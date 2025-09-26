@@ -23,6 +23,9 @@ export class TemporaryRoom {
   @Column({ type: 'datetime' })
   expiresAt: Date;
 
+  @Column({ type: 'int', nullable: true })
+  durationMinutes: number;
+
   @Column({ type: 'int', default: 50 })
   maxCapacity: number;
 

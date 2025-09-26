@@ -31,7 +31,14 @@ export class TemporaryRoomsController {
     console.log('👤 User ID from request:', req.user?.id);
     // Usar ID de usuario por defecto para pruebas (1)
     const userId = req.user?.id || 1;
-    return this.temporaryRoomsService.create(createDto, userId);
+    const creatorUsername =
+      createDto.creatorUsername || req.user?.username || 'Usuario';
+    console.log('👤 Creator username:', creatorUsername);
+    return this.temporaryRoomsService.create(
+      createDto,
+      userId,
+      creatorUsername,
+    );
   }
 
   @Get()
@@ -56,13 +63,42 @@ export class TemporaryRoomsController {
     return this.temporaryRoomsService.getAdminRooms(userId);
   }
 
+  @Get('user/current-room')
+  getCurrentUserRoom(@Request() req) {
+    console.log('🔍 GET /api/temporary-rooms/user/current-room called');
+    const userId = req.user?.id || 1; // Usar ID por defecto para pruebas
+    return this.temporaryRoomsService.getCurrentUserRoom(userId);
+  }
+
+  @Get(':roomCode/users')
+  getRoomUsers(@Param('roomCode') roomCode: string) {
+    console.log('👥 GET /api/temporary-rooms/' + roomCode + '/users called');
+    return this.temporaryRoomsService.getRoomUsers(roomCode);
+  }
+
+  @Patch(':id/duration')
+  updateRoomDuration(
+    @Param('id') id: string,
+    @Body() updateDto: { duration: number },
+    @Request() req,
+  ) {
+    console.log('⏰ PATCH /api/temporary-rooms/' + id + '/duration called');
+    console.log('Nueva duración:', updateDto.duration, 'minutos');
+    const userId = req.user?.id || 1; // Usar ID por defecto para pruebas
+    return this.temporaryRoomsService.updateRoomDuration(
+      +id,
+      updateDto.duration,
+      userId,
+    );
+  }
+
   @Post('join')
   joinRoom(@Body() joinDto: JoinRoomDto, @Request() req) {
     console.log('🚪 POST /api/temporary-rooms/join called with data:', joinDto);
     console.log('👤 Request user:', req.user);
 
-    // Usar username por defecto para pruebas (ya que deshabilitamos auth)
-    const username = req.user?.username || 'Usuario';
+    // Usar username del DTO o del request, con fallback
+    const username = joinDto.username || req.user?.username || 'Usuario';
     console.log('👤 Username to use:', username);
 
     return this.temporaryRoomsService.joinRoom(joinDto, username);

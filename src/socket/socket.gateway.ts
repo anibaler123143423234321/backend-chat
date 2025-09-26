@@ -10,6 +10,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { Injectable } from '@nestjs/common';
 import * as crypto from 'crypto';
+import { TemporaryRoomsService } from '../temporary-rooms/temporary-rooms.service';
 
 @WebSocketGateway({
   cors: {
@@ -31,7 +32,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private publicRooms = new Map<string, any>();
   private roomUsers = new Map<string, Set<string>>(); // roomCode -> Set<usernames>
 
-  constructor() {
+  constructor(private temporaryRoomsService: TemporaryRoomsService) {
     // Limpiar enlaces expirados cada 5 minutos
     setInterval(() => this.cleanExpiredLinks(), 5 * 60 * 1000);
   }
@@ -279,7 +280,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('joinRoom')
-  handleJoinRoom(
+  async handleJoinRoom(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { roomCode: string; roomName: string; from: string },
   ) {
@@ -288,7 +289,16 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
       `🏠 Usuario ${from} se une a la sala ${roomCode} (${roomName})`,
     );
 
-    // Agregar usuario a la sala
+    try {
+      // Actualizar la base de datos usando el servicio
+      const joinDto = { roomCode, username: from };
+      await this.temporaryRoomsService.joinRoom(joinDto, from);
+      console.log(`✅ Usuario ${from} unido a la sala en la base de datos`);
+    } catch (error) {
+      console.error(`❌ Error al unir usuario ${from} a la sala en BD:`, error);
+    }
+
+    // Agregar usuario a la sala en memoria
     if (!this.roomUsers.has(roomCode)) {
       this.roomUsers.set(roomCode, new Set());
     }
