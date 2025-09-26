@@ -22,10 +22,14 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer() server: Server;
 
   // Mapas para el chat
-  private users = new Map<string, { socket: Socket; userData: any }>();
+  private users = new Map<
+    string,
+    { socket: Socket; userData: any; currentRoom?: string }
+  >();
   private groups = new Map<string, Set<string>>();
   private temporaryLinks = new Map<string, any>();
   private publicRooms = new Map<string, any>();
+  private roomUsers = new Map<string, Set<string>>(); // roomCode -> Set<usernames>
 
   constructor() {
     // Limpiar enlaces expirados cada 5 minutos
@@ -60,6 +64,8 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const { username, userData } = data;
     this.users.set(username, { socket: client, userData });
     console.log(`Usuario registrado en chat: ${username}`);
+    console.log(`Datos del usuario:`, userData);
+    console.log(`Rol del usuario:`, userData?.role);
 
     // Enviar confirmación de registro
     client.emit('info', {
@@ -74,23 +80,83 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
   handleMessage(@ConnectedSocket() client: Socket, @MessageBody() data: any) {
     const { to, message, isGroup, time, from } = data;
 
+    console.log(`📨 MENSAGE RECIBIDO:`, data);
+    console.log(`🔍 Usuario que envía: ${from}`);
+    console.log(`🔍 Es grupo: ${isGroup}`);
+    console.log(`🔍 Destinatario: ${to}`);
+
     if (isGroup) {
-      // Mensaje de grupo
-      const group = this.groups.get(to);
-      if (group) {
-        const groupMembers = Array.from(group);
-        groupMembers.forEach((member) => {
-          const user = this.users.get(member);
-          if (user && user.socket.connected) {
-            user.socket.emit('message', {
-              from: from || 'Usuario Desconocido',
-              group: to,
-              message,
-              isGroup: true,
-              time: time || new Date().toLocaleTimeString(),
-            });
-          }
-        });
+      // Verificar si es una sala temporal
+      const user = this.users.get(from);
+      console.log(`🔍 Usuario encontrado:`, user ? 'Sí' : 'No');
+      console.log(`🔍 currentRoom del usuario:`, user?.currentRoom);
+
+      if (user && user.currentRoom) {
+        // Es una sala temporal
+        const roomCode = user.currentRoom;
+        const roomUsers = this.roomUsers.get(roomCode);
+        console.log(`🔍 Sala temporal encontrada: ${roomCode}`);
+        console.log(
+          `🔍 Usuarios en la sala:`,
+          roomUsers ? Array.from(roomUsers) : 'No encontrada',
+        );
+
+        if (roomUsers) {
+          console.log(
+            `📨 Enviando mensaje a sala temporal ${roomCode}:`,
+            message,
+          );
+          console.log(`👥 Usuarios en la sala:`, Array.from(roomUsers));
+
+          roomUsers.forEach((member) => {
+            const memberUser = this.users.get(member);
+            console.log(
+              `🔍 Usuario ${member} encontrado:`,
+              memberUser ? 'Sí' : 'No',
+            );
+            console.log(`🔍 Socket conectado:`, memberUser?.socket.connected);
+
+            if (memberUser && memberUser.socket.connected) {
+              console.log(
+                `📤 Enviando mensaje a ${member} en sala ${roomCode}`,
+              );
+              memberUser.socket.emit('message', {
+                from: from || 'Usuario Desconocido',
+                group: to,
+                message,
+                isGroup: true,
+                time: time || new Date().toLocaleTimeString(),
+              });
+            } else {
+              console.log(
+                `❌ No se puede enviar a ${member} - usuario no encontrado o socket desconectado`,
+              );
+            }
+          });
+        } else {
+          console.log(`❌ No se encontró la sala ${roomCode} en roomUsers`);
+        }
+      } else {
+        console.log(
+          `❌ Usuario no tiene currentRoom, tratando como grupo normal`,
+        );
+        // Es un grupo normal
+        const group = this.groups.get(to);
+        if (group) {
+          const groupMembers = Array.from(group);
+          groupMembers.forEach((member) => {
+            const user = this.users.get(member);
+            if (user && user.socket.connected) {
+              user.socket.emit('message', {
+                from: from || 'Usuario Desconocido',
+                group: to,
+                message,
+                isGroup: true,
+                time: time || new Date().toLocaleTimeString(),
+              });
+            }
+          });
+        }
       }
     } else {
       // Mensaje individual
@@ -212,6 +278,82 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  @SubscribeMessage('joinRoom')
+  handleJoinRoom(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomCode: string; roomName: string; from: string },
+  ) {
+    const { roomCode, roomName, from } = data;
+    console.log(
+      `🏠 Usuario ${from} se une a la sala ${roomCode} (${roomName})`,
+    );
+
+    // Agregar usuario a la sala
+    if (!this.roomUsers.has(roomCode)) {
+      this.roomUsers.set(roomCode, new Set());
+    }
+    this.roomUsers.get(roomCode)!.add(from);
+
+    // Actualizar la sala actual del usuario
+    const user = this.users.get(from);
+    console.log(
+      `🔍 Usuario ${from} encontrado en joinRoom:`,
+      user ? 'Sí' : 'No',
+    );
+    if (user) {
+      user.currentRoom = roomCode;
+      console.log(`📍 Usuario ${from} ahora está en la sala ${roomCode}`);
+      console.log(`📍 currentRoom actualizado a:`, user.currentRoom);
+    } else {
+      console.log(`❌ Usuario ${from} no encontrado en this.users`);
+      console.log(`🔍 Usuarios disponibles:`, Array.from(this.users.keys()));
+    }
+
+    // Notificar a todos en la sala
+    this.broadcastRoomUsers(roomCode);
+
+    // Confirmar al usuario que se unió
+    client.emit('roomJoined', {
+      roomCode,
+      roomName,
+      users: Array.from(this.roomUsers.get(roomCode) || []),
+    });
+
+    console.log(`✅ Usuario ${from} unido exitosamente a la sala ${roomCode}`);
+  }
+
+  @SubscribeMessage('leaveRoom')
+  handleLeaveRoom(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomCode: string; from: string },
+  ) {
+    const { roomCode, from } = data;
+    console.log(`🚪 Usuario ${from} sale de la sala ${roomCode}`);
+
+    // Remover usuario de la sala
+    const roomUsersSet = this.roomUsers.get(roomCode);
+    if (roomUsersSet) {
+      roomUsersSet.delete(from);
+      if (roomUsersSet.size === 0) {
+        this.roomUsers.delete(roomCode);
+      }
+    }
+
+    // Limpiar sala actual del usuario
+    const user = this.users.get(from);
+    if (user) {
+      user.currentRoom = undefined;
+    }
+
+    // Notificar a todos en la sala
+    this.broadcastRoomUsers(roomCode);
+
+    // Reenviar lista general de usuarios (ya que salió de la sala)
+    this.broadcastUserList();
+
+    console.log(`✅ Usuario ${from} salió de la sala ${roomCode}`);
+  }
+
   // ===== MÉTODOS PRIVADOS DEL CHAT =====
 
   private generateTemporaryLink(
@@ -245,9 +387,34 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   private broadcastUserList() {
     const userList = Array.from(this.users.keys());
-    this.users.forEach(({ socket }) => {
+    console.log('📋 Enviando lista de usuarios:', userList);
+
+    this.users.forEach(({ socket, userData, currentRoom }) => {
       if (socket.connected) {
-        socket.emit('userList', { users: userList });
+        // Si el usuario está en una sala, no enviar lista general
+        if (currentRoom) {
+          console.log(
+            `🚫 Usuario ${userData?.username || 'Usuario'} está en sala ${currentRoom}, no enviar lista general`,
+          );
+          return;
+        }
+
+        // Solo enviar lista completa a usuarios admin (cuando NO están en una sala)
+        const isAdmin =
+          userData?.role &&
+          userData.role.toString().toUpperCase().trim() === 'ADMIN';
+
+        if (isAdmin) {
+          console.log(
+            `👑 Enviando lista completa a admin: ${userData.username || 'Usuario'}`,
+          );
+          socket.emit('userList', { users: userList });
+        } else {
+          // Para usuarios no admin, enviar solo su propio nombre
+          const ownUsername = userData?.username || 'Usuario';
+          console.log(`👤 Enviando solo su nombre a usuario: ${ownUsername}`);
+          socket.emit('userList', { users: [ownUsername] });
+        }
       }
     });
   }
@@ -263,6 +430,39 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.users.forEach(({ socket }) => {
       if (socket.connected) {
         socket.emit('groupList', { groups: groupList });
+      }
+    });
+  }
+
+  private broadcastRoomUsers(roomCode: string) {
+    const roomUsersList = Array.from(this.roomUsers.get(roomCode) || []);
+    console.log(`📋 Enviando usuarios de la sala ${roomCode}:`, roomUsersList);
+    console.log(`🔍 Estado completo de roomUsers:`, this.roomUsers);
+    console.log(
+      `🔍 Estado completo de users:`,
+      Array.from(this.users.entries()).map(([name, data]) => ({
+        name,
+        currentRoom: data.currentRoom,
+      })),
+    );
+
+    // Enviar solo a usuarios que están en esta sala
+    this.users.forEach(({ socket, userData, currentRoom }) => {
+      console.log(
+        `🔍 Usuario: ${userData?.username || 'Unknown'}, currentRoom: ${currentRoom}, roomCode: ${roomCode}, connected: ${socket.connected}`,
+      );
+      if (socket.connected && currentRoom === roomCode) {
+        console.log(
+          `📤 Enviando lista de sala a usuario ${userData?.username || 'Unknown'} en ${roomCode}`,
+        );
+        socket.emit('roomUsers', {
+          roomCode,
+          users: roomUsersList,
+        });
+      } else {
+        console.log(
+          `❌ No enviando a ${userData?.username || 'Unknown'} - connected: ${socket.connected}, currentRoom: ${currentRoom}, roomCode: ${roomCode}`,
+        );
       }
     });
   }

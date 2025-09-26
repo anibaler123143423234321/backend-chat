@@ -1,0 +1,34 @@
+services:
+  # Base de datos MySQL para el chat
+  mysql:
+    image: mysql:8.4
+    container_name: chat-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_password}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-chat_db}
+      MYSQL_USER: ${MYSQL_USER:-chat_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-chat_password}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./scripts/init-database.sql:/docker-entrypoint-initdb.d/init-database.sql:ro
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --default-time-zone='+00:00'
+      --max_connections=100
+      --innodb_buffer_pool_size=128M
+      --innodb_flush_log_at_trx_commit=2
+      --tmp_table_size=16M
+      --max_heap_table_size=16M
+      --sort_buffer_size=1M
+      --read_buffer_size=1M
+      --read_rnd_buffer_size=4M
+      --thread_cache_size=4
+      --table_open_cache=32
+
+volumes:
+  mysql_data:
+    driver: local
