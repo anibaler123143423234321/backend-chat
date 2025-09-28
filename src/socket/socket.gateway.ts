@@ -18,6 +18,7 @@ import { MessagesService } from '../messages/messages.service';
     origin: '*',
   },
   transports: ['websocket', 'polling'],
+  path: '/socket.io/',
 })
 @Injectable()
 export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
@@ -98,13 +99,10 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
       fileName,
     } = data;
 
-    // console.log(`📨 MENSAGE RECIBIDO:`, data);
-    // console.log(`🔍 Usuario que envía: ${from} (ID: ${fromId})`);
-    // console.log(`🔍 Es grupo: ${isGroup}`);
-    // console.log(`🔍 Destinatario: ${to}`);
-    // console.log(
-    //   `🔍 Media: ${mediaType ? `${mediaType} - ${fileName} (${mediaData ? 'con datos' : 'sin datos'})` : 'No'}`,
-    // );
+    console.log(`📨 MENSAJE RECIBIDO:`, { from, to, isGroup, message: message?.substring(0, 50) });
+    console.log(`🔍 Usuario que envía: ${from} (ID: ${fromId})`);
+    console.log(`🔍 Es grupo: ${isGroup}`);
+    console.log(`🔍 Destinatario: ${to}`);
 
     if (isGroup) {
       // Verificar si es una sala temporal
@@ -123,35 +121,29 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
         // );
 
         if (roomUsers) {
-          // console.log(
-          //   `📨 Enviando mensaje a sala temporal ${roomCode}:`,
-          //   message,
-          // );
-          // console.log(`👥 Usuarios en la sala:`, Array.from(roomUsers));
+          console.log(`📨 Enviando mensaje a sala temporal ${roomCode}:`, message?.substring(0, 50));
+          console.log(`👥 Usuarios en la sala:`, Array.from(roomUsers));
 
           roomUsers.forEach((member) => {
             const memberUser = this.users.get(member);
-            // console.log(
-            //   `🔍 Usuario ${member} encontrado:`,
-            //   memberUser ? 'Sí' : 'No',
-            // );
-            // console.log(`🔍 Socket conectado:`, memberUser?.socket.connected);
+            console.log(`🔍 Usuario ${member} encontrado:`, memberUser ? 'Sí' : 'No');
+            console.log(`🔍 Socket conectado:`, memberUser?.socket.connected);
 
             if (memberUser && memberUser.socket.connected) {
-              // console.log(
-              //   `📤 Enviando mensaje a ${member} en sala ${roomCode}`,
-              // );
+              console.log(`📤 Enviando mensaje a ${member} en sala ${roomCode}`);
+              // AHORA: Envía todos los datos incluyendo media
               memberUser.socket.emit('message', {
                 from: from || 'Usuario Desconocido',
                 group: to,
                 message,
                 isGroup: true,
                 time: time || new Date().toLocaleTimeString(),
+                mediaType, // ← AGREGADO
+                mediaData, // ← AGREGADO
+                fileName, // ← AGREGADO
               });
             } else {
-              // console.log(
-              //   `❌ No se puede enviar a ${member} - usuario no encontrado o socket desconectado`,
-              // );
+              console.log(`❌ No se puede enviar a ${member} - usuario no encontrado o socket desconectado`);
             }
           });
         } else {
@@ -292,7 +284,8 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {
     const { linkType, participants, roomName, from } = data;
     const linkId = this.generateTemporaryLink(linkType, participants, from);
-    const linkUrl = `http://localhost:8080/#/join/${linkId}`;
+    //const linkUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/#/join/${linkId}`;
+    const linkUrl = `${process.env.FRONTEND_URL || 'https://mensajeria.mass34.com'}/#/join/${linkId}`;
 
     client.emit('temporaryLinkCreated', {
       linkId,
