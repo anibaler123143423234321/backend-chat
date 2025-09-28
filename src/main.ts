@@ -10,6 +10,7 @@ async function bootstrap() {
   app.enableCors({
     origin: [
       'http://localhost:5173',
+      'http://localhost:5174',
       'http://localhost:3000',
       'http://localhost:4200',
       'https://apisozarusac.com',
@@ -23,8 +24,8 @@ async function bootstrap() {
   });
 
   // Configurar prefijo global para todas las rutas
-  app.setGlobalPrefix('BackendChat/api');
-  //app.setGlobalPrefix('/api');
+  app.setGlobalPrefix('/api');
+  //app.setGlobalPrefix('BackendChat/api');
 
   const port = process.env.PORT || 8747;
   await app.listen(port, '0.0.0.0');

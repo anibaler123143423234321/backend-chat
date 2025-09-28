@@ -17,7 +17,7 @@ import { MessagesService } from '../messages/messages.service';
   cors: {
     origin: '*',
   },
-  transports: ['websocket'],
+  transports: ['websocket', 'polling'],
 })
 @Injectable()
 export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
