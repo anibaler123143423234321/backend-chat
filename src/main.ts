@@ -13,6 +13,9 @@ async function bootstrap() {
       'http://localhost:3000',
       'http://localhost:4200',
       'https://apisozarusac.com',
+      'https://apisozarusac.com/BackendJava',
+      'https://apisozarusac.com/BackendChat',
+      'https://mensajeria.mass34.com',
     ],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
@@ -20,11 +23,12 @@ async function bootstrap() {
   });
 
   // Configurar prefijo global para todas las rutas
-  app.setGlobalPrefix('api');
+  app.setGlobalPrefix('BackendChat/api');
+  //app.setGlobalPrefix('/api');
 
-  const port = 8080;
+  const port = process.env.PORT || 8747;
   await app.listen(port, '0.0.0.0');
   console.log(`🚀 Chat Backend running on port ${port}`);
-  console.log(`🌐 CORS enabled for frontend origins`);
+  // console.log(`🌐 CORS enabled for frontend origins`);
 }
 bootstrap();

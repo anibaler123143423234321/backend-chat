@@ -58,14 +58,14 @@ export class TemporaryRoomsController {
 
   @Get('admin/rooms')
   getAdminRooms(@Request() req) {
-    console.log('🔍 GET /api/temporary-rooms/admin/rooms called');
+    // console.log('🔍 GET /api/temporary-rooms/admin/rooms called');
     const userId = req.user?.id || 1; // Usar ID por defecto para pruebas
     return this.temporaryRoomsService.getAdminRooms(userId);
   }
 
   @Get('user/current-room')
   getCurrentUserRoom(@Request() req) {
-    console.log('🔍 GET /api/temporary-rooms/user/current-room called');
+    // console.log('🔍 GET /api/temporary-rooms/user/current-room called');
     const userId = req.user?.id || 1; // Usar ID por defecto para pruebas
     return this.temporaryRoomsService.getCurrentUserRoom(userId);
   }

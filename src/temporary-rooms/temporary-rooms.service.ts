@@ -8,6 +8,7 @@ import { Repository } from 'typeorm';
 import { TemporaryRoom } from './entities/temporary-room.entity';
 import { CreateTemporaryRoomDto } from './dto/create-temporary-room.dto';
 import { JoinRoomDto } from './dto/join-room.dto';
+import { User } from '../users/entities/user.entity';
 import { randomBytes } from 'crypto';
 
 export interface TemporaryRoomWithUrl {
@@ -26,6 +27,8 @@ export class TemporaryRoomsService {
   constructor(
     @InjectRepository(TemporaryRoom)
     private temporaryRoomRepository: Repository<TemporaryRoom>,
+    @InjectRepository(User)
+    private userRepository: Repository<User>,
   ) {}
 
   async create(
@@ -33,17 +36,17 @@ export class TemporaryRoomsService {
     userId: number,
     creatorUsername?: string,
   ): Promise<TemporaryRoomWithUrl> {
-    console.log('Creando sala temporal con datos:', createDto);
-    console.log('Usuario ID:', userId);
-    console.log('Nombre del creador:', creatorUsername);
+    // console.log('Creando sala temporal con datos:', createDto);
+    // console.log('Usuario ID:', userId);
+    // console.log('Nombre del creador:', creatorUsername);
 
     const roomCode = this.generateRoomCode();
     const expiresAt = new Date();
     const durationMinutes = createDto.duration || 1440; // Usar duración del DTO en minutos o 24 horas (1440 min) por defecto
     expiresAt.setMinutes(expiresAt.getMinutes() + durationMinutes);
 
-    console.log('Código de sala generado:', roomCode);
-    console.log('Fecha de expiración:', expiresAt);
+    // console.log('Código de sala generado:', roomCode);
+    // console.log('Fecha de expiración:', expiresAt);
 
     // Inicializar con el creador como primer miembro
     const members = creatorUsername ? [creatorUsername] : [];
@@ -60,14 +63,14 @@ export class TemporaryRoomsService {
       isActive: true,
     });
 
-    console.log('Sala creada en memoria:', room);
+    // console.log('Sala creada en memoria:', room);
 
     const savedRoom = await this.temporaryRoomRepository.save(room);
-    console.log('Sala guardada en BD:', savedRoom);
+    // console.log('Sala guardada en BD:', savedRoom);
 
     // Generar URL de la sala
     const roomUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/#/room/${savedRoom.roomCode}`;
-    console.log('URL generada:', roomUrl);
+    // console.log('URL generada:', roomUrl);
 
     // Crear respuesta limpia con solo los campos necesarios
     const result = {
@@ -81,7 +84,7 @@ export class TemporaryRoomsService {
       isActive: savedRoom.isActive,
     };
 
-    console.log('Resultado final a devolver:', result);
+    // console.log('Resultado final a devolver:', result);
     return result;
   }
 
@@ -124,11 +127,11 @@ export class TemporaryRoomsService {
     joinDto: JoinRoomDto,
     username: string,
   ): Promise<TemporaryRoom> {
-    console.log('🔍 Buscando sala con código:', joinDto.roomCode);
-    console.log('👤 Usuario que se une:', username);
+    // console.log('🔍 Buscando sala con código:', joinDto.roomCode);
+    // console.log('👤 Usuario que se une:', username);
 
     const room = await this.findByRoomCode(joinDto.roomCode);
-    console.log('🏠 Sala encontrada:', room);
+    // console.log('🏠 Sala encontrada:', room);
 
     if (room.currentMembers >= room.maxCapacity) {
       throw new BadRequestException('La sala ha alcanzado su capacidad máxima');
@@ -140,7 +143,7 @@ export class TemporaryRoomsService {
 
     // Si el usuario ya está en la sala, no hacer nada
     if (room.members.includes(username)) {
-      console.log('👤 Usuario ya está en la sala');
+      // console.log('👤 Usuario ya está en la sala');
       return room;
     }
 
@@ -148,17 +151,54 @@ export class TemporaryRoomsService {
     const genericUserIndex = room.members.indexOf('Usuario');
     if (genericUserIndex !== -1) {
       room.members[genericUserIndex] = username;
-      console.log('🔄 Reemplazando "Usuario" genérico con:', username);
+      // console.log('🔄 Reemplazando "Usuario" genérico con:', username);
     } else {
       // Si no hay "Usuario" genérico, agregar el nuevo usuario
       room.members.push(username);
     }
 
     room.currentMembers = room.members.length;
-    console.log('👥 Usuarios en la sala después de unirse:', room.members);
+    // console.log('👥 Usuarios en la sala después de unirse:', room.members);
     await this.temporaryRoomRepository.save(room);
 
-    console.log('✅ Usuario unido exitosamente a la sala');
+    // console.log('✅ Usuario unido exitosamente a la sala');
+    return room;
+  }
+
+  async leaveRoom(roomCode: string, username: string): Promise<TemporaryRoom> {
+    // console.log('🚪 Usuario saliendo de la sala:', username, 'de', roomCode);
+
+    const room = await this.findByRoomCode(roomCode);
+
+    if (!room.members) {
+      room.members = [];
+    }
+
+    // Remover el usuario de la lista de miembros
+    const userIndex = room.members.indexOf(username);
+    if (userIndex !== -1) {
+      room.members.splice(userIndex, 1);
+      room.currentMembers = room.members.length;
+
+      // console.log('👥 Usuarios en la sala después de salir:', room.members);
+      await this.temporaryRoomRepository.save(room);
+      // console.log('✅ Usuario removido exitosamente de la sala en BD');
+    } else {
+      // console.log('❌ Usuario no encontrado en la sala');
+    }
+
+    // Limpiar la sala actual del usuario en la base de datos
+    try {
+      const user = await this.userRepository.findOne({ where: { username } });
+      if (user && user.currentRoomCode === roomCode) {
+        user.currentRoomCode = null;
+        await this.userRepository.save(user);
+        // console.log('✅ Sala actual del usuario limpiada en BD');
+      }
+    } catch (error) {
+      // console.error('❌ Error al limpiar sala actual del usuario:', error);
+    }
+
     return room;
   }
 
@@ -176,40 +216,40 @@ export class TemporaryRoomsService {
   }
 
   async delete(id: number, userId: number): Promise<void> {
-    console.log(
-      '🗑️ Eliminando permanentemente sala:',
-      id,
-      'por usuario:',
-      userId,
-    );
+    // console.log(
+    //   '🗑️ Eliminando permanentemente sala:',
+    //   id,
+    //   'por usuario:',
+    //   userId,
+    // );
     const room = await this.temporaryRoomRepository.findOne({
       where: { id, createdBy: userId },
     });
     if (!room) {
-      console.log('❌ Sala no encontrada o no pertenece al usuario');
+      // console.log('❌ Sala no encontrada o no pertenece al usuario');
       throw new NotFoundException(
         'Sala no encontrada o no tienes permisos para eliminarla',
       );
     }
-    console.log('✅ Sala encontrada, eliminando permanentemente:', room.name);
+    // console.log('✅ Sala encontrada, eliminando permanentemente:', room.name);
     await this.temporaryRoomRepository.remove(room);
-    console.log('✅ Sala eliminada permanentemente');
+    // console.log('✅ Sala eliminada permanentemente');
   }
 
   async getAdminRooms(userId: number): Promise<any[]> {
-    console.log('🔍 Obteniendo salas del admin:', userId);
+    // console.log('🔍 Obteniendo salas del admin:', userId);
     const rooms = await this.temporaryRoomRepository.find({
       where: { createdBy: userId },
       order: { createdAt: 'DESC' },
     });
-    console.log('📋 Salas encontradas:', rooms.length);
+    // console.log('📋 Salas encontradas:', rooms.length);
 
     // Usar la duración guardada en la base de datos
     return rooms;
   }
 
   async deactivateRoom(id: number, userId: number): Promise<TemporaryRoom> {
-    console.log('⏸️ Desactivando sala:', id, 'por usuario:', userId);
+    // console.log('⏸️ Desactivando sala:', id, 'por usuario:', userId);
     const room = await this.temporaryRoomRepository.findOne({
       where: { id, createdBy: userId },
     });
@@ -219,45 +259,57 @@ export class TemporaryRoomsService {
 
     room.isActive = false;
     const updatedRoom = await this.temporaryRoomRepository.save(room);
-    console.log('✅ Sala desactivada:', updatedRoom.name);
+    // console.log('✅ Sala desactivada:', updatedRoom.name);
     return updatedRoom;
   }
 
   async getCurrentUserRoom(userId: number): Promise<any> {
-    console.log('🔍 Buscando sala actual del usuario:', userId);
+    // console.log('🔍 Buscando sala actual del usuario:', userId);
 
-    // Buscar salas donde el usuario es miembro
-    const rooms = await this.temporaryRoomRepository
-      .createQueryBuilder('room')
-      .where('room.createdBy = :userId', { userId })
-      .andWhere('room.isActive = :isActive', { isActive: true })
-      .getMany();
+    try {
+      // Buscar salas donde el usuario es miembro
+      const rooms = await this.temporaryRoomRepository
+        .createQueryBuilder('room')
+        .where('room.createdBy = :userId', { userId })
+        .andWhere('room.isActive = :isActive', { isActive: true })
+        .getMany();
 
-    if (rooms.length === 0) {
-      console.log('❌ Usuario no está en ninguna sala');
-      return { inRoom: false, room: null };
+      if (rooms.length === 0) {
+        // console.log('❌ Usuario no está en ninguna sala');
+        return { inRoom: false, room: null };
+      }
+
+      // Por ahora, devolver la primera sala activa
+      const currentRoom = rooms[0];
+      // console.log('✅ Usuario está en sala:', currentRoom.name);
+
+      return {
+        inRoom: true,
+        room: {
+          id: currentRoom.id,
+          name: currentRoom.name,
+          roomCode: currentRoom.roomCode,
+          maxCapacity: currentRoom.maxCapacity,
+          currentMembers: currentRoom.currentMembers,
+          isActive: currentRoom.isActive,
+          durationMinutes: currentRoom.durationMinutes,
+          expiresAt: currentRoom.expiresAt,
+        },
+      };
+    } catch (error) {
+      // console.error('❌ Error de conexión a la base de datos:', error);
+      // En caso de error de BD, devolver que no está en ninguna sala
+      // para que la aplicación pueda continuar funcionando
+      return {
+        inRoom: false,
+        room: null,
+        error: 'Database connection error',
+      };
     }
-
-    // Por ahora, devolver la primera sala activa
-    const currentRoom = rooms[0];
-    console.log('✅ Usuario está en sala:', currentRoom.name);
-
-    return {
-      inRoom: true,
-      room: {
-        id: currentRoom.id,
-        name: currentRoom.name,
-        roomCode: currentRoom.roomCode,
-        maxCapacity: currentRoom.maxCapacity,
-        currentMembers: currentRoom.currentMembers,
-        isActive: currentRoom.isActive,
-        durationMinutes: currentRoom.durationMinutes,
-      },
-    };
   }
 
   async getRoomUsers(roomCode: string): Promise<any> {
-    console.log('👥 Obteniendo usuarios de la sala:', roomCode);
+    // console.log('👥 Obteniendo usuarios de la sala:', roomCode);
 
     const room = await this.temporaryRoomRepository.findOne({
       where: { roomCode, isActive: true },
@@ -292,7 +344,7 @@ export class TemporaryRoomsService {
       }
     }
 
-    console.log('✅ Usuarios en la sala:', userList);
+    // console.log('✅ Usuarios en la sala:', userList);
 
     return {
       roomCode: room.roomCode,
@@ -308,8 +360,8 @@ export class TemporaryRoomsService {
     durationMinutes: number,
     userId: number,
   ): Promise<TemporaryRoom> {
-    console.log('⏰ Actualizando duración de sala:', roomId);
-    console.log('Nueva duración:', durationMinutes, 'minutos');
+    // console.log('⏰ Actualizando duración de sala:', roomId);
+    // console.log('Nueva duración:', durationMinutes, 'minutos');
 
     const room = await this.temporaryRoomRepository.findOne({
       where: { id: roomId, createdBy: userId },
@@ -329,8 +381,8 @@ export class TemporaryRoomsService {
     room.durationMinutes = durationMinutes; // Actualizar también la duración guardada
     const updatedRoom = await this.temporaryRoomRepository.save(room);
 
-    console.log('✅ Duración de sala actualizada:', updatedRoom.name);
-    console.log('Nueva fecha de expiración:', newExpiresAt);
+    // console.log('✅ Duración de sala actualizada:', updatedRoom.name);
+    // console.log('Nueva fecha de expiración:', newExpiresAt);
 
     return updatedRoom;
   }
