@@ -16,7 +16,7 @@ async function bootstrap() {
       'https://apisozarusac.com',
       'https://apisozarusac.com/BackendJava',
       'https://apisozarusac.com/BackendChat',
-      'https://mensajeria.mass34.com',
+      'https://chat.mass34.com',
     ],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
