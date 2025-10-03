@@ -43,6 +43,21 @@ export class TemporaryConversationsService {
     });
   }
 
+  async findByUser(username: string): Promise<TemporaryConversation[]> {
+    // Obtener todas las conversaciones activas y filtrar en memoria
+    const allConversations = await this.temporaryConversationRepository.find({
+      where: { isActive: true },
+      order: { createdAt: 'DESC' },
+    });
+
+    // Filtrar conversaciones donde el usuario está en assignedUsers
+    const userConversations = allConversations.filter(conv =>
+      conv.assignedUsers && conv.assignedUsers.includes(username)
+    );
+
+    return userConversations;
+  }
+
   async findOne(id: number): Promise<TemporaryConversation> {
     const conversation = await this.temporaryConversationRepository.findOne({
       where: { id, isActive: true },
@@ -97,6 +112,33 @@ export class TemporaryConversationsService {
     }
 
     return conversation;
+  }
+
+  async createAdminAssignedConversation(
+    user1: string,
+    user2: string,
+    name: string,
+    adminId: number,
+  ): Promise<TemporaryConversation> {
+    const linkId = this.generateLinkId();
+    const expiresAt = new Date();
+    // Conversaciones asignadas por admin no expiran (o expiran en 1 año)
+    expiresAt.setFullYear(expiresAt.getFullYear() + 1);
+
+    const conversation = this.temporaryConversationRepository.create({
+      name,
+      linkId,
+      expiresAt,
+      createdBy: adminId,
+      currentParticipants: 2,
+      maxParticipants: 2,
+      isActive: true,
+      isAssignedByAdmin: true,
+      participants: [user1, user2],
+      assignedUsers: [user1, user2],
+    });
+
+    return await this.temporaryConversationRepository.save(conversation);
   }
 
   async remove(id: number, userId: number): Promise<void> {

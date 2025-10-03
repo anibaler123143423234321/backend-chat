@@ -62,6 +62,12 @@ export class Message {
   @Column({ type: 'datetime', nullable: true })
   deletedAt: Date;
 
+  @Column({ type: 'boolean', default: false })
+  isEdited: boolean;
+
+  @Column({ type: 'datetime', nullable: true })
+  editedAt: Date;
+
   @Column({ type: 'varchar', length: 20, nullable: true })
   time: string; // Formato HH:MM
 

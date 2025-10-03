@@ -39,6 +39,12 @@ export class TemporaryRoom {
   members: string[];
 
   @Column({ type: 'json', nullable: true })
+  assignedMembers: string[]; // Usuarios asignados por admin (no pueden salir)
+
+  @Column({ type: 'boolean', default: false })
+  isAssignedByAdmin: boolean; // Indica si la sala fue asignada por un admin
+
+  @Column({ type: 'json', nullable: true })
   settings: any;
 
   @Column()

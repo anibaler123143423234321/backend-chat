@@ -67,6 +67,21 @@ export class MessagesController {
     return { success: true };
   }
 
+  @Put(':id')
+  async editMessage(
+    @Param('id') id: string,
+    @Body('username') username: string,
+    @Body('message') message: string,
+  ) {
+    // console.log(`✏️ Editando mensaje ${id} por ${username}`);
+    const edited = await this.messagesService.editMessage(
+      parseInt(id),
+      username,
+      message,
+    );
+    return { success: !!edited, message: edited };
+  }
+
   @Delete(':id')
   async deleteMessage(
     @Param('id') id: string,

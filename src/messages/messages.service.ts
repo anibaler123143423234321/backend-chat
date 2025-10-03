@@ -1,14 +1,17 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Message } from './entities/message.entity';
 import { CreateMessageDto } from './dto/create-message.dto';
+import { TemporaryRoom } from '../temporary-rooms/entities/temporary-room.entity';
 
 @Injectable()
 export class MessagesService {
   constructor(
     @InjectRepository(Message)
     private messageRepository: Repository<Message>,
+    @InjectRepository(TemporaryRoom)
+    private temporaryRoomRepository: Repository<TemporaryRoom>,
   ) {}
 
   async create(createMessageDto: CreateMessageDto): Promise<Message> {
@@ -84,12 +87,49 @@ export class MessagesService {
     });
 
     if (message) {
+      // 🔥 NUEVO: Validar si el mensaje pertenece a una sala asignada por admin
+      if (message.roomCode) {
+        const room = await this.temporaryRoomRepository.findOne({
+          where: { roomCode: message.roomCode },
+        });
+
+        if (
+          room &&
+          room.isAssignedByAdmin &&
+          room.assignedMembers &&
+          room.assignedMembers.includes(username)
+        ) {
+          throw new BadRequestException(
+            'No puedes eliminar mensajes en salas asignadas por un administrador',
+          );
+        }
+      }
+
       message.isDeleted = true;
       message.deletedAt = new Date();
       await this.messageRepository.save(message);
       return true;
     }
     return false;
+  }
+
+  async editMessage(
+    messageId: number,
+    username: string,
+    newText: string,
+  ): Promise<Message | null> {
+    const message = await this.messageRepository.findOne({
+      where: { id: messageId, from: username },
+    });
+
+    if (message) {
+      message.message = newText;
+      message.isEdited = true;
+      message.editedAt = new Date();
+      await this.messageRepository.save(message);
+      return message;
+    }
+    return null;
   }
 
   async getMessageStats(

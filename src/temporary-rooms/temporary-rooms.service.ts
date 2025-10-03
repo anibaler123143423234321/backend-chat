@@ -171,6 +171,13 @@ export class TemporaryRoomsService {
 
     const room = await this.findByRoomCode(roomCode);
 
+    // 🔥 NUEVO: Validar si el usuario está asignado por un admin
+    if (room.isAssignedByAdmin && room.assignedMembers && room.assignedMembers.includes(username)) {
+      throw new BadRequestException(
+        'No puedes salir de esta sala porque fuiste asignado por un administrador'
+      );
+    }
+
     if (!room.members) {
       room.members = [];
     }

@@ -109,6 +109,42 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.broadcastUserList();
   }
 
+  @SubscribeMessage('conversationAssigned')
+  handleConversationAssigned(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { user1: string; user2: string; conversationName: string; linkId: string },
+  ) {
+    const { user1, user2, conversationName, linkId } = data;
+    console.log(`💬 Conversación asignada: ${conversationName} entre ${user1} y ${user2}`);
+
+    // Notificar a ambos usuarios
+    const user1Connection = this.users.get(user1);
+    const user2Connection = this.users.get(user2);
+
+    const notificationData = {
+      conversationName,
+      linkId,
+      otherUser: '',
+      message: `Se te ha asignado una conversación: ${conversationName}`,
+    };
+
+    if (user1Connection && user1Connection.socket.connected) {
+      user1Connection.socket.emit('newConversationAssigned', {
+        ...notificationData,
+        otherUser: user2,
+      });
+      console.log(`✅ Notificación enviada a ${user1}`);
+    }
+
+    if (user2Connection && user2Connection.socket.connected) {
+      user2Connection.socket.emit('newConversationAssigned', {
+        ...notificationData,
+        otherUser: user1,
+      });
+      console.log(`✅ Notificación enviada a ${user2}`);
+    }
+  }
+
   @SubscribeMessage('message')
   async handleMessage(
     @ConnectedSocket() client: Socket,
@@ -264,6 +300,67 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
       // console.log(`✅ Mensaje guardado exitosamente en BD`);
     } catch (error) {
       // console.error(`❌ Error al guardar mensaje en BD:`, error);
+    }
+  }
+
+  @SubscribeMessage('editMessage')
+  async handleEditMessage(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: {
+      messageId: number;
+      username: string;
+      newText: string;
+      to: string;
+      isGroup: boolean;
+      roomCode?: string;
+    },
+  ) {
+    const { messageId, username, newText, to, isGroup, roomCode } = data;
+
+    try {
+      // Editar mensaje en la base de datos
+      const editedMessage = await this.messagesService.editMessage(
+        messageId,
+        username,
+        newText,
+      );
+
+      if (editedMessage) {
+        // Emitir evento de mensaje editado
+        const editEvent = {
+          messageId,
+          newText,
+          editedAt: editedMessage.editedAt,
+          isEdited: true,
+        };
+
+        if (isGroup && roomCode) {
+          // Broadcast a todos los usuarios de la sala
+          const roomUsersSet = this.roomUsers.get(roomCode);
+          if (roomUsersSet) {
+            roomUsersSet.forEach((user) => {
+              const userConnection = this.users.get(user);
+              if (userConnection && userConnection.socket.connected) {
+                userConnection.socket.emit('messageEdited', editEvent);
+              }
+            });
+          }
+        } else {
+          // Enviar al destinatario individual
+          const recipient = this.users.get(to);
+          if (recipient && recipient.socket.connected) {
+            recipient.socket.emit('messageEdited', editEvent);
+          }
+          // También enviar al remitente para sincronizar
+          const sender = this.users.get(username);
+          if (sender && sender.socket.connected) {
+            sender.socket.emit('messageEdited', editEvent);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error al editar mensaje:', error);
     }
   }
 
@@ -606,5 +703,103 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
         // );
       }
     });
+  }
+
+  // ==================== EVENTOS WEBRTC ====================
+
+  @SubscribeMessage('call-offer')
+  handleCallOffer(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { offer: any; to: string; from: string; callType: string },
+  ) {
+    console.log(`📞 Oferta de llamada de ${data.from} a ${data.to}`);
+
+    const targetUser = this.users.get(data.to);
+    if (targetUser && targetUser.socket.connected) {
+      targetUser.socket.emit('call-offer', {
+        offer: data.offer,
+        from: data.from,
+        callType: data.callType,
+      });
+      console.log(`✅ Oferta enviada a ${data.to}`);
+    } else {
+      console.log(`❌ Usuario ${data.to} no encontrado o desconectado`);
+      client.emit('call-failed', { reason: 'Usuario no disponible' });
+    }
+  }
+
+  @SubscribeMessage('call-answer')
+  handleCallAnswer(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { answer: any; to: string; from: string },
+  ) {
+    console.log(`📞 Respuesta de llamada de ${data.from} a ${data.to}`);
+
+    const targetUser = this.users.get(data.to);
+    if (targetUser && targetUser.socket.connected) {
+      targetUser.socket.emit('call-answer', {
+        answer: data.answer,
+        from: data.from,
+      });
+      console.log(`✅ Respuesta enviada a ${data.to}`);
+    }
+  }
+
+  @SubscribeMessage('ice-candidate')
+  handleIceCandidate(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { candidate: any; to: string },
+  ) {
+    const targetUser = this.users.get(data.to);
+    if (targetUser && targetUser.socket.connected) {
+      targetUser.socket.emit('ice-candidate', {
+        candidate: data.candidate,
+      });
+    }
+  }
+
+  @SubscribeMessage('call-accepted')
+  handleCallAccepted(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { to: string; from: string },
+  ) {
+    console.log(`✅ Llamada aceptada por ${data.from}`);
+
+    const targetUser = this.users.get(data.to);
+    if (targetUser && targetUser.socket.connected) {
+      targetUser.socket.emit('call-accepted', {
+        from: data.from,
+      });
+    }
+  }
+
+  @SubscribeMessage('call-rejected')
+  handleCallRejected(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { to: string; from: string },
+  ) {
+    console.log(`❌ Llamada rechazada por ${data.from}`);
+
+    const targetUser = this.users.get(data.to);
+    if (targetUser && targetUser.socket.connected) {
+      targetUser.socket.emit('call-rejected', {
+        from: data.from,
+      });
+    }
+  }
+
+  @SubscribeMessage('call-ended')
+  handleCallEnded(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { to: string; from: string },
+  ) {
+    console.log(`📴 Llamada finalizada por ${data.from}`);
+
+    const targetUser = this.users.get(data.to);
+    if (targetUser && targetUser.socket.connected) {
+      targetUser.socket.emit('call-ended', {
+        from: data.from,
+      });
+    }
   }
 }

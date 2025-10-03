@@ -3,9 +3,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { MessagesService } from './messages.service';
 import { MessagesController } from './messages.controller';
 import { Message } from './entities/message.entity';
+import { TemporaryRoom } from '../temporary-rooms/entities/temporary-room.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Message])],
+  imports: [TypeOrmModule.forFeature([Message, TemporaryRoom])],
   controllers: [MessagesController],
   providers: [MessagesService],
   exports: [MessagesService],

@@ -35,6 +35,12 @@ export class TemporaryConversation {
   @Column({ type: 'json', nullable: true })
   participants: string[];
 
+  @Column({ type: 'boolean', default: false })
+  isAssignedByAdmin: boolean; // Indica si fue asignada por un admin
+
+  @Column({ type: 'json', nullable: true })
+  assignedUsers: string[]; // Usuarios asignados (no pueden salir)
+
   @Column({ type: 'json', nullable: true })
   settings: any;
 
