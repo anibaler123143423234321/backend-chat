@@ -42,12 +42,39 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     setInterval(() => this.cleanExpiredLinks(), 5 * 60 * 1000);
   }
 
-  handleDisconnect(client: Socket) {
+  async handleDisconnect(client: Socket) {
     // console.log('Un usuario se ha desconectado de SOCKET.IO', client.id);
 
     // Remover usuario del chat si existe
     for (const [username, user] of this.users.entries()) {
       if (user.socket === client) {
+        // Si el usuario estaba en una sala, removerlo de la sala
+        if (user.currentRoom) {
+          const roomCode = user.currentRoom;
+          // console.log(`🚪 Usuario ${username} se desconectó mientras estaba en la sala ${roomCode}`);
+
+          try {
+            // Remover de la base de datos
+            await this.temporaryRoomsService.leaveRoom(roomCode, username);
+            // console.log(`✅ Usuario ${username} removido de la sala ${roomCode} en BD`);
+          } catch (error) {
+            // console.error(`❌ Error al remover usuario ${username} de la sala en BD:`, error);
+          }
+
+          // Remover de la memoria
+          const roomUsersSet = this.roomUsers.get(roomCode);
+          if (roomUsersSet) {
+            roomUsersSet.delete(username);
+            if (roomUsersSet.size === 0) {
+              this.roomUsers.delete(roomCode);
+            }
+          }
+
+          // Notificar a otros usuarios de la sala que este usuario salió
+          this.broadcastRoomUsers(roomCode);
+        }
+
+        // Remover usuario del mapa de usuarios conectados
         this.users.delete(username);
         // console.log(`Usuario desconectado del chat: ${username}`);
         this.broadcastUserList();
@@ -97,6 +124,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
       mediaType,
       mediaData,
       fileName,
+      fileSize,
     } = data;
 
     console.log(`📨 MENSAJE RECIBIDO:`, { from, to, isGroup, message: message?.substring(0, 50) });
@@ -139,8 +167,9 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 isGroup: true,
                 time: time || new Date().toLocaleTimeString(),
                 mediaType, // ← AGREGADO
-                mediaData, // ← AGREGADO
+                mediaData, // ← AGREGADO (ahora es URL)
                 fileName, // ← AGREGADO
+                fileSize, // ← AGREGADO
               });
             } else {
               console.log(`❌ No se puede enviar a ${member} - usuario no encontrado o socket desconectado`);
@@ -166,6 +195,10 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 message,
                 isGroup: true,
                 time: time || new Date().toLocaleTimeString(),
+                mediaType,
+                mediaData,
+                fileName,
+                fileSize,
               });
             }
           });
@@ -181,6 +214,10 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
           message,
           isGroup: false,
           time: time || new Date().toLocaleTimeString(),
+          mediaType,
+          mediaData,
+          fileName,
+          fileSize,
         });
       }
     }
@@ -202,6 +239,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
       mediaType,
       mediaData,
       fileName,
+      fileSize,
     } = data;
 
     try {
@@ -216,6 +254,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
         mediaType,
         mediaData,
         fileName,
+        fileSize,
         sentAt: new Date(),
         time: time || new Date().toLocaleTimeString(),
       };
@@ -285,7 +324,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const { linkType, participants, roomName, from } = data;
     const linkId = this.generateTemporaryLink(linkType, participants, from);
     //const linkUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/#/join/${linkId}`;
-    const linkUrl = `${process.env.FRONTEND_URL || 'https://mensajeria.mass34.com'}/#/join/${linkId}`;
+    const linkUrl = `${process.env.FRONTEND_URL || 'https://chat.mass34.com'}/#/join/${linkId}`;
 
     client.emit('temporaryLinkCreated', {
       linkId,
@@ -377,11 +416,23 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     // Notificar a todos en la sala
     this.broadcastRoomUsers(roomCode);
 
+    // Crear lista de usuarios con información completa para roomJoined
+    const roomUsernamesList = Array.from(this.roomUsers.get(roomCode) || []);
+    const roomUsersList = roomUsernamesList.map(username => {
+      const user = this.users.get(username);
+      return {
+        username: username,
+        picture: user?.userData?.picture || null,
+        nombre: user?.userData?.nombre || null,
+        apellido: user?.userData?.apellido || null
+      };
+    });
+
     // Confirmar al usuario que se unió
     client.emit('roomJoined', {
       roomCode,
       roomName,
-      users: Array.from(this.roomUsers.get(roomCode) || []),
+      users: roomUsersList,
     });
 
     // console.log(`✅ Usuario ${from} unido exitosamente a la sala ${roomCode}`);
@@ -513,7 +564,19 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   private broadcastRoomUsers(roomCode: string) {
-    const roomUsersList = Array.from(this.roomUsers.get(roomCode) || []);
+    const roomUsernamesList = Array.from(this.roomUsers.get(roomCode) || []);
+
+    // Crear lista de usuarios con información completa (username y picture)
+    const roomUsersList = roomUsernamesList.map(username => {
+      const user = this.users.get(username);
+      return {
+        username: username,
+        picture: user?.userData?.picture || null,
+        nombre: user?.userData?.nombre || null,
+        apellido: user?.userData?.apellido || null
+      };
+    });
+
     // console.log(`📋 Enviando usuarios de la sala ${roomCode}:`, roomUsersList);
     // console.log(`🔍 Estado completo de roomUsers:`, this.roomUsers);
     // console.log(

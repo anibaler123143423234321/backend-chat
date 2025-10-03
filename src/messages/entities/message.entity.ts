@@ -39,13 +39,13 @@ export class Message {
   mediaType: string; // 'image', 'video', 'audio', 'document'
 
   @Column({ type: 'longtext', nullable: true })
-  mediaData: string; // Base64 data
+  mediaData: string; // URL del archivo (o Base64 para compatibilidad)
 
   @Column({ length: 255, nullable: true })
   fileName: string;
 
   @Column({ type: 'int', nullable: true })
-  fileSize: number;
+  fileSize: number; // Tamaño del archivo en bytes
 
   @Column({ type: 'datetime' })
   sentAt: Date;

@@ -70,7 +70,7 @@ export class TemporaryRoomsService {
 
     // Generar URL de la sala
     //const roomUrl = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/#/room/${savedRoom.roomCode}`;
-    const roomUrl = `${process.env.FRONTEND_URL || 'https://mensajeria.mass34.com'}/#/room/${savedRoom.roomCode}`;
+    const roomUrl = `${process.env.FRONTEND_URL || 'https://chat.mass34.com'}/#/room/${savedRoom.roomCode}`;
     // console.log('URL generada:', roomUrl);
 
     // Crear respuesta limpia con solo los campos necesarios
