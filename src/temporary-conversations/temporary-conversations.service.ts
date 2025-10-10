@@ -44,16 +44,25 @@ export class TemporaryConversationsService {
   }
 
   async findByUser(username: string): Promise<TemporaryConversation[]> {
+    console.log('🔍 Buscando conversaciones para usuario:', username);
+
     // Obtener todas las conversaciones activas y filtrar en memoria
     const allConversations = await this.temporaryConversationRepository.find({
       where: { isActive: true },
       order: { createdAt: 'DESC' },
     });
 
+    console.log('📋 Total de conversaciones activas:', allConversations.length);
+    allConversations.forEach(conv => {
+      console.log(`  - Conversación ID ${conv.id}: assignedUsers =`, conv.assignedUsers);
+    });
+
     // Filtrar conversaciones donde el usuario está en assignedUsers
     const userConversations = allConversations.filter(conv =>
       conv.assignedUsers && conv.assignedUsers.includes(username)
     );
+
+    console.log('✅ Conversaciones encontradas para', username, ':', userConversations.length);
 
     return userConversations;
   }
@@ -120,6 +129,12 @@ export class TemporaryConversationsService {
     name: string,
     adminId: number,
   ): Promise<TemporaryConversation> {
+    console.log('💬 Creando conversación asignada:');
+    console.log('  - user1:', user1);
+    console.log('  - user2:', user2);
+    console.log('  - name:', name);
+    console.log('  - adminId:', adminId);
+
     const linkId = this.generateLinkId();
     const expiresAt = new Date();
     // Conversaciones asignadas por admin no expiran (o expiran en 1 año)
@@ -138,13 +153,35 @@ export class TemporaryConversationsService {
       assignedUsers: [user1, user2],
     });
 
+    const saved = await this.temporaryConversationRepository.save(conversation);
+    console.log('✅ Conversación guardada con ID:', saved.id);
+    console.log('  - assignedUsers:', saved.assignedUsers);
+
+    return saved;
+  }
+
+  async update(
+    id: number,
+    updateData: { name?: string; expiresAt?: Date },
+  ): Promise<TemporaryConversation> {
+    const conversation = await this.findOne(id);
+
+    if (updateData.name) {
+      conversation.name = updateData.name;
+    }
+
+    if (updateData.expiresAt) {
+      conversation.expiresAt = new Date(updateData.expiresAt);
+    }
+
     return await this.temporaryConversationRepository.save(conversation);
   }
 
-  async remove(id: number, userId: number): Promise<void> {
+  async remove(id: number, userId?: number): Promise<void> {
     const conversation = await this.findOne(id);
 
-    if (conversation.createdBy !== userId) {
+    // Si se proporciona userId, validar permisos
+    if (userId && conversation.createdBy !== userId) {
       throw new BadRequestException(
         'No tienes permisos para eliminar esta conversación',
       );

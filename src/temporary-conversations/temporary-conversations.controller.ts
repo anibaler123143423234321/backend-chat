@@ -2,6 +2,7 @@ import {
   Controller,
   Get,
   Post,
+  Put,
   Body,
   Param,
   Delete,
@@ -25,7 +26,7 @@ export class TemporaryConversationsController {
     return this.temporaryConversationsService.create(createDto, userId);
   }
 
-  @Get()
+  @Get('all')
   findAll() {
     return this.temporaryConversationsService.findAll();
   }
@@ -45,21 +46,37 @@ export class TemporaryConversationsController {
     return this.temporaryConversationsService.findOne(+id);
   }
 
+  @Put(':id')
+  update(
+    @Param('id') id: string,
+    @Body() updateData: { name?: string; expiresAt?: Date },
+  ) {
+    return this.temporaryConversationsService.update(+id, updateData);
+  }
+
   @Post('admin-assign')
   createAdminAssignedConversation(
-    @Body() body: { user1: string; user2: string; name: string },
-    @Request() req,
+    @Body()
+    body: {
+      user1: string;
+      user2: string;
+      name: string;
+      adminId: number;
+      adminRole: string;
+    },
   ) {
     // Validar que el usuario sea admin
-    if (req.user.role !== 'ADMIN') {
-      throw new Error('Solo los administradores pueden crear conversaciones asignadas');
+    if (body.adminRole !== 'ADMIN') {
+      throw new Error(
+        'Solo los administradores pueden crear conversaciones asignadas',
+      );
     }
 
     return this.temporaryConversationsService.createAdminAssignedConversation(
       body.user1,
       body.user2,
       body.name,
-      req.user.id,
+      body.adminId,
     );
   }
 
@@ -73,6 +90,7 @@ export class TemporaryConversationsController {
 
   @Delete(':id')
   remove(@Param('id') id: string, @Request() req) {
-    return this.temporaryConversationsService.remove(+id, req.user.id);
+    const userId = req.user?.id;
+    return this.temporaryConversationsService.remove(+id, userId);
   }
 }

@@ -92,9 +92,9 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('register')
   handleRegister(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { username: string; userData: any },
+    @MessageBody() data: { username: string; userData: any; assignedConversations?: any[] },
   ) {
-    const { username, userData } = data;
+    const { username, userData, assignedConversations } = data;
     this.users.set(username, { socket: client, userData });
     // console.log(`Usuario registrado en chat: ${username}`);
     // console.log(`Datos del usuario:`, userData);
@@ -105,8 +105,60 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
       message: `Registrado como ${username}`,
     });
 
-    // Enviar lista de usuarios
-    this.broadcastUserList();
+    // Enviar lista de usuarios (incluyendo usuarios de conversaciones asignadas si aplica)
+    this.broadcastUserList(assignedConversations);
+  }
+
+  @SubscribeMessage('updateAssignedConversations')
+  handleUpdateAssignedConversations(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { username: string; assignedConversations: any[] },
+  ) {
+    const { username, assignedConversations } = data;
+    console.log(`🔄 Actualizando conversaciones asignadas para: ${username}`);
+
+    // Actualizar la lista de usuarios para este usuario específico
+    const userConnection = this.users.get(username);
+    if (userConnection && userConnection.socket.connected) {
+      // Crear lista de usuarios con toda su información
+      const userListWithData = Array.from(this.users.entries()).map(([uname, { userData }]) => ({
+        username: uname,
+        nombre: userData?.nombre || null,
+        apellido: userData?.apellido || null,
+        email: userData?.email || null,
+        role: userData?.role || 'USER',
+        picture: userData?.picture || null,
+        sede: userData?.sede || null,
+      }));
+
+      // Incluir información del usuario actual + usuarios de conversaciones asignadas
+      let usersToSend = [];
+
+      // Agregar información del usuario actual
+      const ownUserData = userListWithData.find(u => u.username === username);
+      if (ownUserData) {
+        usersToSend.push(ownUserData);
+      }
+
+      // Agregar información de los otros usuarios en las conversaciones asignadas
+      if (assignedConversations && assignedConversations.length > 0) {
+        assignedConversations.forEach(conv => {
+          if (conv.participants && Array.isArray(conv.participants)) {
+            conv.participants.forEach(participantName => {
+              if (participantName !== username) {
+                const participantData = userListWithData.find(u => u.username === participantName);
+                if (participantData && !usersToSend.some(u => u.username === participantName)) {
+                  usersToSend.push(participantData);
+                }
+              }
+            });
+          }
+        });
+      }
+
+      console.log(`✅ Enviando lista actualizada a ${username}:`, usersToSend.map(u => u.username));
+      userConnection.socket.emit('userList', { users: usersToSend });
+    }
   }
 
   @SubscribeMessage('conversationAssigned')
@@ -611,9 +663,19 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  private broadcastUserList() {
-    const userList = Array.from(this.users.keys());
-    // console.log('📋 Enviando lista de usuarios:', userList);
+  private broadcastUserList(assignedConversations?: any[]) {
+    // Crear lista de usuarios con toda su información
+    const userListWithData = Array.from(this.users.entries()).map(([username, { userData }]) => ({
+      username: username,
+      nombre: userData?.nombre || null,
+      apellido: userData?.apellido || null,
+      email: userData?.email || null,
+      role: userData?.role || 'USER',
+      picture: userData?.picture || null,
+      sede: userData?.sede || null,
+    }));
+
+    // console.log('📋 Enviando lista de usuarios con datos completos:', userListWithData);
 
     this.users.forEach(({ socket, userData, currentRoom }) => {
       if (socket.connected) {
@@ -634,12 +696,36 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
           // console.log(
           //   `👑 Enviando lista completa a admin: ${userData.username || 'Usuario'}`,
           // );
-          socket.emit('userList', { users: userList });
+          socket.emit('userList', { users: userListWithData });
         } else {
-          // Para usuarios no admin, enviar solo su propio nombre
-          const ownUsername = userData?.username || 'Usuario';
-          // console.log(`👤 Enviando solo su nombre a usuario: ${ownUsername}`);
-          socket.emit('userList', { users: [ownUsername] });
+          // Para usuarios no admin, incluir su propia información + usuarios de conversaciones asignadas
+          let usersToSend = [];
+
+          // Agregar información del usuario actual
+          const ownUserData = userListWithData.find(u => u.username === userData?.username);
+          if (ownUserData) {
+            usersToSend.push(ownUserData);
+          }
+
+          // Si tiene conversaciones asignadas, agregar información de los otros usuarios
+          if (assignedConversations && assignedConversations.length > 0) {
+            assignedConversations.forEach(conv => {
+              if (conv.participants && Array.isArray(conv.participants)) {
+                conv.participants.forEach(participantName => {
+                  // No agregar al usuario actual
+                  if (participantName !== userData?.username) {
+                    const participantData = userListWithData.find(u => u.username === participantName);
+                    if (participantData && !usersToSend.some(u => u.username === participantName)) {
+                      usersToSend.push(participantData);
+                    }
+                  }
+                });
+              }
+            });
+          }
+
+          // console.log(`👤 Enviando información a usuario: ${userData?.username}`, usersToSend);
+          socket.emit('userList', { users: usersToSend });
         }
       }
     });
@@ -705,75 +791,46 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     });
   }
 
-  // ==================== EVENTOS WEBRTC ====================
+  // ==================== EVENTOS WEBRTC (SIMPLE-PEER) ====================
 
-  @SubscribeMessage('call-offer')
-  handleCallOffer(
+  @SubscribeMessage('callUser')
+  handleCallUser(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { offer: any; to: string; from: string; callType: string },
+    @MessageBody() data: { userToCall: string; signalData: any; from: string; callType: string },
   ) {
-    console.log(`📞 Oferta de llamada de ${data.from} a ${data.to}`);
+    console.log(`📞 Llamada de ${data.from} a ${data.userToCall} (${data.callType})`);
 
-    const targetUser = this.users.get(data.to);
+    const targetUser = this.users.get(data.userToCall);
     if (targetUser && targetUser.socket.connected) {
-      targetUser.socket.emit('call-offer', {
-        offer: data.offer,
+      targetUser.socket.emit('callUser', {
+        signal: data.signalData,
         from: data.from,
         callType: data.callType,
       });
-      console.log(`✅ Oferta enviada a ${data.to}`);
+      console.log(`✅ Señal de llamada enviada a ${data.userToCall}`);
     } else {
-      console.log(`❌ Usuario ${data.to} no encontrado o desconectado`);
-      client.emit('call-failed', { reason: 'Usuario no disponible' });
+      console.log(`❌ Usuario ${data.userToCall} no encontrado o desconectado`);
+      client.emit('callFailed', { reason: 'Usuario no disponible' });
     }
   }
 
-  @SubscribeMessage('call-answer')
-  handleCallAnswer(
+  @SubscribeMessage('answerCall')
+  handleAnswerCall(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { answer: any; to: string; from: string },
+    @MessageBody() data: { signal: any; to: string },
   ) {
-    console.log(`📞 Respuesta de llamada de ${data.from} a ${data.to}`);
+    console.log(`📞 Respuesta de llamada a ${data.to}`);
 
     const targetUser = this.users.get(data.to);
     if (targetUser && targetUser.socket.connected) {
-      targetUser.socket.emit('call-answer', {
-        answer: data.answer,
-        from: data.from,
+      targetUser.socket.emit('callAccepted', {
+        signal: data.signal,
       });
       console.log(`✅ Respuesta enviada a ${data.to}`);
     }
   }
 
-  @SubscribeMessage('ice-candidate')
-  handleIceCandidate(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { candidate: any; to: string },
-  ) {
-    const targetUser = this.users.get(data.to);
-    if (targetUser && targetUser.socket.connected) {
-      targetUser.socket.emit('ice-candidate', {
-        candidate: data.candidate,
-      });
-    }
-  }
-
-  @SubscribeMessage('call-accepted')
-  handleCallAccepted(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() data: { to: string; from: string },
-  ) {
-    console.log(`✅ Llamada aceptada por ${data.from}`);
-
-    const targetUser = this.users.get(data.to);
-    if (targetUser && targetUser.socket.connected) {
-      targetUser.socket.emit('call-accepted', {
-        from: data.from,
-      });
-    }
-  }
-
-  @SubscribeMessage('call-rejected')
+  @SubscribeMessage('callRejected')
   handleCallRejected(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { to: string; from: string },
@@ -782,24 +839,22 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const targetUser = this.users.get(data.to);
     if (targetUser && targetUser.socket.connected) {
-      targetUser.socket.emit('call-rejected', {
+      targetUser.socket.emit('callRejected', {
         from: data.from,
       });
     }
   }
 
-  @SubscribeMessage('call-ended')
+  @SubscribeMessage('callEnded')
   handleCallEnded(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { to: string; from: string },
+    @MessageBody() data: { to: string },
   ) {
-    console.log(`📴 Llamada finalizada por ${data.from}`);
+    console.log(`📴 Llamada finalizada`);
 
     const targetUser = this.users.get(data.to);
     if (targetUser && targetUser.socket.connected) {
-      targetUser.socket.emit('call-ended', {
-        from: data.from,
-      });
+      targetUser.socket.emit('callEnded');
     }
   }
 }
