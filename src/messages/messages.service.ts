@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, Like } from 'typeorm';
 import { Message } from './entities/message.entity';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { TemporaryRoom } from '../temporary-rooms/entities/temporary-room.entity';
@@ -147,5 +147,72 @@ export class MessagesService {
     });
 
     return { totalMessages, unreadMessages };
+  }
+
+  // Buscar mensajes por contenido para un usuario específico
+  async searchMessages(
+    username: string,
+    searchTerm: string,
+    limit: number = 50,
+  ): Promise<any[]> {
+    if (!searchTerm || searchTerm.trim().length === 0) {
+      return [];
+    }
+
+    // Buscar mensajes donde el usuario es el remitente o el destinatario
+    const messages = await this.messageRepository.find({
+      where: [
+        {
+          from: username,
+          message: Like(`%${searchTerm}%`),
+          isDeleted: false,
+        },
+        {
+          to: username,
+          message: Like(`%${searchTerm}%`),
+          isDeleted: false,
+        },
+      ],
+      order: { sentAt: 'DESC' },
+      take: limit,
+    });
+
+    // Agrupar mensajes por conversación
+    const conversationsMap = new Map();
+
+    for (const msg of messages) {
+      // Determinar el otro usuario en la conversación
+      const otherUser = msg.from === username ? msg.to : msg.from;
+
+      if (!conversationsMap.has(otherUser)) {
+        conversationsMap.set(otherUser, {
+          user: otherUser,
+          messages: [],
+          lastMessage: {
+            id: msg.id,
+            text: msg.message,
+            from: msg.from,
+            to: msg.to,
+            sentAt: msg.sentAt,
+          },
+          lastMessageTime: msg.sentAt,
+        });
+      }
+
+      conversationsMap.get(otherUser).messages.push({
+        id: msg.id,
+        text: msg.message,
+        from: msg.from,
+        to: msg.to,
+        sentAt: msg.sentAt,
+      });
+    }
+
+    // Convertir el mapa a array y ordenar por último mensaje
+    const conversations = Array.from(conversationsMap.values()).sort(
+      (a, b) => b.lastMessageTime.getTime() - a.lastMessageTime.getTime(),
+    );
+
+    return conversations;
   }
 }

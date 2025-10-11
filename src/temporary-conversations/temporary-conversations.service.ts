@@ -178,7 +178,20 @@ export class TemporaryConversationsService {
   }
 
   async remove(id: number, userId?: number): Promise<void> {
-    const conversation = await this.findOne(id);
+    // Buscar la conversación sin filtrar por isActive para poder manejar conversaciones ya eliminadas
+    const conversation = await this.temporaryConversationRepository.findOne({
+      where: { id },
+    });
+
+    if (!conversation) {
+      throw new NotFoundException('Conversación temporal no encontrada');
+    }
+
+    // Si ya está inactiva, no hacer nada (ya fue eliminada)
+    if (!conversation.isActive) {
+      console.log(`⚠️ Conversación ${id} ya estaba inactiva`);
+      return;
+    }
 
     // Si se proporciona userId, validar permisos
     if (userId && conversation.createdBy !== userId) {

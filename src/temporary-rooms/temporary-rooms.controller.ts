@@ -76,22 +76,6 @@ export class TemporaryRoomsController {
     return this.temporaryRoomsService.getRoomUsers(roomCode);
   }
 
-  @Patch(':id/duration')
-  updateRoomDuration(
-    @Param('id') id: string,
-    @Body() updateDto: { duration: number },
-    @Request() req,
-  ) {
-    console.log('⏰ PATCH /api/temporary-rooms/' + id + '/duration called');
-    console.log('Nueva duración:', updateDto.duration, 'minutos');
-    const userId = req.user?.id || 1; // Usar ID por defecto para pruebas
-    return this.temporaryRoomsService.updateRoomDuration(
-      +id,
-      updateDto.duration,
-      userId,
-    );
-  }
-
   @Post('join')
   joinRoom(@Body() joinDto: JoinRoomDto, @Request() req) {
     console.log('🚪 POST /api/temporary-rooms/join called with data:', joinDto);

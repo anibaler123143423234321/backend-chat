@@ -42,24 +42,25 @@ export class TemporaryRoomsService {
 
     const roomCode = this.generateRoomCode();
     const expiresAt = new Date();
-    const durationMinutes = createDto.duration || 1440; // Usar duración del DTO en minutos o 24 horas (1440 min) por defecto
-    expiresAt.setMinutes(expiresAt.getMinutes() + durationMinutes);
+    // Las salas ahora son permanentes (sin expiración automática)
+    expiresAt.setFullYear(expiresAt.getFullYear() + 10); // Expira en 10 años
 
     // console.log('Código de sala generado:', roomCode);
     // console.log('Fecha de expiración:', expiresAt);
 
     // Inicializar con el creador como primer miembro
-    const members = creatorUsername ? [creatorUsername] : [];
+    const members = creatorUsername ? [creatorUsername] : []; // Historial
+    const connectedMembers = creatorUsername ? [creatorUsername] : []; // Conectados actualmente
     const currentMembers = creatorUsername ? 1 : 0;
 
     const room = this.temporaryRoomRepository.create({
       ...createDto,
       roomCode,
       expiresAt,
-      durationMinutes: createDto.duration || 1440, // Guardar duración en minutos
       createdBy: userId,
       currentMembers,
       members,
+      connectedMembers,
       isActive: true,
     });
 
@@ -141,25 +142,34 @@ export class TemporaryRoomsService {
     if (!room.members) {
       room.members = [];
     }
-
-    // Si el usuario ya está en la sala, no hacer nada
-    if (room.members.includes(username)) {
-      // console.log('👤 Usuario ya está en la sala');
-      return room;
+    if (!room.connectedMembers) {
+      room.connectedMembers = [];
     }
 
-    // Si hay un "Usuario" genérico, reemplazarlo con el nombre real
-    const genericUserIndex = room.members.indexOf('Usuario');
-    if (genericUserIndex !== -1) {
-      room.members[genericUserIndex] = username;
-      // console.log('🔄 Reemplazando "Usuario" genérico con:', username);
-    } else {
-      // Si no hay "Usuario" genérico, agregar el nuevo usuario
+    // Agregar al historial si no está
+    if (!room.members.includes(username)) {
       room.members.push(username);
     }
 
-    room.currentMembers = room.members.length;
-    // console.log('👥 Usuarios en la sala después de unirse:', room.members);
+    // Si el usuario ya está conectado, no hacer nada
+    if (room.connectedMembers.includes(username)) {
+      // console.log('👤 Usuario ya está conectado en la sala');
+      return room;
+    }
+
+    // Si hay un "Usuario" genérico en connectedMembers, reemplazarlo
+    const genericUserIndex = room.connectedMembers.indexOf('Usuario');
+    if (genericUserIndex !== -1) {
+      room.connectedMembers[genericUserIndex] = username;
+      // console.log('🔄 Reemplazando "Usuario" genérico con:', username);
+    } else {
+      // Agregar a usuarios conectados
+      room.connectedMembers.push(username);
+    }
+
+    room.currentMembers = room.connectedMembers.length;
+    // console.log('👥 Usuarios conectados en la sala:', room.connectedMembers);
+    // console.log('📜 Historial de usuarios:', room.members);
     await this.temporaryRoomRepository.save(room);
 
     // console.log('✅ Usuario unido exitosamente a la sala');
@@ -178,21 +188,22 @@ export class TemporaryRoomsService {
       );
     }
 
-    if (!room.members) {
-      room.members = [];
+    if (!room.connectedMembers) {
+      room.connectedMembers = [];
     }
 
-    // Remover el usuario de la lista de miembros
-    const userIndex = room.members.indexOf(username);
+    // Remover el usuario solo de connectedMembers (mantener en historial)
+    const userIndex = room.connectedMembers.indexOf(username);
     if (userIndex !== -1) {
-      room.members.splice(userIndex, 1);
-      room.currentMembers = room.members.length;
+      room.connectedMembers.splice(userIndex, 1);
+      room.currentMembers = room.connectedMembers.length;
 
-      // console.log('👥 Usuarios en la sala después de salir:', room.members);
+      // console.log('👥 Usuarios conectados después de salir:', room.connectedMembers);
+      // console.log('📜 Historial de usuarios (sin cambios):', room.members);
       await this.temporaryRoomRepository.save(room);
-      // console.log('✅ Usuario removido exitosamente de la sala en BD');
+      // console.log('✅ Usuario desconectado de la sala en BD');
     } else {
-      // console.log('❌ Usuario no encontrado en la sala');
+      // console.log('❌ Usuario no encontrado en connectedMembers');
     }
 
     // Limpiar la sala actual del usuario en la base de datos
@@ -300,7 +311,6 @@ export class TemporaryRoomsService {
           maxCapacity: currentRoom.maxCapacity,
           currentMembers: currentRoom.currentMembers,
           isActive: currentRoom.isActive,
-          durationMinutes: currentRoom.durationMinutes,
           expiresAt: currentRoom.expiresAt,
         },
       };
@@ -327,18 +337,18 @@ export class TemporaryRoomsService {
       throw new NotFoundException('Sala no encontrada o inactiva');
     }
 
-    // Obtener usuarios reales del WebSocket o de la base de datos
-    // Por ahora, devolver información más detallada
-    const users = room.members || [];
+    // Obtener historial completo de usuarios
+    const allUsers = room.members || [];
+    const connectedUsers = room.connectedMembers || [];
 
-    // Si no hay usuarios en el array members, intentar obtener del currentMembers
+    // Crear lista con todos los usuarios del historial y su estado de conexión
     let userList = [];
-    if (users.length > 0) {
-      userList = users.map((username, index) => ({
+    if (allUsers.length > 0) {
+      userList = allUsers.map((username, index) => ({
         id: index + 1,
         username: username,
         displayName: username === 'Usuario' ? `Usuario ${index + 1}` : username,
-        isOnline: true,
+        isOnline: connectedUsers.includes(username), // true si está en connectedMembers
       }));
     } else if (room.currentMembers > 0) {
       // Si hay miembros pero no en el array, crear usuarios genéricos
@@ -352,7 +362,7 @@ export class TemporaryRoomsService {
       }
     }
 
-    // console.log('✅ Usuarios en la sala:', userList);
+    // console.log('✅ Usuarios en la sala (historial):', userList);
 
     return {
       roomCode: room.roomCode,
@@ -361,38 +371,6 @@ export class TemporaryRoomsService {
       totalUsers: userList.length,
       maxCapacity: room.maxCapacity,
     };
-  }
-
-  async updateRoomDuration(
-    roomId: number,
-    durationMinutes: number,
-    userId: number,
-  ): Promise<TemporaryRoom> {
-    // console.log('⏰ Actualizando duración de sala:', roomId);
-    // console.log('Nueva duración:', durationMinutes, 'minutos');
-
-    const room = await this.temporaryRoomRepository.findOne({
-      where: { id: roomId, createdBy: userId },
-    });
-
-    if (!room) {
-      throw new NotFoundException(
-        'Sala no encontrada o no tienes permisos para editarla',
-      );
-    }
-
-    // Calcular nueva fecha de expiración
-    const newExpiresAt = new Date();
-    newExpiresAt.setMinutes(newExpiresAt.getMinutes() + durationMinutes);
-
-    room.expiresAt = newExpiresAt;
-    room.durationMinutes = durationMinutes; // Actualizar también la duración guardada
-    const updatedRoom = await this.temporaryRoomRepository.save(room);
-
-    // console.log('✅ Duración de sala actualizada:', updatedRoom.name);
-    // console.log('Nueva fecha de expiración:', newExpiresAt);
-
-    return updatedRoom;
   }
 
   private generateRoomCode(): string {

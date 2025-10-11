@@ -23,9 +23,6 @@ export class TemporaryRoom {
   @Column({ type: 'datetime' })
   expiresAt: Date;
 
-  @Column({ type: 'int', nullable: true })
-  durationMinutes: number;
-
   @Column({ type: 'int', default: 50 })
   maxCapacity: number;
 
@@ -36,7 +33,10 @@ export class TemporaryRoom {
   isActive: boolean;
 
   @Column({ type: 'json', nullable: true })
-  members: string[];
+  members: string[]; // Historial de todos los usuarios que han entrado
+
+  @Column({ type: 'json', nullable: true })
+  connectedMembers: string[]; // Usuarios actualmente conectados
 
   @Column({ type: 'json', nullable: true })
   assignedMembers: string[]; // Usuarios asignados por admin (no pueden salir)

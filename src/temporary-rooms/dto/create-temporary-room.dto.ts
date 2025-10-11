@@ -18,8 +18,4 @@ export class CreateTemporaryRoomDto {
   @IsOptional()
   @IsString()
   creatorUsername?: string;
-
-  @IsOptional()
-  @IsNumber()
-  duration?: number; // Duración en minutos
 }

@@ -100,4 +100,18 @@ export class MessagesController {
     // console.log(`📊 Obteniendo estadísticas de mensajes`);
     return await this.messagesService.getMessageStats(roomCode);
   }
+
+  @Get('search/:username')
+  async searchMessages(
+    @Param('username') username: string,
+    @Query('q') searchTerm: string,
+    @Query('limit') limit: string = '50',
+  ) {
+    console.log(`🔍 Buscando mensajes para ${username} con término: "${searchTerm}"`);
+    return await this.messagesService.searchMessages(
+      username,
+      searchTerm,
+      parseInt(limit),
+    );
+  }
 }
