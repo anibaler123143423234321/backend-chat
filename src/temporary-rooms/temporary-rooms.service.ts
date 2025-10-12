@@ -2,6 +2,8 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -24,12 +26,19 @@ export interface TemporaryRoomWithUrl {
 
 @Injectable()
 export class TemporaryRoomsService {
+  private socketGateway: any; // Referencia al gateway de WebSocket
+
   constructor(
     @InjectRepository(TemporaryRoom)
     private temporaryRoomRepository: Repository<TemporaryRoom>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
   ) {}
+
+  // Método para inyectar el gateway de WebSocket (evita dependencia circular)
+  setSocketGateway(gateway: any) {
+    this.socketGateway = gateway;
+  }
 
   async create(
     createDto: CreateTemporaryRoomDto,
@@ -41,12 +50,8 @@ export class TemporaryRoomsService {
     // console.log('Nombre del creador:', creatorUsername);
 
     const roomCode = this.generateRoomCode();
-    const expiresAt = new Date();
-    // Las salas ahora son permanentes (sin expiración automática)
-    expiresAt.setFullYear(expiresAt.getFullYear() + 10); // Expira en 10 años
 
     // console.log('Código de sala generado:', roomCode);
-    // console.log('Fecha de expiración:', expiresAt);
 
     // Inicializar con el creador como primer miembro
     const members = creatorUsername ? [creatorUsername] : []; // Historial
@@ -56,7 +61,6 @@ export class TemporaryRoomsService {
     const room = this.temporaryRoomRepository.create({
       ...createDto,
       roomCode,
-      expiresAt,
       createdBy: userId,
       currentMembers,
       members,
@@ -118,8 +122,8 @@ export class TemporaryRoomsService {
       throw new NotFoundException('Código de sala no válido');
     }
 
-    if (new Date() > room.expiresAt) {
-      throw new BadRequestException('La sala ha expirado');
+    if (!room.isActive) {
+      throw new BadRequestException('La sala está inactiva');
     }
 
     return room;
@@ -250,9 +254,17 @@ export class TemporaryRoomsService {
         'Sala no encontrada o no tienes permisos para eliminarla',
       );
     }
+
+    const roomCode = room.roomCode; // Guardar antes de eliminar
+
     // console.log('✅ Sala encontrada, eliminando permanentemente:', room.name);
     await this.temporaryRoomRepository.remove(room);
     // console.log('✅ Sala eliminada permanentemente');
+
+    // 🔥 Notificar a todos los usuarios conectados que la sala fue eliminada
+    if (this.socketGateway) {
+      this.socketGateway.broadcastRoomDeleted(roomCode, id);
+    }
   }
 
   async getAdminRooms(userId: number): Promise<any[]> {
@@ -276,9 +288,46 @@ export class TemporaryRoomsService {
       throw new NotFoundException('Sala no encontrada');
     }
 
+    const roomCode = room.roomCode; // Guardar antes de desactivar
+
     room.isActive = false;
     const updatedRoom = await this.temporaryRoomRepository.save(room);
     // console.log('✅ Sala desactivada:', updatedRoom.name);
+
+    // 🔥 Notificar a todos los usuarios conectados que la sala fue desactivada
+    if (this.socketGateway) {
+      this.socketGateway.broadcastRoomDeleted(roomCode, id);
+    }
+
+    return updatedRoom;
+  }
+
+  async updateRoom(
+    id: number,
+    userId: number,
+    updateData: { maxCapacity?: number },
+  ): Promise<TemporaryRoom> {
+    console.log('✏️ Actualizando sala:', id, 'por usuario:', userId, 'con datos:', updateData);
+
+    const room = await this.temporaryRoomRepository.findOne({
+      where: { id, createdBy: userId },
+    });
+
+    if (!room) {
+      throw new NotFoundException('Sala no encontrada o no tienes permisos para editarla');
+    }
+
+    // Actualizar capacidad máxima
+    if (updateData.maxCapacity !== undefined) {
+      if (updateData.maxCapacity < 1 || updateData.maxCapacity > 500) {
+        throw new BadRequestException('La capacidad debe estar entre 1 y 500');
+      }
+      room.maxCapacity = updateData.maxCapacity;
+    }
+
+    const updatedRoom = await this.temporaryRoomRepository.save(room);
+    console.log('✅ Sala actualizada:', updatedRoom.name);
+
     return updatedRoom;
   }
 
@@ -311,7 +360,6 @@ export class TemporaryRoomsService {
           maxCapacity: currentRoom.maxCapacity,
           currentMembers: currentRoom.currentMembers,
           isActive: currentRoom.isActive,
-          expiresAt: currentRoom.expiresAt,
         },
       };
     } catch (error) {

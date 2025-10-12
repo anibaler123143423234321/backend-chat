@@ -46,16 +46,7 @@ export class TemporaryRoomsController {
     return this.temporaryRoomsService.findAll();
   }
 
-  @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.temporaryRoomsService.findOne(+id);
-  }
-
-  @Get('code/:roomCode')
-  findByCode(@Param('roomCode') roomCode: string) {
-    return this.temporaryRoomsService.findByRoomCode(roomCode);
-  }
-
+  // Rutas específicas ANTES de rutas con parámetros
   @Get('admin/rooms')
   getAdminRooms(@Request() req) {
     // console.log('🔍 GET /api/temporary-rooms/admin/rooms called');
@@ -68,6 +59,17 @@ export class TemporaryRoomsController {
     // console.log('🔍 GET /api/temporary-rooms/user/current-room called');
     const userId = req.user?.id || 1; // Usar ID por defecto para pruebas
     return this.temporaryRoomsService.getCurrentUserRoom(userId);
+  }
+
+  @Get('code/:roomCode')
+  findByCode(@Param('roomCode') roomCode: string) {
+    return this.temporaryRoomsService.findByRoomCode(roomCode);
+  }
+
+  // Rutas con parámetros AL FINAL
+  @Get(':id')
+  findOne(@Param('id') id: string) {
+    return this.temporaryRoomsService.findOne(+id);
   }
 
   @Get(':roomCode/users')
@@ -100,5 +102,16 @@ export class TemporaryRoomsController {
     console.log('⏸️ PATCH /api/temporary-rooms/' + id + '/deactivate called');
     const userId = req.user?.id || 1; // Usar ID por defecto para pruebas
     return this.temporaryRoomsService.deactivateRoom(parseInt(id), userId);
+  }
+
+  @Patch(':id/update')
+  updateRoom(
+    @Param('id') id: string,
+    @Body() updateData: { maxCapacity?: number },
+    @Request() req
+  ) {
+    console.log('✏️ PATCH /api/temporary-rooms/' + id + '/update called');
+    const userId = req.user?.id || 1; // Usar ID por defecto para pruebas
+    return this.temporaryRoomsService.updateRoom(parseInt(id), userId, updateData);
   }
 }

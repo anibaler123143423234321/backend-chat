@@ -40,6 +40,9 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {
     // Limpiar enlaces expirados cada 5 minutos
     setInterval(() => this.cleanExpiredLinks(), 5 * 60 * 1000);
+
+    // Inyectar referencia del gateway en el servicio para notificaciones
+    this.temporaryRoomsService.setSocketGateway(this);
   }
 
   async handleDisconnect(client: Socket) {
@@ -72,7 +75,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
-  handleConnection(client: Socket) {
+  handleConnection(_client: Socket) {
     // Socket.IO connection established
   }
 
@@ -108,6 +111,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (userConnection && userConnection.socket.connected) {
       // Crear lista de usuarios con toda su información
       const userListWithData = Array.from(this.users.entries()).map(([uname, { userData }]) => ({
+        id: userData?.id || null,
         username: uname,
         nombre: userData?.nombre || null,
         apellido: userData?.apellido || null,
@@ -115,10 +119,11 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
         role: userData?.role || 'USER',
         picture: userData?.picture || null,
         sede: userData?.sede || null,
+        sede_id: userData?.sede_id || null,
       }));
 
       // Incluir información del usuario actual + usuarios de conversaciones asignadas
-      let usersToSend = [];
+      const usersToSend = [];
 
       // Agregar información del usuario actual
       const ownUserData = userListWithData.find(u => u.username === data.username);
@@ -208,7 +213,6 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
       isGroup,
       time,
       from,
-      fromId,
       mediaType,
       mediaData,
       fileName,
@@ -285,8 +289,8 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     // Guardar mensaje en la base de datos (después de enviar)
-    this.saveMessageToDatabase(data).catch((error) => {
-      // console.error(`❌ Error al guardar mensaje en BD:`, error);
+    this.saveMessageToDatabase(data).catch(() => {
+      // Error al guardar en BD
     });
   }
 
@@ -331,7 +335,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('editMessage')
   async handleEditMessage(
-    @ConnectedSocket() client: Socket,
+    @ConnectedSocket() _client: Socket,
     @MessageBody()
     data: {
       messageId: number;
@@ -536,10 +540,13 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const user = this.users.get(username);
       const isOnline = connectedUsernamesList.includes(username);
       return {
+        id: user?.userData?.id || null,
         username: username,
         picture: user?.userData?.picture || null,
         nombre: user?.userData?.nombre || null,
         apellido: user?.userData?.apellido || null,
+        sede: user?.userData?.sede || null,
+        sede_id: user?.userData?.sede_id || null,
         isOnline: isOnline
       };
     });
@@ -550,6 +557,58 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
       roomName: data.roomName,
       users: roomUsersList,
     });
+  }
+
+  @SubscribeMessage('kickUser')
+  async handleKickUser(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomCode: string; username: string; kickedBy: string },
+  ) {
+    console.log(`👢 WS: kickUser - Usuario: ${data.username}, Sala: ${data.roomCode}, Expulsado por: ${data.kickedBy}`);
+
+    // Verificar que quien expulsa sea admin
+    const kickerUser = this.users.get(data.kickedBy);
+    if (!kickerUser || !kickerUser.userData) {
+      console.log('❌ Usuario que intenta expulsar no encontrado');
+      return;
+    }
+
+    const kickerRole = kickerUser.userData.role?.toString().toUpperCase().trim();
+    if (kickerRole !== 'ADMIN' && kickerRole !== 'JEFEPISO') {
+      console.log('❌ Usuario no tiene permisos para expulsar');
+      return;
+    }
+
+    try {
+      // Remover usuario de la base de datos
+      await this.temporaryRoomsService.leaveRoom(data.roomCode, data.username);
+    } catch (error) {
+      console.error('❌ Error al remover usuario de BD:', error);
+    }
+
+    // Remover usuario de la sala en memoria
+    const roomUsersSet = this.roomUsers.get(data.roomCode);
+    if (roomUsersSet) {
+      roomUsersSet.delete(data.username);
+    }
+
+    // Notificar al usuario expulsado
+    const kickedUser = this.users.get(data.username);
+    if (kickedUser && kickedUser.socket) {
+      kickedUser.socket.emit('kicked', {
+        roomCode: data.roomCode,
+        message: `Has sido expulsado de la sala por ${data.kickedBy}`,
+      });
+    }
+
+    // Actualizar lista de usuarios en la sala
+    const roomUsersList = Array.from(roomUsersSet || []);
+    this.server.to(data.roomCode).emit('roomUsers', {
+      roomCode: data.roomCode,
+      users: roomUsersList,
+    });
+
+    console.log(`✅ Usuario ${data.username} expulsado de la sala ${data.roomCode}`);
   }
 
   @SubscribeMessage('leaveRoom')
@@ -627,6 +686,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private broadcastUserList(assignedConversations?: any[]) {
     // Crear lista de usuarios con toda su información
     const userListWithData = Array.from(this.users.entries()).map(([username, { userData }]) => ({
+      id: userData?.id || null,
       username: username,
       nombre: userData?.nombre || null,
       apellido: userData?.apellido || null,
@@ -634,6 +694,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
       role: userData?.role || 'USER',
       picture: userData?.picture || null,
       sede: userData?.sede || null,
+      sede_id: userData?.sede_id || null,
     }));
 
     // console.log('📋 Enviando lista de usuarios con datos completos:', userListWithData);
@@ -660,7 +721,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
           socket.emit('userList', { users: userListWithData });
         } else {
           // Para usuarios no admin, incluir su propia información + usuarios de conversaciones asignadas
-          let usersToSend = [];
+          const usersToSend = [];
 
           // Agregar información del usuario actual
           const ownUserData = userListWithData.find(u => u.username === userData?.username);
@@ -725,17 +786,20 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const user = this.users.get(username);
       const isOnline = connectedUsernamesList.includes(username);
       return {
+        id: user?.userData?.id || null,
         username: username,
         picture: user?.userData?.picture || null,
         nombre: user?.userData?.nombre || null,
         apellido: user?.userData?.apellido || null,
+        sede: user?.userData?.sede || null,
+        sede_id: user?.userData?.sede_id || null,
         isOnline: isOnline
       };
     });
 
     // Enviar a TODOS los usuarios conectados (para que vean actualizaciones en tiempo real)
     // Esto permite que usuarios que salieron de la sala vean cuando otros entran/salen
-    this.users.forEach(({ socket, userData }) => {
+    this.users.forEach(({ socket }) => {
       if (socket.connected) {
         socket.emit('roomUsers', {
           roomCode,
@@ -823,5 +887,25 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (targetUser && targetUser.socket.connected) {
       targetUser.socket.emit('callEnded');
     }
+  }
+
+  // ==================== NOTIFICACIONES DE SALAS ====================
+
+  /**
+   * Notificar a todos los usuarios ADMIN y JEFEPISO que una sala fue eliminada/desactivada
+   */
+  broadcastRoomDeleted(roomCode: string, roomId: number) {
+    console.log(`🗑️ Broadcasting room deleted: ${roomCode} (ID: ${roomId})`);
+
+    // Enviar notificación a todos los ADMIN y JEFEPISO
+    this.users.forEach(({ socket, userData }) => {
+      const role = userData?.role?.toString().toUpperCase().trim();
+      if (socket.connected && (role === 'ADMIN' || role === 'JEFEPISO')) {
+        socket.emit('roomDeleted', {
+          roomCode,
+          roomId,
+        });
+      }
+    });
   }
 }
