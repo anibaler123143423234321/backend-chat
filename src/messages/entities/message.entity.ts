@@ -71,6 +71,16 @@ export class Message {
   @Column({ type: 'varchar', length: 20, nullable: true })
   time: string; // Formato HH:MM
 
+  // Campos para responder mensajes
+  @Column({ type: 'int', nullable: true })
+  replyToMessageId: number; // ID del mensaje al que se responde
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  replyToSender: string; // Nombre del remitente del mensaje original
+
+  @Column({ type: 'text', nullable: true })
+  replyToText: string; // Texto del mensaje original (preview)
+
   // Relación con la sala temporal (opcional)
   @ManyToOne(() => TemporaryRoom, { nullable: true })
   @JoinColumn({ name: 'roomId' })

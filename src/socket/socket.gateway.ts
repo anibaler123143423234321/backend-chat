@@ -217,6 +217,9 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
       mediaData,
       fileName,
       fileSize,
+      replyToMessageId,
+      replyToSender,
+      replyToText,
     } = data;
 
     if (isGroup) {
@@ -243,6 +246,9 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 mediaData,
                 fileName,
                 fileSize,
+                replyToMessageId,
+                replyToSender,
+                replyToText,
               });
             }
           });
@@ -265,6 +271,9 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 mediaData,
                 fileName,
                 fileSize,
+                replyToMessageId,
+                replyToSender,
+                replyToText,
               });
             }
           });
@@ -272,11 +281,25 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
     } else {
       // Mensaje individual
-      const recipient = this.users.get(to);
+      let recipientUsername = to;
+
+      // Si es una conversación asignada, obtener el destinatario real
+      if (data.isAssignedConversation && data.actualRecipient) {
+        recipientUsername = data.actualRecipient;
+        console.log(`📧 Conversación asignada detectada. Destinatario real: ${recipientUsername}`);
+      }
+
+      // Log de usuarios conectados
+      const connectedUsers = Array.from(this.users.keys());
+      console.log(`👥 Usuarios conectados: ${connectedUsers.join(', ')}`);
+      console.log(`🔍 Buscando destinatario: ${recipientUsername}`);
+
+      const recipient = this.users.get(recipientUsername);
       if (recipient && recipient.socket.connected) {
+        console.log(`✅ Enviando mensaje a ${recipientUsername} (socket conectado)`);
         recipient.socket.emit('message', {
           from: from || 'Usuario Desconocido',
-          to,
+          to: recipientUsername,
           message,
           isGroup: false,
           time: time || new Date().toLocaleTimeString(),
@@ -284,7 +307,15 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
           mediaData,
           fileName,
           fileSize,
+          replyToMessageId,
+          replyToSender,
+          replyToText,
         });
+      } else {
+        console.log(`❌ No se pudo enviar mensaje a ${recipientUsername} (usuario no conectado o no encontrado)`);
+        if (recipient) {
+          console.log(`   Socket conectado: ${recipient.socket.connected}`);
+        }
       }
     }
 
@@ -306,13 +337,24 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
       mediaData,
       fileName,
       fileSize,
+      replyToMessageId,
+      replyToSender,
+      replyToText,
+      isAssignedConversation,
+      actualRecipient,
     } = data;
 
     try {
+      // Si es una conversación asignada, usar el destinatario real
+      let recipientForDB = to;
+      if (isAssignedConversation && actualRecipient) {
+        recipientForDB = actualRecipient;
+      }
+
       const messageData = {
         from,
         fromId,
-        to: isGroup ? null : to,
+        to: isGroup ? null : recipientForDB,
         message,
         isGroup,
         groupName: isGroup ? to : null,
@@ -323,13 +365,16 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
         fileSize,
         sentAt: new Date(),
         time: time || new Date().toLocaleTimeString(),
+        replyToMessageId,
+        replyToSender,
+        replyToText,
       };
 
-      // console.log(`💾 Guardando mensaje en BD:`, messageData);
+      console.log(`💾 Guardando mensaje en BD:`, messageData);
       await this.messagesService.create(messageData);
-      // console.log(`✅ Mensaje guardado exitosamente en BD`);
+      console.log(`✅ Mensaje guardado exitosamente en BD`);
     } catch (error) {
-      // console.error(`❌ Error al guardar mensaje en BD:`, error);
+      console.error(`❌ Error al guardar mensaje en BD:`, error);
     }
   }
 

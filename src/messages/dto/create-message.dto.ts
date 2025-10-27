@@ -61,4 +61,16 @@ export class CreateMessageDto {
   @IsNumber()
   @IsOptional()
   roomId?: number;
+
+  @IsNumber()
+  @IsOptional()
+  replyToMessageId?: number;
+
+  @IsString()
+  @IsOptional()
+  replyToSender?: string;
+
+  @IsString()
+  @IsOptional()
+  replyToText?: string;
 }
