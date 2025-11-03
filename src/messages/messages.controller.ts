@@ -7,9 +7,11 @@ import {
   Body,
   Param,
   Query,
+  Patch,
 } from '@nestjs/common';
 import { MessagesService } from './messages.service';
 import { CreateMessageDto } from './dto/create-message.dto';
+import { MarkReadDto } from './dto/mark-read.dto';
 
 @Controller('messages')
 export class MessagesController {
@@ -62,9 +64,36 @@ export class MessagesController {
     @Param('id') id: string,
     @Body('username') username: string,
   ) {
-    // console.log(`✅ Marcando mensaje ${id} como leído por ${username}`);
-    await this.messagesService.markAsRead(parseInt(id), username);
-    return { success: true };
+    console.log(`✅ Marcando mensaje ${id} como leído por ${username}`);
+    const message = await this.messagesService.markAsRead(parseInt(id), username);
+    return { success: !!message, message };
+  }
+
+  // Marcar múltiples mensajes como leídos
+  @Patch('mark-read')
+  async markMultipleAsRead(@Body() markReadDto: MarkReadDto) {
+    console.log(`✅ Marcando ${markReadDto.messageIds?.length || 0} mensajes como leídos por ${markReadDto.username}`);
+
+    if (markReadDto.messageIds && markReadDto.messageIds.length > 0) {
+      const messages = await this.messagesService.markMultipleAsRead(
+        markReadDto.messageIds,
+        markReadDto.username,
+      );
+      return { success: true, messagesUpdated: messages.length, messages };
+    }
+
+    return { success: false, message: 'No message IDs provided' };
+  }
+
+  // Marcar toda una conversación como leída
+  @Patch('mark-conversation-read')
+  async markConversationAsRead(
+    @Body('from') from: string,
+    @Body('to') to: string,
+  ) {
+    console.log(`✅ Marcando conversación de ${from} a ${to} como leída`);
+    const messages = await this.messagesService.markConversationAsRead(from, to);
+    return { success: true, messagesUpdated: messages.length, messages };
   }
 
   @Put(':id')

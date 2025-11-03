@@ -53,6 +53,9 @@ export class Message {
   @Column({ type: 'boolean', default: false })
   isRead: boolean;
 
+  @Column({ type: 'datetime', nullable: true })
+  readAt: Date; // Fecha y hora en que se leyó el mensaje
+
   @Column({ type: 'json', nullable: true })
   readBy: string[]; // Array de usuarios que han leído el mensaje
 

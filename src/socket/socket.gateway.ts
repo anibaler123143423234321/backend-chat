@@ -934,6 +934,76 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  // ==================== MENSAJES LEÍDOS ====================
+
+  @SubscribeMessage('markAsRead')
+  async handleMarkAsRead(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { messageId: number; username: string; from: string },
+  ) {
+    console.log(`✅ WS: markAsRead - Mensaje ${data.messageId} leído por ${data.username}`);
+
+    try {
+      // Marcar el mensaje como leído en la base de datos
+      const message = await this.messagesService.markAsRead(data.messageId, data.username);
+
+      if (message) {
+        // Notificar al remitente que su mensaje fue leído
+        const senderUser = this.users.get(data.from);
+        if (senderUser && senderUser.socket.connected) {
+          senderUser.socket.emit('messageRead', {
+            messageId: data.messageId,
+            readBy: data.username,
+            readAt: message.readAt,
+          });
+        }
+
+        // Confirmar al lector
+        client.emit('messageReadConfirmed', {
+          messageId: data.messageId,
+          readAt: message.readAt,
+        });
+      }
+    } catch (error) {
+      console.error('Error al marcar mensaje como leído:', error);
+      client.emit('error', { message: 'Error al marcar mensaje como leído' });
+    }
+  }
+
+  @SubscribeMessage('markConversationAsRead')
+  async handleMarkConversationAsRead(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { from: string; to: string },
+  ) {
+    console.log(`✅ WS: markConversationAsRead - Conversación de ${data.from} a ${data.to} marcada como leída`);
+
+    try {
+      // Marcar todos los mensajes de la conversación como leídos
+      const messages = await this.messagesService.markConversationAsRead(data.from, data.to);
+
+      if (messages.length > 0) {
+        // Notificar al remitente que sus mensajes fueron leídos
+        const senderUser = this.users.get(data.from);
+        if (senderUser && senderUser.socket.connected) {
+          senderUser.socket.emit('conversationRead', {
+            readBy: data.to,
+            messageIds: messages.map(m => m.id),
+            readAt: new Date(),
+          });
+        }
+
+        // Confirmar al lector
+        client.emit('conversationReadConfirmed', {
+          messagesUpdated: messages.length,
+          readAt: new Date(),
+        });
+      }
+    } catch (error) {
+      console.error('Error al marcar conversación como leída:', error);
+      client.emit('error', { message: 'Error al marcar conversación como leída' });
+    }
+  }
+
   // ==================== NOTIFICACIONES DE SALAS ====================
 
   /**

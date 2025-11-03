@@ -65,20 +65,68 @@ export class MessagesService {
     });
   }
 
-  async markAsRead(messageId: number, username: string): Promise<void> {
+  async markAsRead(messageId: number, username: string): Promise<Message | null> {
     const message = await this.messageRepository.findOne({
       where: { id: messageId },
     });
-    if (message) {
+
+    if (message && message.from !== username) {
+      // Solo marcar como leído si el usuario NO es el remitente
       if (!message.readBy) {
         message.readBy = [];
       }
       if (!message.readBy.includes(username)) {
         message.readBy.push(username);
+        message.isRead = true;
+        message.readAt = new Date();
+        await this.messageRepository.save(message);
+        return message;
       }
-      message.isRead = true;
-      await this.messageRepository.save(message);
     }
+    return null;
+  }
+
+  // Marcar múltiples mensajes como leídos
+  async markMultipleAsRead(messageIds: number[], username: string): Promise<Message[]> {
+    const updatedMessages: Message[] = [];
+
+    for (const messageId of messageIds) {
+      const message = await this.markAsRead(messageId, username);
+      if (message) {
+        updatedMessages.push(message);
+      }
+    }
+
+    return updatedMessages;
+  }
+
+  // Marcar todos los mensajes de una conversación como leídos
+  async markConversationAsRead(from: string, to: string): Promise<Message[]> {
+    const messages = await this.messageRepository.find({
+      where: {
+        from,
+        to,
+        isRead: false,
+        isDeleted: false,
+      },
+    });
+
+    const updatedMessages: Message[] = [];
+
+    for (const message of messages) {
+      if (!message.readBy) {
+        message.readBy = [];
+      }
+      if (!message.readBy.includes(to)) {
+        message.readBy.push(to);
+        message.isRead = true;
+        message.readAt = new Date();
+        await this.messageRepository.save(message);
+        updatedMessages.push(message);
+      }
+    }
+
+    return updatedMessages;
   }
 
   async deleteMessage(messageId: number, username: string): Promise<boolean> {
