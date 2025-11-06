@@ -6,6 +6,7 @@ import {
   Body,
   Param,
   Delete,
+  Patch,
   UseGuards,
   Request,
 } from '@nestjs/common';
@@ -92,5 +93,19 @@ export class TemporaryConversationsController {
   remove(@Param('id') id: string, @Request() req) {
     const userId = req.user?.id;
     return this.temporaryConversationsService.remove(+id, userId);
+  }
+
+  @Patch(':id/deactivate')
+  deactivateConversation(@Param('id') id: string, @Request() req) {
+    console.log('⏸️ PATCH /api/temporary-conversations/' + id + '/deactivate called');
+    const userId = req.user?.id || 1;
+    return this.temporaryConversationsService.deactivateConversation(parseInt(id), userId);
+  }
+
+  @Patch(':id/activate')
+  activateConversation(@Param('id') id: string, @Request() req) {
+    console.log('▶️ PATCH /api/temporary-conversations/' + id + '/activate called');
+    const userId = req.user?.id || 1;
+    return this.temporaryConversationsService.activateConversation(parseInt(id), userId);
   }
 }

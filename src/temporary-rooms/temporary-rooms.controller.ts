@@ -104,6 +104,13 @@ export class TemporaryRoomsController {
     return this.temporaryRoomsService.deactivateRoom(parseInt(id), userId);
   }
 
+  @Patch(':id/activate')
+  activateRoom(@Param('id') id: string, @Request() req) {
+    console.log('▶️ PATCH /api/temporary-rooms/' + id + '/activate called');
+    const userId = req.user?.id || 1; // Usar ID por defecto para pruebas
+    return this.temporaryRoomsService.activateRoom(parseInt(id), userId);
+  }
+
   @Patch(':id/update')
   updateRoom(
     @Param('id') id: string,

@@ -204,6 +204,40 @@ export class TemporaryConversationsService {
     await this.temporaryConversationRepository.save(conversation);
   }
 
+  async deactivateConversation(id: number, userId: number): Promise<TemporaryConversation> {
+    console.log('⏸️ Desactivando conversación:', id, 'por usuario:', userId);
+    const conversation = await this.temporaryConversationRepository.findOne({
+      where: { id, createdBy: userId },
+    });
+
+    if (!conversation) {
+      throw new NotFoundException('Conversación no encontrada');
+    }
+
+    conversation.isActive = false;
+    const updatedConversation = await this.temporaryConversationRepository.save(conversation);
+    console.log('✅ Conversación desactivada:', updatedConversation.name);
+
+    return updatedConversation;
+  }
+
+  async activateConversation(id: number, userId: number): Promise<TemporaryConversation> {
+    console.log('▶️ Activando conversación:', id, 'por usuario:', userId);
+    const conversation = await this.temporaryConversationRepository.findOne({
+      where: { id, createdBy: userId },
+    });
+
+    if (!conversation) {
+      throw new NotFoundException('Conversación no encontrada');
+    }
+
+    conversation.isActive = true;
+    const updatedConversation = await this.temporaryConversationRepository.save(conversation);
+    console.log('✅ Conversación activada:', updatedConversation.name);
+
+    return updatedConversation;
+  }
+
   private generateLinkId(): string {
     return randomBytes(8).toString('hex').toUpperCase();
   }

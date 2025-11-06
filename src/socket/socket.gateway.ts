@@ -120,6 +120,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
         picture: userData?.picture || null,
         sede: userData?.sede || null,
         sede_id: userData?.sede_id || null,
+        numeroAgente: userData?.numeroAgente || null,
       }));
 
       // Incluir información del usuario actual + usuarios de conversaciones asignadas
@@ -740,6 +741,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
       picture: userData?.picture || null,
       sede: userData?.sede || null,
       sede_id: userData?.sede_id || null,
+      numeroAgente: userData?.numeroAgente || null,
     }));
 
     // console.log('📋 Enviando lista de usuarios con datos completos:', userListWithData);
@@ -838,6 +840,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
         apellido: user?.userData?.apellido || null,
         sede: user?.userData?.sede || null,
         sede_id: user?.userData?.sede_id || null,
+        numeroAgente: user?.userData?.numeroAgente || null,
         isOnline: isOnline
       };
     });

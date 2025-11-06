@@ -302,6 +302,22 @@ export class TemporaryRoomsService {
     return updatedRoom;
   }
 
+  async activateRoom(id: number, userId: number): Promise<TemporaryRoom> {
+    console.log('▶️ Activando sala:', id, 'por usuario:', userId);
+    const room = await this.temporaryRoomRepository.findOne({
+      where: { id, createdBy: userId },
+    });
+    if (!room) {
+      throw new NotFoundException('Sala no encontrada');
+    }
+
+    room.isActive = true;
+    const updatedRoom = await this.temporaryRoomRepository.save(room);
+    console.log('✅ Sala activada:', updatedRoom.name);
+
+    return updatedRoom;
+  }
+
   async updateRoom(
     id: number,
     userId: number,
