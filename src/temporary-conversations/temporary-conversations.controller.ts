@@ -96,16 +96,22 @@ export class TemporaryConversationsController {
   }
 
   @Patch(':id/deactivate')
-  deactivateConversation(@Param('id') id: string, @Request() req) {
+  deactivateConversation(@Param('id') id: string, @Body() body: any, @Request() req) {
     console.log('⏸️ PATCH /api/temporary-conversations/' + id + '/deactivate called');
-    const userId = req.user?.id || 1;
-    return this.temporaryConversationsService.deactivateConversation(parseInt(id), userId);
+    const userId = req.user?.id || req.user?.sub || 1;
+    // Priorizar el rol del body (viene del localStorage) sobre el del token JWT
+    const userRole = body?.userRole || req.user?.role || 'ASESOR';
+    console.log('👤 Usuario ID:', userId, 'Rol del body:', body?.userRole, 'Rol del token:', req.user?.role, 'Rol final:', userRole);
+    return this.temporaryConversationsService.deactivateConversation(parseInt(id), userId, userRole);
   }
 
   @Patch(':id/activate')
-  activateConversation(@Param('id') id: string, @Request() req) {
+  activateConversation(@Param('id') id: string, @Body() body: any, @Request() req) {
     console.log('▶️ PATCH /api/temporary-conversations/' + id + '/activate called');
-    const userId = req.user?.id || 1;
-    return this.temporaryConversationsService.activateConversation(parseInt(id), userId);
+    const userId = req.user?.id || req.user?.sub || 1;
+    // Priorizar el rol del body (viene del localStorage) sobre el del token JWT
+    const userRole = body?.userRole || req.user?.role || 'ASESOR';
+    console.log('👤 Usuario ID:', userId, 'Rol del body:', body?.userRole, 'Rol del token:', req.user?.role, 'Rol final:', userRole);
+    return this.temporaryConversationsService.activateConversation(parseInt(id), userId, userRole);
   }
 }

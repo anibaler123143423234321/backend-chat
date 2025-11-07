@@ -99,6 +99,68 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.broadcastUserList(assignedConversations);
   }
 
+  @SubscribeMessage('requestUserListPage')
+  handleRequestUserListPage(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { page: number; pageSize: number },
+  ) {
+    console.log(`📄 WS: requestUserListPage - Página: ${data.page}, Tamaño: ${data.pageSize}`);
+
+    // Obtener el usuario que hace la petición
+    let requestingUser = null;
+    for (const [username, { socket, userData }] of this.users.entries()) {
+      if (socket.id === client.id) {
+        requestingUser = { username, userData };
+        break;
+      }
+    }
+
+    if (!requestingUser) {
+      console.log('❌ Usuario no encontrado');
+      return;
+    }
+
+    // Verificar que sea admin
+    const isAdmin =
+      requestingUser.userData?.role &&
+      requestingUser.userData.role.toString().toUpperCase().trim() === 'ADMIN';
+
+    if (!isAdmin) {
+      console.log('❌ Usuario no es admin');
+      return;
+    }
+
+    // Crear lista de usuarios con toda su información
+    const userListWithData = Array.from(this.users.entries()).map(([username, { userData }]) => ({
+      id: userData?.id || null,
+      username: username,
+      nombre: userData?.nombre || null,
+      apellido: userData?.apellido || null,
+      email: userData?.email || null,
+      role: userData?.role || 'USER',
+      picture: userData?.picture || null,
+      sede: userData?.sede || null,
+      sede_id: userData?.sede_id || null,
+      numeroAgente: userData?.numeroAgente || null,
+    }));
+
+    // Paginar
+    const page = data.page || 0;
+    const pageSize = data.pageSize || 10;
+    const start = page * pageSize;
+    const end = start + pageSize;
+    const paginatedUsers = userListWithData.slice(start, end);
+
+    // Enviar página solicitada
+    client.emit('userListPage', {
+      users: paginatedUsers,
+      page: page,
+      pageSize: pageSize,
+      totalUsers: userListWithData.length,
+      hasMore: end < userListWithData.length
+    });
+  }
+
   @SubscribeMessage('updateAssignedConversations')
   handleUpdateAssignedConversations(
     @ConnectedSocket() client: Socket,
@@ -183,6 +245,40 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
         otherUser: data.user1,
       });
     }
+  }
+
+  @SubscribeMessage('conversationUpdated')
+  handleConversationUpdated(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { participants: string[]; conversationName: string; conversationId: string },
+  ) {
+    console.log(`🔄 WS: conversationUpdated - ${data.conversationName} (ID: ${data.conversationId})`);
+
+    // Notificar a todos los participantes que la conversación fue actualizada
+    if (data.participants && Array.isArray(data.participants)) {
+      data.participants.forEach(participantName => {
+        const participantConnection = this.users.get(participantName);
+        if (participantConnection && participantConnection.socket.connected) {
+          participantConnection.socket.emit('conversationDataUpdated', {
+            conversationId: data.conversationId,
+            conversationName: data.conversationName,
+            message: `La conversación "${data.conversationName}" ha sido actualizada`,
+          });
+        }
+      });
+    }
+
+    // También notificar a todos los ADMIN
+    this.users.forEach(({ socket, userData }) => {
+      const role = userData?.role?.toString().toUpperCase().trim();
+      if (socket.connected && role === 'ADMIN') {
+        socket.emit('conversationDataUpdated', {
+          conversationId: data.conversationId,
+          conversationName: data.conversationName,
+          message: `La conversación "${data.conversationName}" ha sido actualizada`,
+        });
+      }
+    });
   }
 
   @SubscribeMessage('typing')
@@ -763,9 +859,18 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
         if (isAdmin) {
           // console.log(
-          //   `👑 Enviando lista completa a admin: ${userData.username || 'Usuario'}`,
+          //   `👑 Enviando lista paginada a admin: ${userData.username || 'Usuario'}`,
           // );
-          socket.emit('userList', { users: userListWithData });
+          // Enviar solo los primeros 10 usuarios (página 0)
+          const pageSize = 10;
+          const firstPage = userListWithData.slice(0, pageSize);
+          socket.emit('userList', {
+            users: firstPage,
+            page: 0,
+            pageSize: pageSize,
+            totalUsers: userListWithData.length,
+            hasMore: userListWithData.length > pageSize
+          });
         } else {
           // Para usuarios no admin, incluir su propia información + usuarios de conversaciones asignadas
           const usersToSend = [];
@@ -840,6 +945,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
         apellido: user?.userData?.apellido || null,
         sede: user?.userData?.sede || null,
         sede_id: user?.userData?.sede_id || null,
+        role: user?.userData?.role || null,
         numeroAgente: user?.userData?.numeroAgente || null,
         isOnline: isOnline
       };
@@ -1025,5 +1131,25 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
         });
       }
     });
+  }
+
+  /**
+   * Notificar a un usuario específico que fue agregado a una sala
+   */
+  notifyUserAddedToRoom(username: string, roomCode: string, roomName: string) {
+    console.log(`➕ Notificando a ${username} que fue agregado a la sala ${roomCode}`);
+
+    const userConnection = this.users.get(username);
+    if (userConnection && userConnection.socket.connected) {
+      console.log(`✅ Usuario ${username} está conectado, enviando notificación`);
+      userConnection.socket.emit('addedToRoom', {
+        roomCode,
+        roomName,
+        message: `Has sido agregado a la sala: ${roomName}`,
+      });
+    } else {
+      console.log(`❌ Usuario ${username} NO está conectado o no existe en el mapa de usuarios`);
+      console.log(`📋 Usuarios conectados:`, Array.from(this.users.keys()));
+    }
   }
 }

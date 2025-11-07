@@ -176,6 +176,11 @@ export class TemporaryRoomsService {
     // console.log('📜 Historial de usuarios:', room.members);
     await this.temporaryRoomRepository.save(room);
 
+    // Notificar al gateway para que envíe notificación al usuario
+    if (this.socketGateway) {
+      this.socketGateway.notifyUserAddedToRoom(username, room.roomCode, room.name);
+    }
+
     // console.log('✅ Usuario unido exitosamente a la sala');
     return room;
   }
@@ -348,24 +353,44 @@ export class TemporaryRoomsService {
   }
 
   async getCurrentUserRoom(userId: number): Promise<any> {
-    // console.log('🔍 Buscando sala actual del usuario:', userId);
+    console.log('🔍 Buscando sala actual del usuario ID:', userId);
 
     try {
-      // Buscar salas donde el usuario es miembro
-      const rooms = await this.temporaryRoomRepository
-        .createQueryBuilder('room')
-        .where('room.createdBy = :userId', { userId })
-        .andWhere('room.isActive = :isActive', { isActive: true })
-        .getMany();
-
-      if (rooms.length === 0) {
-        // console.log('❌ Usuario no está en ninguna sala');
+      // Primero obtener el username del usuario
+      const user = await this.userRepository.findOne({ where: { id: userId } });
+      if (!user) {
+        console.log('❌ Usuario no encontrado');
         return { inRoom: false, room: null };
       }
 
-      // Por ahora, devolver la primera sala activa
-      const currentRoom = rooms[0];
-      // console.log('✅ Usuario está en sala:', currentRoom.name);
+      const username = user.username;
+      console.log('👤 Username:', username);
+
+      // Buscar todas las salas activas
+      const allRooms = await this.temporaryRoomRepository.find({
+        where: { isActive: true },
+      });
+
+      console.log('🏠 Total de salas activas:', allRooms.length);
+
+      // Filtrar salas donde el usuario es miembro
+      const userRooms = allRooms.filter(room => {
+        const members = room.members || [];
+        const isMember = members.includes(username);
+        if (isMember) {
+          console.log(`✅ Usuario ${username} es miembro de sala: ${room.name} (${room.roomCode})`);
+        }
+        return isMember;
+      });
+
+      if (userRooms.length === 0) {
+        console.log('❌ Usuario no está en ninguna sala');
+        return { inRoom: false, room: null };
+      }
+
+      // Devolver la primera sala activa
+      const currentRoom = userRooms[0];
+      console.log('✅ Sala actual del usuario:', currentRoom.name);
 
       return {
         inRoom: true,
@@ -379,7 +404,7 @@ export class TemporaryRoomsService {
         },
       };
     } catch (error) {
-      // console.error('❌ Error de conexión a la base de datos:', error);
+      console.error('❌ Error de conexión a la base de datos:', error);
       // En caso de error de BD, devolver que no está en ninguna sala
       // para que la aplicación pueda continuar funcionando
       return {
