@@ -7,6 +7,7 @@ import {
   Delete,
   Patch,
   Request,
+  Query,
 } from '@nestjs/common';
 import {
   TemporaryRoomsService,
@@ -55,10 +56,10 @@ export class TemporaryRoomsController {
   }
 
   @Get('user/current-room')
-  getCurrentUserRoom(@Request() req) {
-    // console.log('🔍 GET /api/temporary-rooms/user/current-room called');
-    const userId = req.user?.id || 1; // Usar ID por defecto para pruebas
-    return this.temporaryRoomsService.getCurrentUserRoom(userId);
+  getCurrentUserRoom(@Request() req, @Query('username') username?: string) {
+    // Usar username del query param (displayName desde localStorage)
+    console.log('🔍 GET /api/temporary-rooms/user/current-room - username:', username);
+    return this.temporaryRoomsService.getCurrentUserRoomByUsername(username);
   }
 
   @Get('code/:roomCode')
