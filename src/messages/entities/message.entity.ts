@@ -91,6 +91,9 @@ export class Message {
   @Column({ type: 'int', default: 0 })
   threadCount: number; // Cantidad de respuestas en el hilo
 
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  lastReplyFrom: string; // Nombre del último usuario que respondió en el hilo
+
   // Campos para reacciones a mensajes
   @Column({ type: 'json', nullable: true })
   reactions: { emoji: string; username: string; timestamp: Date }[]; // Array de reacciones

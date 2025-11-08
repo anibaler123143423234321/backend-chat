@@ -411,7 +411,21 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
       console.log(`👥 Usuarios conectados: ${connectedUsers.join(', ')}`);
       console.log(`🔍 Buscando destinatario: ${recipientUsername}`);
 
-      const recipient = this.users.get(recipientUsername);
+      // 🔥 Búsqueda case-insensitive del destinatario
+      let recipient = this.users.get(recipientUsername);
+
+      // Si no se encuentra con el nombre exacto, buscar case-insensitive
+      if (!recipient) {
+        const recipientNormalized = recipientUsername?.toLowerCase().trim();
+        const foundUsername = Array.from(this.users.keys()).find(
+          key => key?.toLowerCase().trim() === recipientNormalized
+        );
+        if (foundUsername) {
+          recipient = this.users.get(foundUsername);
+          console.log(`✅ Usuario encontrado con búsqueda case-insensitive: ${foundUsername}`);
+        }
+      }
+
       if (recipient && recipient.socket.connected) {
         console.log(`✅ Enviando mensaje a ${recipientUsername} (socket conectado)`);
         recipient.socket.emit('message', {
@@ -1111,14 +1125,30 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const messages = await this.messagesService.markConversationAsRead(data.from, data.to);
 
       if (messages.length > 0) {
+        // 🔥 Búsqueda case-insensitive del remitente
+        let senderUser = this.users.get(data.from);
+
+        if (!senderUser) {
+          const senderNormalized = data.from?.toLowerCase().trim();
+          const foundUsername = Array.from(this.users.keys()).find(
+            key => key?.toLowerCase().trim() === senderNormalized
+          );
+          if (foundUsername) {
+            senderUser = this.users.get(foundUsername);
+            console.log(`✅ Remitente encontrado con búsqueda case-insensitive: ${foundUsername}`);
+          }
+        }
+
         // Notificar al remitente que sus mensajes fueron leídos
-        const senderUser = this.users.get(data.from);
         if (senderUser && senderUser.socket.connected) {
+          console.log(`📨 Notificando a ${data.from} que sus mensajes fueron leídos por ${data.to}`);
           senderUser.socket.emit('conversationRead', {
             readBy: data.to,
             messageIds: messages.map(m => m.id),
             readAt: new Date(),
           });
+        } else {
+          console.log(`❌ No se pudo notificar a ${data.from} (usuario no conectado o no encontrado)`);
         }
 
         // Confirmar al lector
@@ -1220,7 +1250,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     console.log(`🔢 WS: threadCountUpdated - MessageID: ${data.messageId}, LastReply: ${data.lastReplyFrom}`);
 
     try {
-      const { messageId, lastReplyFrom, isGroup, roomCode, to } = data;
+      const { messageId, lastReplyFrom, isGroup, roomCode, to, from } = data;
 
       if (isGroup && roomCode) {
         // Actualización en grupo/sala - enviar a todos los miembros de la sala
@@ -1242,6 +1272,15 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
         const recipientUser = this.users.get(to);
         if (recipientUser && recipientUser.socket.connected) {
           recipientUser.socket.emit('threadCountUpdated', {
+            messageId,
+            lastReplyFrom
+          });
+        }
+
+        // 🔥 TAMBIÉN enviar al remitente para que vea el contador actualizado
+        const senderUser = this.users.get(from);
+        if (senderUser && senderUser.socket.connected && from !== to) {
+          senderUser.socket.emit('threadCountUpdated', {
             messageId,
             lastReplyFrom
           });

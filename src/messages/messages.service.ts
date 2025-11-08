@@ -36,12 +36,23 @@ export class MessagesService {
       skip: offset,
     });
 
-    // Calcular el threadCount real para cada mensaje
+    // Calcular el threadCount real para cada mensaje y el último usuario que respondió
     for (const message of messages) {
       const threadCount = await this.messageRepository.count({
         where: { threadId: message.id, isDeleted: false },
       });
       message.threadCount = threadCount;
+
+      // Obtener el último mensaje del hilo (si existe)
+      if (threadCount > 0) {
+        const lastThreadMessage = await this.messageRepository.findOne({
+          where: { threadId: message.id, isDeleted: false },
+          order: { sentAt: 'DESC' },
+        });
+        if (lastThreadMessage) {
+          message.lastReplyFrom = lastThreadMessage.from;
+        }
+      }
     }
 
     // Revertir el orden para mostrar cronológicamente (más antiguos arriba, más recientes abajo)
@@ -64,12 +75,23 @@ export class MessagesService {
       skip: offset,
     });
 
-    // Calcular el threadCount real para cada mensaje
+    // Calcular el threadCount real para cada mensaje y el último usuario que respondió
     for (const message of messages) {
       const threadCount = await this.messageRepository.count({
         where: { threadId: message.id, isDeleted: false },
       });
       message.threadCount = threadCount;
+
+      // Obtener el último mensaje del hilo (si existe)
+      if (threadCount > 0) {
+        const lastThreadMessage = await this.messageRepository.findOne({
+          where: { threadId: message.id, isDeleted: false },
+          order: { sentAt: 'DESC' },
+        });
+        if (lastThreadMessage) {
+          message.lastReplyFrom = lastThreadMessage.from;
+        }
+      }
     }
 
     return messages;

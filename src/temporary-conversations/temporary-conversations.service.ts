@@ -39,11 +39,14 @@ export class TemporaryConversationsService {
     return await this.temporaryConversationRepository.save(conversation);
   }
 
-  async findAll(): Promise<any[]> {
+  async findAll(username?: string): Promise<any[]> {
     const allConversations = await this.temporaryConversationRepository.find({
       where: { isActive: true },
       order: { createdAt: 'DESC' },
     });
+
+    // Normalizar username para comparación case-insensitive
+    const usernameNormalized = username?.toLowerCase().trim();
 
     // Enriquecer cada conversación con el último mensaje y contador de no leídos
     const enrichedConversations = await Promise.all(
@@ -91,9 +94,21 @@ export class TemporaryConversationsService {
               }
             }
 
+            // 🔥 Si es un archivo multimedia sin texto, mostrar el tipo de archivo
+            let messageText = messages[0].message;
+            if (!messageText && messages[0].mediaType) {
+              const mediaTypeMap = {
+                'image': '📷 Imagen',
+                'video': '🎥 Video',
+                'audio': '🎵 Audio',
+                'document': '📄 Documento'
+              };
+              messageText = mediaTypeMap[messages[0].mediaType] || '📎 Archivo';
+            }
+
             lastMessage = {
               id: messages[0].id,
-              text: messages[0].message,
+              text: messageText,
               from: messages[0].from,
               to: messages[0].to,
               sentAt: messages[0].sentAt,
@@ -103,12 +118,36 @@ export class TemporaryConversationsService {
             };
           }
 
-          // Contar mensajes no leídos totales en la conversación
-          const allMessages = await this.messageRepository.find({
-            where: messageConditions,
-          });
+          // 🔥 NUEVO: Contar solo mensajes no leídos dirigidos al usuario actual
+          if (username && usernameNormalized) {
+            // Filtrar solo mensajes dirigidos al usuario actual
+            const filteredConditions = messageConditions.filter(
+              cond => cond.to?.toLowerCase().trim() === usernameNormalized
+            );
 
-          unreadCount = allMessages.filter(msg => !msg.isRead).length;
+            const allMessages = await this.messageRepository.find({
+              where: filteredConditions,
+            });
+
+            // Filtrar mensajes no leídos (case-insensitive en readBy)
+            unreadCount = allMessages.filter(msg => {
+              if (!msg.readBy || msg.readBy.length === 0) {
+                return true; // No ha sido leído por nadie
+              }
+              // Verificar si el usuario actual está en readBy (case-insensitive)
+              const isReadByUser = msg.readBy.some(reader =>
+                reader?.toLowerCase().trim() === usernameNormalized
+              );
+              return !isReadByUser;
+            }).length;
+          } else {
+            // Si no hay username, contar todos los mensajes no leídos (comportamiento anterior)
+            const allMessages = await this.messageRepository.find({
+              where: messageConditions,
+            });
+
+            unreadCount = allMessages.filter(msg => !msg.isRead).length;
+          }
         }
 
         return {
@@ -219,21 +258,32 @@ export class TemporaryConversationsService {
           }
 
           // Contar mensajes no leídos (mensajes enviados por otros usuarios que el usuario actual no ha leído)
-          const unreadMessages = await this.messageRepository.count({
-            where: messageConditions.filter(cond =>
-              cond.to === username && // Mensajes dirigidos al usuario actual
-              cond.isDeleted === false
-            ),
-          });
+          // 🔥 Filtrar solo mensajes dirigidos al usuario actual (case-insensitive)
+          const usernameNormalized = username?.toLowerCase().trim();
+          const filteredConditions = messageConditions.filter(cond =>
+            cond.to?.toLowerCase().trim() === usernameNormalized
+          );
 
           // Filtrar solo los mensajes que no han sido leídos por el usuario actual
           const allMessages = await this.messageRepository.find({
-            where: messageConditions.filter(cond => cond.to === username),
+            where: filteredConditions,
           });
 
-          unreadCount = allMessages.filter(msg =>
-            !msg.readBy || !msg.readBy.includes(username)
-          ).length;
+          console.log(`📊 Mensajes dirigidos a ${username}:`, allMessages.length);
+
+          // 🔥 Filtrar mensajes no leídos (case-insensitive en readBy)
+          unreadCount = allMessages.filter(msg => {
+            if (!msg.readBy || msg.readBy.length === 0) {
+              return true; // No ha sido leído por nadie
+            }
+            // Verificar si el usuario actual está en readBy (case-insensitive)
+            const isReadByUser = msg.readBy.some(reader =>
+              reader?.toLowerCase().trim() === usernameNormalized
+            );
+            return !isReadByUser;
+          }).length;
+
+          console.log(`   - Mensajes no leídos:`, unreadCount);
         }
 
         return {

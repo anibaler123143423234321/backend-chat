@@ -9,6 +9,7 @@ import {
   Patch,
   UseGuards,
   Request,
+  Query,
 } from '@nestjs/common';
 import { TemporaryConversationsService } from './temporary-conversations.service';
 import { CreateTemporaryConversationDto } from './dto/create-temporary-conversation.dto';
@@ -28,8 +29,8 @@ export class TemporaryConversationsController {
   }
 
   @Get('all')
-  findAll() {
-    return this.temporaryConversationsService.findAll();
+  findAll(@Query('username') username?: string) {
+    return this.temporaryConversationsService.findAll(username);
   }
 
   @Get('my-conversations')
