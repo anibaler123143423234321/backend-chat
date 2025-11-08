@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like } from 'typeorm';
+import { Repository, Like, IsNull } from 'typeorm';
 import { Message } from './entities/message.entity';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { TemporaryRoom } from '../temporary-rooms/entities/temporary-room.entity';
@@ -36,6 +36,14 @@ export class MessagesService {
       skip: offset,
     });
 
+    // Calcular el threadCount real para cada mensaje
+    for (const message of messages) {
+      const threadCount = await this.messageRepository.count({
+        where: { threadId: message.id, isDeleted: false },
+      });
+      message.threadCount = threadCount;
+    }
+
     // Revertir el orden para mostrar cronológicamente (más antiguos arriba, más recientes abajo)
     return messages.reverse();
   }
@@ -46,15 +54,25 @@ export class MessagesService {
     limit: number = 50,
     offset: number = 0,
   ): Promise<Message[]> {
-    return await this.messageRepository.find({
+    const messages = await this.messageRepository.find({
       where: [
-        { from, to, isDeleted: false },
-        { from: to, to: from, isDeleted: false },
+        { from, to, isDeleted: false, threadId: IsNull() },
+        { from: to, to: from, isDeleted: false, threadId: IsNull() },
       ],
       order: { sentAt: 'ASC' },
       take: limit,
       skip: offset,
     });
+
+    // Calcular el threadCount real para cada mensaje
+    for (const message of messages) {
+      const threadCount = await this.messageRepository.count({
+        where: { threadId: message.id, isDeleted: false },
+      });
+      message.threadCount = threadCount;
+    }
+
+    return messages;
   }
 
   async findRecentMessages(limit: number = 20): Promise<Message[]> {
@@ -307,5 +325,31 @@ export class MessagesService {
     );
 
     return conversations;
+  }
+
+  // Obtener mensajes de un hilo específico
+  async findThreadMessages(
+    threadId: number,
+    limit: number = 50,
+    offset: number = 0,
+  ): Promise<Message[]> {
+    return await this.messageRepository.find({
+      where: { threadId, isDeleted: false },
+      order: { sentAt: 'ASC' },
+      take: limit,
+      skip: offset,
+    });
+  }
+
+  // Incrementar contador de respuestas en hilo
+  async incrementThreadCount(messageId: number): Promise<void> {
+    const message = await this.messageRepository.findOne({
+      where: { id: messageId },
+    });
+
+    if (message) {
+      message.threadCount = (message.threadCount || 0) + 1;
+      await this.messageRepository.save(message);
+    }
   }
 }

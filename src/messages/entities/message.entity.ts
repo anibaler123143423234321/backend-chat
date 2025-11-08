@@ -84,6 +84,13 @@ export class Message {
   @Column({ type: 'text', nullable: true })
   replyToText: string; // Texto del mensaje original (preview)
 
+  // Campos para hilos de conversación
+  @Column({ type: 'int', nullable: true })
+  threadId: number; // ID del mensaje principal del hilo (null si es mensaje principal)
+
+  @Column({ type: 'int', default: 0 })
+  threadCount: number; // Cantidad de respuestas en el hilo
+
   // Campos para reacciones a mensajes
   @Column({ type: 'json', nullable: true })
   reactions: { emoji: string; username: string; timestamp: Date }[]; // Array de reacciones

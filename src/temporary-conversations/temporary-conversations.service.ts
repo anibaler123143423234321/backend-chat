@@ -4,7 +4,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, IsNull } from 'typeorm';
 import { TemporaryConversation } from './entities/temporary-conversation.entity';
 import { CreateTemporaryConversationDto } from './dto/create-temporary-conversation.dto';
 import { Message } from '../messages/entities/message.entity';
@@ -60,8 +60,8 @@ export class TemporaryConversationsService {
           for (let i = 0; i < participants.length; i++) {
             for (let j = i + 1; j < participants.length; j++) {
               messageConditions.push(
-                { from: participants[i], to: participants[j], isDeleted: false },
-                { from: participants[j], to: participants[i], isDeleted: false }
+                { from: participants[i], to: participants[j], isDeleted: false, threadId: IsNull() },
+                { from: participants[j], to: participants[i], isDeleted: false, threadId: IsNull() }
               );
             }
           }
@@ -74,6 +74,23 @@ export class TemporaryConversationsService {
           });
 
           if (messages.length > 0) {
+            // Calcular el threadCount del último mensaje
+            const threadCount = await this.messageRepository.count({
+              where: { threadId: messages[0].id, isDeleted: false },
+            });
+
+            // Obtener el último mensaje del hilo (si existe)
+            let lastReplyFrom = null;
+            if (threadCount > 0) {
+              const lastThreadMessage = await this.messageRepository.findOne({
+                where: { threadId: messages[0].id, isDeleted: false },
+                order: { sentAt: 'DESC' },
+              });
+              if (lastThreadMessage) {
+                lastReplyFrom = lastThreadMessage.from;
+              }
+            }
+
             lastMessage = {
               id: messages[0].id,
               text: messages[0].message,
@@ -81,6 +98,8 @@ export class TemporaryConversationsService {
               to: messages[0].to,
               sentAt: messages[0].sentAt,
               mediaType: messages[0].mediaType,
+              threadCount,
+              lastReplyFrom,
             };
           }
 
@@ -98,6 +117,8 @@ export class TemporaryConversationsService {
           lastMessageFrom: lastMessage ? lastMessage.from : null,
           lastMessageTime: lastMessage ? lastMessage.sentAt : null,
           lastMessageMediaType: lastMessage ? lastMessage.mediaType : null,
+          lastMessageThreadCount: lastMessage ? lastMessage.threadCount : 0,
+          lastMessageLastReplyFrom: lastMessage ? lastMessage.lastReplyFrom : null,
           unreadCount,
         };
       })
@@ -154,8 +175,8 @@ export class TemporaryConversationsService {
           for (let i = 0; i < participants.length; i++) {
             for (let j = i + 1; j < participants.length; j++) {
               messageConditions.push(
-                { from: participants[i], to: participants[j], isDeleted: false },
-                { from: participants[j], to: participants[i], isDeleted: false }
+                { from: participants[i], to: participants[j], isDeleted: false, threadId: IsNull() },
+                { from: participants[j], to: participants[i], isDeleted: false, threadId: IsNull() }
               );
             }
           }
@@ -168,6 +189,23 @@ export class TemporaryConversationsService {
           });
 
           if (messages.length > 0) {
+            // Calcular el threadCount del último mensaje
+            const threadCount = await this.messageRepository.count({
+              where: { threadId: messages[0].id, isDeleted: false },
+            });
+
+            // Obtener el último mensaje del hilo (si existe)
+            let lastReplyFrom = null;
+            if (threadCount > 0) {
+              const lastThreadMessage = await this.messageRepository.findOne({
+                where: { threadId: messages[0].id, isDeleted: false },
+                order: { sentAt: 'DESC' },
+              });
+              if (lastThreadMessage) {
+                lastReplyFrom = lastThreadMessage.from;
+              }
+            }
+
             lastMessage = {
               id: messages[0].id,
               text: messages[0].message,
@@ -175,6 +213,8 @@ export class TemporaryConversationsService {
               to: messages[0].to,
               sentAt: messages[0].sentAt,
               mediaType: messages[0].mediaType,
+              threadCount,
+              lastReplyFrom,
             };
           }
 
@@ -202,6 +242,8 @@ export class TemporaryConversationsService {
           lastMessageFrom: lastMessage ? lastMessage.from : null,
           lastMessageTime: lastMessage ? lastMessage.sentAt : null,
           lastMessageMediaType: lastMessage ? lastMessage.mediaType : null,
+          lastMessageThreadCount: lastMessage ? lastMessage.threadCount : 0,
+          lastMessageLastReplyFrom: lastMessage ? lastMessage.lastReplyFrom : null,
           unreadCount,
         };
       })

@@ -143,4 +143,24 @@ export class MessagesController {
       parseInt(limit),
     );
   }
+
+  @Get('thread/:threadId')
+  async findThreadMessages(
+    @Param('threadId') threadId: string,
+    @Query('limit') limit: string = '50',
+    @Query('offset') offset: string = '0',
+  ) {
+    console.log(`🧵 Obteniendo mensajes del hilo: ${threadId}`);
+    return await this.messagesService.findThreadMessages(
+      parseInt(threadId),
+      parseInt(limit),
+      parseInt(offset),
+    );
+  }
+
+  @Patch(':id/increment-thread')
+  async incrementThreadCount(@Param('id') id: string) {
+    await this.messagesService.incrementThreadCount(parseInt(id));
+    return { success: true };
+  }
 }

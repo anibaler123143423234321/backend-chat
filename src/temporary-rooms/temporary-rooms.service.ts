@@ -101,6 +101,11 @@ export class TemporaryRoomsService {
       isActive: savedRoom.isActive,
     };
 
+    // 🔥 Notificar a todos los ADMIN y JEFEPISO que se creó una nueva sala
+    if (this.socketGateway) {
+      this.socketGateway.broadcastRoomCreated(savedRoom);
+    }
+
     // console.log('Resultado final a devolver:', result);
     return result;
   }

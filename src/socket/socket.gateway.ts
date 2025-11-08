@@ -1167,6 +1167,94 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  // ==================== MENSAJES DE HILO ====================
+
+  @SubscribeMessage('threadMessage')
+  async handleThreadMessage(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: any,
+  ) {
+    console.log(`🧵 WS: threadMessage - ThreadID: ${data.threadId}, De: ${data.from}, Para: ${data.to}`);
+
+    try {
+      const { threadId, from, to, isGroup, roomCode } = data;
+
+      if (isGroup && roomCode) {
+        // Mensaje de hilo en grupo/sala - enviar a todos los miembros de la sala
+        const roomUsers = this.roomUsers.get(roomCode);
+        if (roomUsers) {
+          roomUsers.forEach((member) => {
+            const memberUser = this.users.get(member);
+            if (memberUser && memberUser.socket.connected) {
+              memberUser.socket.emit('threadMessage', data);
+            }
+          });
+        }
+      } else {
+        // Mensaje de hilo en conversación 1-a-1
+        // Enviar al remitente (para sincronizar otras pestañas/dispositivos)
+        const senderUser = this.users.get(from);
+        if (senderUser && senderUser.socket.connected) {
+          senderUser.socket.emit('threadMessage', data);
+        }
+
+        // Enviar al destinatario
+        const recipientUser = this.users.get(to);
+        if (recipientUser && recipientUser.socket.connected) {
+          recipientUser.socket.emit('threadMessage', data);
+        }
+      }
+
+      console.log(`✅ Mensaje de hilo enviado correctamente`);
+    } catch (error) {
+      console.error('❌ Error al enviar mensaje de hilo:', error);
+      client.emit('error', { message: 'Error al enviar mensaje de hilo' });
+    }
+  }
+
+  @SubscribeMessage('threadCountUpdated')
+  async handleThreadCountUpdated(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: any,
+  ) {
+    console.log(`🔢 WS: threadCountUpdated - MessageID: ${data.messageId}, LastReply: ${data.lastReplyFrom}`);
+
+    try {
+      const { messageId, lastReplyFrom, isGroup, roomCode, to } = data;
+
+      if (isGroup && roomCode) {
+        // Actualización en grupo/sala - enviar a todos los miembros de la sala
+        const roomUsers = this.roomUsers.get(roomCode);
+        if (roomUsers) {
+          roomUsers.forEach((member) => {
+            const memberUser = this.users.get(member);
+            if (memberUser && memberUser.socket.connected) {
+              memberUser.socket.emit('threadCountUpdated', {
+                messageId,
+                lastReplyFrom
+              });
+            }
+          });
+        }
+      } else {
+        // Actualización en conversación 1-a-1
+        // Enviar al destinatario
+        const recipientUser = this.users.get(to);
+        if (recipientUser && recipientUser.socket.connected) {
+          recipientUser.socket.emit('threadCountUpdated', {
+            messageId,
+            lastReplyFrom
+          });
+        }
+      }
+
+      console.log(`✅ Contador de hilo actualizado correctamente`);
+    } catch (error) {
+      console.error('❌ Error al actualizar contador de hilo:', error);
+      client.emit('error', { message: 'Error al actualizar contador de hilo' });
+    }
+  }
+
   // ==================== REACCIONES A MENSAJES ====================
 
   @SubscribeMessage('toggleReaction')
@@ -1226,6 +1314,29 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   // ==================== NOTIFICACIONES DE SALAS ====================
+
+  /**
+   * Notificar a todos los usuarios ADMIN y JEFEPISO que se creó una nueva sala
+   */
+  broadcastRoomCreated(room: any) {
+    console.log(`✨ Broadcasting room created: ${room.roomCode} (ID: ${room.id})`);
+
+    // Enviar notificación a todos los ADMIN y JEFEPISO
+    this.users.forEach(({ socket, userData }) => {
+      const role = userData?.role?.toString().toUpperCase().trim();
+      if (socket.connected && (role === 'ADMIN' || role === 'JEFEPISO')) {
+        socket.emit('roomCreated', {
+          id: room.id,
+          name: room.name,
+          roomCode: room.roomCode,
+          maxCapacity: room.maxCapacity,
+          currentMembers: room.currentMembers,
+          createdAt: room.createdAt,
+          isActive: room.isActive,
+        });
+      }
+    });
+  }
 
   /**
    * Notificar a todos los usuarios ADMIN y JEFEPISO que una sala fue eliminada/desactivada

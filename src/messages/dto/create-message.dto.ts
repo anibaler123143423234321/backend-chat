@@ -73,4 +73,12 @@ export class CreateMessageDto {
   @IsString()
   @IsOptional()
   replyToText?: string;
+
+  @IsNumber()
+  @IsOptional()
+  threadId?: number;
+
+  @IsNumber()
+  @IsOptional()
+  threadCount?: number;
 }
