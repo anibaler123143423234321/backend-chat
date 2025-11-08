@@ -129,6 +129,51 @@ export class MessagesService {
     return updatedMessages;
   }
 
+  // Agregar o quitar reacción a un mensaje
+  async toggleReaction(
+    messageId: number,
+    username: string,
+    emoji: string,
+  ): Promise<Message | null> {
+    const message = await this.messageRepository.findOne({
+      where: { id: messageId },
+    });
+
+    if (!message) {
+      return null;
+    }
+
+    // Inicializar reactions si no existe
+    if (!message.reactions) {
+      message.reactions = [];
+    }
+
+    // Buscar si el usuario ya reaccionó con este emoji
+    const existingReactionIndex = message.reactions.findIndex(
+      (r) => r.username === username && r.emoji === emoji,
+    );
+
+    if (existingReactionIndex !== -1) {
+      // Si ya existe, quitarla
+      message.reactions.splice(existingReactionIndex, 1);
+    } else {
+      // Quitar cualquier otra reacción del usuario (solo una reacción por usuario)
+      message.reactions = message.reactions.filter(
+        (r) => r.username !== username,
+      );
+
+      // Agregar la nueva reacción
+      message.reactions.push({
+        emoji,
+        username,
+        timestamp: new Date(),
+      });
+    }
+
+    await this.messageRepository.save(message);
+    return message;
+  }
+
   async deleteMessage(messageId: number, username: string): Promise<boolean> {
     const message = await this.messageRepository.findOne({
       where: { id: messageId, from: username },

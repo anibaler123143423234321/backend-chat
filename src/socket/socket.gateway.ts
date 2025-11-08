@@ -284,16 +284,36 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('typing')
   handleTyping(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { from: string; to: string; isTyping: boolean },
+    @MessageBody() data: { from: string; to: string; isTyping: boolean; roomCode?: string },
   ) {
-    // Buscar la conexión del destinatario
-    const recipientConnection = this.users.get(data.to);
+    // Si es un mensaje de sala (roomCode presente)
+    if (data.roomCode) {
+      const roomUsers = this.roomUsers.get(data.roomCode);
+      if (roomUsers) {
+        // Emitir a todos los usuarios de la sala excepto al que está escribiendo
+        roomUsers.forEach((member) => {
+          if (member !== data.from) {
+            const memberUser = this.users.get(member);
+            if (memberUser && memberUser.socket.connected) {
+              memberUser.socket.emit('roomTyping', {
+                from: data.from,
+                roomCode: data.roomCode,
+                isTyping: data.isTyping,
+              });
+            }
+          }
+        });
+      }
+    } else {
+      // Mensaje directo (1 a 1)
+      const recipientConnection = this.users.get(data.to);
 
-    if (recipientConnection && recipientConnection.socket.connected) {
-      recipientConnection.socket.emit('userTyping', {
-        from: data.from,
-        isTyping: data.isTyping,
-      });
+      if (recipientConnection && recipientConnection.socket.connected) {
+        recipientConnection.socket.emit('userTyping', {
+          from: data.from,
+          isTyping: data.isTyping,
+        });
+      }
     }
   }
 
@@ -1113,10 +1133,103 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  @SubscribeMessage('markRoomMessageAsRead')
+  async handleMarkRoomMessageAsRead(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { messageId: number; username: string; roomCode: string },
+  ) {
+    console.log(`✅ WS: markRoomMessageAsRead - Mensaje ${data.messageId} en sala ${data.roomCode} leído por ${data.username}`);
+
+    try {
+      // Marcar el mensaje como leído en la base de datos
+      const message = await this.messagesService.markAsRead(data.messageId, data.username);
+
+      if (message) {
+        // Notificar a todos los usuarios de la sala que el mensaje fue leído
+        const roomUsers = this.roomUsers.get(data.roomCode);
+        if (roomUsers) {
+          roomUsers.forEach((member) => {
+            const memberUser = this.users.get(member);
+            if (memberUser && memberUser.socket.connected) {
+              memberUser.socket.emit('roomMessageRead', {
+                messageId: data.messageId,
+                readBy: message.readBy, // Enviar el array completo de lectores
+                readAt: message.readAt,
+                roomCode: data.roomCode,
+              });
+            }
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error al marcar mensaje de sala como leído:', error);
+      client.emit('error', { message: 'Error al marcar mensaje de sala como leído' });
+    }
+  }
+
+  // ==================== REACCIONES A MENSAJES ====================
+
+  @SubscribeMessage('toggleReaction')
+  async handleToggleReaction(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { messageId: number; username: string; emoji: string; roomCode?: string; to?: string },
+  ) {
+    console.log(`😊 WS: toggleReaction - Mensaje ${data.messageId}, Usuario: ${data.username}, Emoji: ${data.emoji}`);
+
+    try {
+      const message = await this.messagesService.toggleReaction(
+        data.messageId,
+        data.username,
+        data.emoji,
+      );
+
+      if (message) {
+        // Emitir la actualización a todos los usuarios relevantes
+        if (data.roomCode) {
+          // Si es un mensaje de sala, notificar a todos los miembros
+          const roomUsers = this.roomUsers.get(data.roomCode);
+          if (roomUsers) {
+            roomUsers.forEach((member) => {
+              const memberUser = this.users.get(member);
+              if (memberUser && memberUser.socket.connected) {
+                memberUser.socket.emit('reactionUpdated', {
+                  messageId: data.messageId,
+                  reactions: message.reactions,
+                  roomCode: data.roomCode,
+                });
+              }
+            });
+          }
+        } else if (data.to) {
+          // Si es un mensaje 1-a-1, notificar al otro usuario
+          const otherUser = this.users.get(data.to);
+          if (otherUser && otherUser.socket.connected) {
+            otherUser.socket.emit('reactionUpdated', {
+              messageId: data.messageId,
+              reactions: message.reactions,
+              to: data.to,
+            });
+          }
+
+          // También notificar al usuario que reaccionó
+          client.emit('reactionUpdated', {
+            messageId: data.messageId,
+            reactions: message.reactions,
+            to: data.to,
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error al alternar reacción:', error);
+      client.emit('error', { message: 'Error al alternar reacción' });
+    }
+  }
+
   // ==================== NOTIFICACIONES DE SALAS ====================
 
   /**
    * Notificar a todos los usuarios ADMIN y JEFEPISO que una sala fue eliminada/desactivada
+   * También notifica a todos los miembros de la sala
    */
   broadcastRoomDeleted(roomCode: string, roomId: number) {
     console.log(`🗑️ Broadcasting room deleted: ${roomCode} (ID: ${roomId})`);
@@ -1131,6 +1244,27 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
         });
       }
     });
+
+    // 🔥 NUEVO: Notificar a todos los miembros de la sala que fue desactivada
+    const roomMembers = this.roomUsers.get(roomCode);
+    if (roomMembers) {
+      console.log(`📢 Notificando a ${roomMembers.size} miembros de la sala ${roomCode}`);
+
+      roomMembers.forEach((username) => {
+        const userConnection = this.users.get(username);
+        if (userConnection && userConnection.socket.connected) {
+          console.log(`✅ Notificando a ${username} que la sala fue desactivada`);
+          userConnection.socket.emit('roomDeactivated', {
+            roomCode,
+            roomId,
+            message: 'La sala ha sido desactivada por el administrador',
+          });
+        }
+      });
+
+      // Limpiar el mapa de usuarios de la sala
+      this.roomUsers.delete(roomCode);
+    }
   }
 
   /**
@@ -1151,5 +1285,41 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
       console.log(`❌ Usuario ${username} NO está conectado o no existe en el mapa de usuarios`);
       console.log(`📋 Usuarios conectados:`, Array.from(this.users.keys()));
     }
+  }
+
+  /**
+   * Notificar cuando un usuario es eliminado de una sala
+   */
+  async handleUserRemovedFromRoom(roomCode: string, username: string) {
+    console.log(`🚫 Usuario ${username} eliminado de la sala ${roomCode}`);
+
+    // Remover el usuario del mapa de usuarios de la sala
+    const roomUserSet = this.roomUsers.get(roomCode);
+    if (roomUserSet) {
+      roomUserSet.delete(username);
+      if (roomUserSet.size === 0) {
+        this.roomUsers.delete(roomCode);
+      }
+    }
+
+    // Notificar al usuario eliminado
+    const userConnection = this.users.get(username);
+    if (userConnection && userConnection.socket.connected) {
+      userConnection.socket.emit('removedFromRoom', {
+        roomCode,
+        message: 'Has sido eliminado de la sala',
+      });
+
+      // Limpiar la sala actual del usuario
+      if (userConnection.userData) {
+        userConnection.userData.currentRoom = undefined;
+      }
+    }
+
+    // Notificar a todos los usuarios de la sala sobre la actualización
+    await this.broadcastRoomUsers(roomCode);
+
+    // Reenviar lista general de usuarios
+    this.broadcastUserList();
   }
 }

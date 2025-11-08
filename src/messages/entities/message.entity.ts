@@ -84,6 +84,10 @@ export class Message {
   @Column({ type: 'text', nullable: true })
   replyToText: string; // Texto del mensaje original (preview)
 
+  // Campos para reacciones a mensajes
+  @Column({ type: 'json', nullable: true })
+  reactions: { emoji: string; username: string; timestamp: Date }[]; // Array de reacciones
+
   // Relación con la sala temporal (opcional)
   @ManyToOne(() => TemporaryRoom, { nullable: true })
   @JoinColumn({ name: 'roomId' })

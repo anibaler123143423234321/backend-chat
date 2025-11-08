@@ -49,6 +49,17 @@ export class TemporaryRoomsService {
     // console.log('Usuario ID:', userId);
     // console.log('Nombre del creador:', creatorUsername);
 
+    // 🔥 VALIDAR: Verificar si ya existe una sala activa con el mismo nombre
+    const existingRoom = await this.temporaryRoomRepository.findOne({
+      where: { name: createDto.name, isActive: true },
+    });
+
+    if (existingRoom) {
+      throw new BadRequestException(
+        `Ya existe una sala activa con el nombre "${createDto.name}". Por favor, elige otro nombre.`
+      );
+    }
+
     const roomCode = this.generateRoomCode();
 
     // console.log('Código de sala generado:', roomCode);
@@ -228,6 +239,58 @@ export class TemporaryRoomsService {
     }
 
     return room;
+  }
+
+  async removeUserFromRoom(roomCode: string, username: string): Promise<any> {
+    console.log('🚫 Eliminando usuario de la sala:', username, 'de', roomCode);
+
+    const room = await this.findByRoomCode(roomCode);
+
+    if (!room) {
+      throw new NotFoundException('Sala no encontrada');
+    }
+
+    // Remover el usuario de connectedMembers
+    if (room.connectedMembers && room.connectedMembers.includes(username)) {
+      room.connectedMembers = room.connectedMembers.filter(u => u !== username);
+      room.currentMembers = room.connectedMembers.length;
+    }
+
+    // Remover el usuario de members (historial)
+    if (room.members && room.members.includes(username)) {
+      room.members = room.members.filter(u => u !== username);
+    }
+
+    // Remover el usuario de assignedMembers si está asignado
+    if (room.assignedMembers && room.assignedMembers.includes(username)) {
+      room.assignedMembers = room.assignedMembers.filter(u => u !== username);
+    }
+
+    await this.temporaryRoomRepository.save(room);
+
+    // Limpiar la sala actual del usuario en la base de datos
+    try {
+      const user = await this.userRepository.findOne({ where: { username } });
+      if (user && user.currentRoomCode === roomCode) {
+        user.currentRoomCode = null;
+        await this.userRepository.save(user);
+      }
+    } catch (error) {
+      console.error('❌ Error al limpiar sala actual del usuario:', error);
+    }
+
+    // Notificar a través del socket gateway
+    if (this.socketGateway) {
+      this.socketGateway.handleUserRemovedFromRoom(roomCode, username);
+    }
+
+    console.log('✅ Usuario eliminado de la sala exitosamente');
+
+    return {
+      message: `Usuario ${username} eliminado de la sala ${room.name}`,
+      roomCode: room.roomCode,
+      username: username
+    };
   }
 
   async remove(id: number, userId: number): Promise<void> {

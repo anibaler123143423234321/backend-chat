@@ -91,6 +91,17 @@ export class TemporaryRoomsController {
     return this.temporaryRoomsService.joinRoom(joinDto, username);
   }
 
+  @Post(':roomCode/remove-user')
+  removeUserFromRoom(
+    @Param('roomCode') roomCode: string,
+    @Body() body: { username: string },
+    @Request() req
+  ) {
+    console.log('🚫 POST /api/temporary-rooms/' + roomCode + '/remove-user called');
+    console.log('👤 User to remove:', body.username);
+    return this.temporaryRoomsService.removeUserFromRoom(roomCode, body.username);
+  }
+
   @Delete(':id')
   remove(@Param('id') id: string, @Request() req) {
     console.log('🗑️ DELETE /api/temporary-rooms/' + id + ' called');
