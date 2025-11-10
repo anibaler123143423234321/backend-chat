@@ -1,4 +1,4 @@
-import {
+﻿import {
   Controller,
   Get,
   Post,
@@ -16,7 +16,7 @@ import { CreateTemporaryConversationDto } from './dto/create-temporary-conversat
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @Controller('temporary-conversations')
-// @UseGuards(JwtAuthGuard) // Temporalmente deshabilitado - autenticación por socket
+// @UseGuards(JwtAuthGuard) // Temporalmente deshabilitado - autenticaciÃ³n por socket
 export class TemporaryConversationsController {
   constructor(
     private readonly temporaryConversationsService: TemporaryConversationsService,
@@ -98,21 +98,17 @@ export class TemporaryConversationsController {
 
   @Patch(':id/deactivate')
   deactivateConversation(@Param('id') id: string, @Body() body: any, @Request() req) {
-    console.log('⏸️ PATCH /api/temporary-conversations/' + id + '/deactivate called');
     const userId = req.user?.id || req.user?.sub || 1;
     // Priorizar el rol del body (viene del localStorage) sobre el del token JWT
     const userRole = body?.userRole || req.user?.role || 'ASESOR';
-    console.log('👤 Usuario ID:', userId, 'Rol del body:', body?.userRole, 'Rol del token:', req.user?.role, 'Rol final:', userRole);
     return this.temporaryConversationsService.deactivateConversation(parseInt(id), userId, userRole);
   }
 
   @Patch(':id/activate')
   activateConversation(@Param('id') id: string, @Body() body: any, @Request() req) {
-    console.log('▶️ PATCH /api/temporary-conversations/' + id + '/activate called');
     const userId = req.user?.id || req.user?.sub || 1;
     // Priorizar el rol del body (viene del localStorage) sobre el del token JWT
     const userRole = body?.userRole || req.user?.role || 'ASESOR';
-    console.log('👤 Usuario ID:', userId, 'Rol del body:', body?.userRole, 'Rol del token:', req.user?.role, 'Rol final:', userRole);
     return this.temporaryConversationsService.activateConversation(parseInt(id), userId, userRole);
   }
 }

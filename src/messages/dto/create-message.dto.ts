@@ -16,6 +16,14 @@ export class CreateMessageDto {
 
   @IsString()
   @IsOptional()
+  senderRole?: string;
+
+  @IsString()
+  @IsOptional()
+  senderNumeroAgente?: string;
+
+  @IsString()
+  @IsOptional()
   to?: string;
 
   @IsString()

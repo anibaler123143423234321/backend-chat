@@ -1,4 +1,4 @@
-import {
+﻿import {
   Controller,
   Post,
   Get,
@@ -19,7 +19,7 @@ export class MessagesController {
 
   @Post()
   async create(@Body() createMessageDto: CreateMessageDto) {
-    // console.log('💬 Creando mensaje:', createMessageDto);
+    // console.log('ðŸ’¬ Creando mensaje:', createMessageDto);
     return await this.messagesService.create(createMessageDto);
   }
 
@@ -29,7 +29,7 @@ export class MessagesController {
     @Query('limit') limit: string = '50',
     @Query('offset') offset: string = '0',
   ) {
-    // console.log(`📋 Obteniendo mensajes de la sala: ${roomCode}`);
+    // console.log(`ðŸ“‹ Obteniendo mensajes de la sala: ${roomCode}`);
     return await this.messagesService.findByRoom(
       roomCode,
       parseInt(limit),
@@ -44,7 +44,7 @@ export class MessagesController {
     @Query('limit') limit: string = '50',
     @Query('offset') offset: string = '0',
   ) {
-    // console.log(`👤 Obteniendo mensajes entre ${from} y ${to}`);
+    // console.log(`ðŸ‘¤ Obteniendo mensajes entre ${from} y ${to}`);
     return await this.messagesService.findByUser(
       from,
       to,
@@ -55,7 +55,7 @@ export class MessagesController {
 
   @Get('recent')
   async findRecent(@Query('limit') limit: string = '20') {
-    // console.log(`🕒 Obteniendo mensajes recientes`);
+    // console.log(`ðŸ•’ Obteniendo mensajes recientes`);
     return await this.messagesService.findRecentMessages(parseInt(limit));
   }
 
@@ -64,15 +64,13 @@ export class MessagesController {
     @Param('id') id: string,
     @Body('username') username: string,
   ) {
-    console.log(`✅ Marcando mensaje ${id} como leído por ${username}`);
     const message = await this.messagesService.markAsRead(parseInt(id), username);
     return { success: !!message, message };
   }
 
-  // Marcar múltiples mensajes como leídos
+  // Marcar mÃºltiples mensajes como leÃ­dos
   @Patch('mark-read')
   async markMultipleAsRead(@Body() markReadDto: MarkReadDto) {
-    console.log(`✅ Marcando ${markReadDto.messageIds?.length || 0} mensajes como leídos por ${markReadDto.username}`);
 
     if (markReadDto.messageIds && markReadDto.messageIds.length > 0) {
       const messages = await this.messagesService.markMultipleAsRead(
@@ -85,13 +83,12 @@ export class MessagesController {
     return { success: false, message: 'No message IDs provided' };
   }
 
-  // Marcar toda una conversación como leída
+  // Marcar toda una conversaciÃ³n como leÃ­da
   @Patch('mark-conversation-read')
   async markConversationAsRead(
     @Body('from') from: string,
     @Body('to') to: string,
   ) {
-    console.log(`✅ Marcando conversación de ${from} a ${to} como leída`);
     const messages = await this.messagesService.markConversationAsRead(from, to);
     return { success: true, messagesUpdated: messages.length, messages };
   }
@@ -102,7 +99,7 @@ export class MessagesController {
     @Body('username') username: string,
     @Body('message') message: string,
   ) {
-    // console.log(`✏️ Editando mensaje ${id} por ${username}`);
+    // console.log(`âœï¸ Editando mensaje ${id} por ${username}`);
     const edited = await this.messagesService.editMessage(
       parseInt(id),
       username,
@@ -116,7 +113,7 @@ export class MessagesController {
     @Param('id') id: string,
     @Body('username') username: string,
   ) {
-    // console.log(`🗑️ Eliminando mensaje ${id} por ${username}`);
+    // console.log(`ðŸ—‘ï¸ Eliminando mensaje ${id} por ${username}`);
     const deleted = await this.messagesService.deleteMessage(
       parseInt(id),
       username,
@@ -126,7 +123,7 @@ export class MessagesController {
 
   @Get('stats/:roomCode?')
   async getStats(@Param('roomCode') roomCode?: string) {
-    // console.log(`📊 Obteniendo estadísticas de mensajes`);
+    // console.log(`ðŸ“Š Obteniendo estadÃ­sticas de mensajes`);
     return await this.messagesService.getMessageStats(roomCode);
   }
 
@@ -136,7 +133,6 @@ export class MessagesController {
     @Query('q') searchTerm: string,
     @Query('limit') limit: string = '50',
   ) {
-    console.log(`🔍 Buscando mensajes para ${username} con término: "${searchTerm}"`);
     return await this.messagesService.searchMessages(
       username,
       searchTerm,
@@ -150,7 +146,6 @@ export class MessagesController {
     @Query('limit') limit: string = '50',
     @Query('offset') offset: string = '0',
   ) {
-    console.log(`🧵 Obteniendo mensajes del hilo: ${threadId}`);
     return await this.messagesService.findThreadMessages(
       parseInt(threadId),
       parseInt(limit),

@@ -20,6 +20,12 @@ export class User {
   @Column({ nullable: true })
   currentRoomCode: string;
 
+  @Column({ nullable: true })
+  role: string;
+
+  @Column({ nullable: true })
+  numeroAgente: string;
+
   @CreateDateColumn()
   createdAt: Date;
 

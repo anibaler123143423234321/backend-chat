@@ -1,4 +1,4 @@
-import {
+﻿import {
   Injectable,
   NotFoundException,
   BadRequestException,
@@ -8,6 +8,7 @@ import { Repository, IsNull } from 'typeorm';
 import { TemporaryConversation } from './entities/temporary-conversation.entity';
 import { CreateTemporaryConversationDto } from './dto/create-temporary-conversation.dto';
 import { Message } from '../messages/entities/message.entity';
+import { User } from '../users/entities/user.entity'; // ðŸ”¥ Importar entidad User
 import { randomBytes } from 'crypto';
 
 @Injectable()
@@ -17,6 +18,8 @@ export class TemporaryConversationsService {
     private temporaryConversationRepository: Repository<TemporaryConversation>,
     @InjectRepository(Message)
     private messageRepository: Repository<Message>,
+    @InjectRepository(User) // ðŸ”¥ Inyectar repositorio de User
+    private userRepository: Repository<User>,
   ) {}
 
   async create(
@@ -45,10 +48,10 @@ export class TemporaryConversationsService {
       order: { createdAt: 'DESC' },
     });
 
-    // Normalizar username para comparación case-insensitive
+    // Normalizar username para comparaciÃ³n case-insensitive
     const usernameNormalized = username?.toLowerCase().trim();
 
-    // Enriquecer cada conversación con el último mensaje y contador de no leídos
+    // Enriquecer cada conversaciÃ³n con el Ãºltimo mensaje y contador de no leÃ­dos
     const enrichedConversations = await Promise.all(
       allConversations.map(async (conv) => {
         const participants = conv.participants || [];
@@ -69,7 +72,7 @@ export class TemporaryConversationsService {
             }
           }
 
-          // Obtener el último mensaje
+          // Obtener el Ãºltimo mensaje
           const messages = await this.messageRepository.find({
             where: messageConditions,
             order: { sentAt: 'DESC' },
@@ -77,12 +80,12 @@ export class TemporaryConversationsService {
           });
 
           if (messages.length > 0) {
-            // Calcular el threadCount del último mensaje
+            // Calcular el threadCount del Ãºltimo mensaje
             const threadCount = await this.messageRepository.count({
               where: { threadId: messages[0].id, isDeleted: false },
             });
 
-            // Obtener el último mensaje del hilo (si existe)
+            // Obtener el Ãºltimo mensaje del hilo (si existe)
             let lastReplyFrom = null;
             if (threadCount > 0) {
               const lastThreadMessage = await this.messageRepository.findOne({
@@ -94,16 +97,16 @@ export class TemporaryConversationsService {
               }
             }
 
-            // 🔥 Si es un archivo multimedia sin texto, mostrar el tipo de archivo
+            // ðŸ”¥ Si es un archivo multimedia sin texto, mostrar el tipo de archivo
             let messageText = messages[0].message;
             if (!messageText && messages[0].mediaType) {
               const mediaTypeMap = {
-                'image': '📷 Imagen',
-                'video': '🎥 Video',
-                'audio': '🎵 Audio',
-                'document': '📄 Documento'
+                'image': 'ðŸ“· Imagen',
+                'video': 'ðŸŽ¥ Video',
+                'audio': 'ðŸŽµ Audio',
+                'document': 'ðŸ“„ Documento'
               };
-              messageText = mediaTypeMap[messages[0].mediaType] || '📎 Archivo';
+              messageText = mediaTypeMap[messages[0].mediaType] || 'ðŸ“Ž Archivo';
             }
 
             lastMessage = {
@@ -118,7 +121,7 @@ export class TemporaryConversationsService {
             };
           }
 
-          // 🔥 NUEVO: Contar solo mensajes no leídos dirigidos al usuario actual
+          // ðŸ”¥ NUEVO: Contar solo mensajes no leÃ­dos dirigidos al usuario actual
           if (username && usernameNormalized) {
             // Filtrar solo mensajes dirigidos al usuario actual
             const filteredConditions = messageConditions.filter(
@@ -129,24 +132,42 @@ export class TemporaryConversationsService {
               where: filteredConditions,
             });
 
-            // Filtrar mensajes no leídos (case-insensitive en readBy)
+            // Filtrar mensajes no leÃ­dos (case-insensitive en readBy)
             unreadCount = allMessages.filter(msg => {
               if (!msg.readBy || msg.readBy.length === 0) {
-                return true; // No ha sido leído por nadie
+                return true; // No ha sido leÃ­do por nadie
               }
-              // Verificar si el usuario actual está en readBy (case-insensitive)
+              // Verificar si el usuario actual estÃ¡ en readBy (case-insensitive)
               const isReadByUser = msg.readBy.some(reader =>
                 reader?.toLowerCase().trim() === usernameNormalized
               );
               return !isReadByUser;
             }).length;
           } else {
-            // Si no hay username, contar todos los mensajes no leídos (comportamiento anterior)
+            // Si no hay username, contar todos los mensajes no leÃ­dos (comportamiento anterior)
             const allMessages = await this.messageRepository.find({
               where: messageConditions,
             });
 
             unreadCount = allMessages.filter(msg => !msg.isRead).length;
+          }
+        }
+
+        // ðŸ”¥ Obtener informaciÃ³n de los participantes (role y numeroAgente)
+        // Para conversaciones de monitoreo, obtener info del primer participante que no sea el admin
+        let participantRole = null;
+        let participantNumeroAgente = null;
+
+        if (participants.length > 0) {
+          // Buscar el primer participante en la tabla chat_users
+          const participantName = participants[0];
+          const participantUser = await this.userRepository.findOne({
+            where: { username: participantName },
+          });
+
+          if (participantUser) {
+            participantRole = participantUser.role;
+            participantNumeroAgente = participantUser.numeroAgente;
           }
         }
 
@@ -159,11 +180,13 @@ export class TemporaryConversationsService {
           lastMessageThreadCount: lastMessage ? lastMessage.threadCount : 0,
           lastMessageLastReplyFrom: lastMessage ? lastMessage.lastReplyFrom : null,
           unreadCount,
+          role: participantRole, // ðŸ”¥ Incluir role del participante
+          numeroAgente: participantNumeroAgente, // ðŸ”¥ Incluir numeroAgente del participante
         };
       })
     );
 
-    // Ordenar por último mensaje (más reciente primero)
+    // Ordenar por Ãºltimo mensaje (mÃ¡s reciente primero)
     enrichedConversations.sort((a, b) => {
       if (!a.lastMessageTime && !b.lastMessageTime) return 0;
       if (!a.lastMessageTime) return 1;
@@ -175,7 +198,6 @@ export class TemporaryConversationsService {
   }
 
   async findByUser(username: string): Promise<any[]> {
-    console.log('🔍 Buscando conversaciones para usuario:', username);
 
     // Obtener todas las conversaciones activas y filtrar en memoria
     const allConversations = await this.temporaryConversationRepository.find({
@@ -183,26 +205,22 @@ export class TemporaryConversationsService {
       order: { createdAt: 'DESC' },
     });
 
-    console.log('📋 Total de conversaciones activas:', allConversations.length);
     allConversations.forEach(conv => {
-      console.log(`  - Conversación ID ${conv.id}: assignedUsers =`, conv.assignedUsers);
     });
 
-    // Filtrar conversaciones donde el usuario está en assignedUsers
+    // Filtrar conversaciones donde el usuario estÃ¡ en assignedUsers
     const userConversations = allConversations.filter(conv =>
       conv.assignedUsers && conv.assignedUsers.includes(username)
     );
 
-    console.log('✅ Conversaciones encontradas para', username, ':', userConversations.length);
 
-    // Enriquecer cada conversación con el último mensaje y contador de no leídos
+    // Enriquecer cada conversaciÃ³n con el Ãºltimo mensaje y contador de no leÃ­dos
     const enrichedConversations = await Promise.all(
       userConversations.map(async (conv) => {
-        // Obtener los participantes de la conversación (excluyendo al usuario actual)
+        // Obtener los participantes de la conversaciÃ³n
         const participants = conv.participants || [];
-        const otherParticipants = participants.filter(p => p !== username);
 
-        // Obtener el último mensaje de la conversación
+        // Obtener el Ãºltimo mensaje de la conversaciÃ³n
         // Buscar mensajes entre cualquiera de los participantes
         let lastMessage = null;
         let unreadCount = 0;
@@ -220,7 +238,7 @@ export class TemporaryConversationsService {
             }
           }
 
-          // Obtener el último mensaje
+          // Obtener el Ãºltimo mensaje
           const messages = await this.messageRepository.find({
             where: messageConditions,
             order: { sentAt: 'DESC' },
@@ -228,12 +246,12 @@ export class TemporaryConversationsService {
           });
 
           if (messages.length > 0) {
-            // Calcular el threadCount del último mensaje
+            // Calcular el threadCount del Ãºltimo mensaje
             const threadCount = await this.messageRepository.count({
               where: { threadId: messages[0].id, isDeleted: false },
             });
 
-            // Obtener el último mensaje del hilo (si existe)
+            // Obtener el Ãºltimo mensaje del hilo (si existe)
             let lastReplyFrom = null;
             if (threadCount > 0) {
               const lastThreadMessage = await this.messageRepository.findOne({
@@ -257,33 +275,49 @@ export class TemporaryConversationsService {
             };
           }
 
-          // Contar mensajes no leídos (mensajes enviados por otros usuarios que el usuario actual no ha leído)
-          // 🔥 Filtrar solo mensajes dirigidos al usuario actual (case-insensitive)
+          // Contar mensajes no leÃ­dos (mensajes enviados por otros usuarios que el usuario actual no ha leÃ­do)
+          // ðŸ”¥ Filtrar solo mensajes dirigidos al usuario actual (case-insensitive)
           const usernameNormalized = username?.toLowerCase().trim();
           const filteredConditions = messageConditions.filter(cond =>
             cond.to?.toLowerCase().trim() === usernameNormalized
           );
 
-          // Filtrar solo los mensajes que no han sido leídos por el usuario actual
+          // Filtrar solo los mensajes que no han sido leÃ­dos por el usuario actual
           const allMessages = await this.messageRepository.find({
             where: filteredConditions,
           });
 
-          console.log(`📊 Mensajes dirigidos a ${username}:`, allMessages.length);
 
-          // 🔥 Filtrar mensajes no leídos (case-insensitive en readBy)
+          // ðŸ”¥ Filtrar mensajes no leÃ­dos (case-insensitive en readBy)
           unreadCount = allMessages.filter(msg => {
             if (!msg.readBy || msg.readBy.length === 0) {
-              return true; // No ha sido leído por nadie
+              return true; // No ha sido leÃ­do por nadie
             }
-            // Verificar si el usuario actual está en readBy (case-insensitive)
+            // Verificar si el usuario actual estÃ¡ en readBy (case-insensitive)
             const isReadByUser = msg.readBy.some(reader =>
               reader?.toLowerCase().trim() === usernameNormalized
             );
             return !isReadByUser;
           }).length;
 
-          console.log(`   - Mensajes no leídos:`, unreadCount);
+        }
+
+        // ðŸ”¥ Obtener informaciÃ³n del otro participante (role y numeroAgente)
+        const otherParticipants = participants.filter(p => p !== username);
+        let otherParticipantRole = null;
+        let otherParticipantNumeroAgente = null;
+
+        if (otherParticipants.length > 0) {
+          // Buscar el otro participante en la tabla chat_users
+          const otherParticipantName = otherParticipants[0];
+          const otherUser = await this.userRepository.findOne({
+            where: { username: otherParticipantName },
+          });
+
+          if (otherUser) {
+            otherParticipantRole = otherUser.role;
+            otherParticipantNumeroAgente = otherUser.numeroAgente;
+          }
         }
 
         return {
@@ -295,11 +329,13 @@ export class TemporaryConversationsService {
           lastMessageThreadCount: lastMessage ? lastMessage.threadCount : 0,
           lastMessageLastReplyFrom: lastMessage ? lastMessage.lastReplyFrom : null,
           unreadCount,
+          role: otherParticipantRole, // ðŸ”¥ Incluir role del otro participante
+          numeroAgente: otherParticipantNumeroAgente, // ðŸ”¥ Incluir numeroAgente del otro participante
         };
       })
     );
 
-    // Ordenar por último mensaje (más reciente primero)
+    // Ordenar por Ãºltimo mensaje (mÃ¡s reciente primero)
     enrichedConversations.sort((a, b) => {
       if (!a.lastMessageTime && !b.lastMessageTime) return 0;
       if (!a.lastMessageTime) return 1;
@@ -316,7 +352,7 @@ export class TemporaryConversationsService {
     });
 
     if (!conversation) {
-      throw new NotFoundException('Conversación temporal no encontrada');
+      throw new NotFoundException('ConversaciÃ³n temporal no encontrada');
     }
 
     return conversation;
@@ -328,11 +364,11 @@ export class TemporaryConversationsService {
     });
 
     if (!conversation) {
-      throw new NotFoundException('Enlace de conversación no válido');
+      throw new NotFoundException('Enlace de conversaciÃ³n no vÃ¡lido');
     }
 
     if (new Date() > conversation.expiresAt) {
-      throw new BadRequestException('La conversación ha expirado');
+      throw new BadRequestException('La conversaciÃ³n ha expirado');
     }
 
     return conversation;
@@ -349,7 +385,7 @@ export class TemporaryConversationsService {
       conversation.currentParticipants >= conversation.maxParticipants
     ) {
       throw new BadRequestException(
-        'La conversación ha alcanzado el máximo de participantes',
+        'La conversaciÃ³n ha alcanzado el mÃ¡ximo de participantes',
       );
     }
 
@@ -372,15 +408,10 @@ export class TemporaryConversationsService {
     name: string,
     adminId: number,
   ): Promise<TemporaryConversation> {
-    console.log('💬 Creando conversación asignada:');
-    console.log('  - user1:', user1);
-    console.log('  - user2:', user2);
-    console.log('  - name:', name);
-    console.log('  - adminId:', adminId);
 
     const linkId = this.generateLinkId();
     const expiresAt = new Date();
-    // Conversaciones asignadas por admin no expiran (o expiran en 1 año)
+    // Conversaciones asignadas por admin no expiran (o expiran en 1 aÃ±o)
     expiresAt.setFullYear(expiresAt.getFullYear() + 1);
 
     const conversation = this.temporaryConversationRepository.create({
@@ -397,8 +428,6 @@ export class TemporaryConversationsService {
     });
 
     const saved = await this.temporaryConversationRepository.save(conversation);
-    console.log('✅ Conversación guardada con ID:', saved.id);
-    console.log('  - assignedUsers:', saved.assignedUsers);
 
     return saved;
   }
@@ -421,25 +450,24 @@ export class TemporaryConversationsService {
   }
 
   async remove(id: number, userId?: number): Promise<void> {
-    // Buscar la conversación sin filtrar por isActive para poder manejar conversaciones ya eliminadas
+    // Buscar la conversaciÃ³n sin filtrar por isActive para poder manejar conversaciones ya eliminadas
     const conversation = await this.temporaryConversationRepository.findOne({
       where: { id },
     });
 
     if (!conversation) {
-      throw new NotFoundException('Conversación temporal no encontrada');
+      throw new NotFoundException('ConversaciÃ³n temporal no encontrada');
     }
 
-    // Si ya está inactiva, no hacer nada (ya fue eliminada)
+    // Si ya estÃ¡ inactiva, no hacer nada (ya fue eliminada)
     if (!conversation.isActive) {
-      console.log(`⚠️ Conversación ${id} ya estaba inactiva`);
       return;
     }
 
     // Si se proporciona userId, validar permisos
     if (userId && conversation.createdBy !== userId) {
       throw new BadRequestException(
-        'No tienes permisos para eliminar esta conversación',
+        'No tienes permisos para eliminar esta conversaciÃ³n',
       );
     }
 
@@ -448,23 +476,19 @@ export class TemporaryConversationsService {
   }
 
   async deactivateConversation(id: number, userId: number, userRole: string): Promise<TemporaryConversation> {
-    console.log('⏸️ Desactivando conversación:', id, 'por usuario:', userId, 'rol:', userRole);
 
-    // Si es ADMIN, JEFEPISO o PROGRAMADOR, puede desactivar cualquier conversación
+    // Si es ADMIN, JEFEPISO o PROGRAMADOR, puede desactivar cualquier conversaciÃ³n
     const isAdmin = ['ADMIN', 'JEFEPISO', 'PROGRAMADOR'].includes(userRole);
-    console.log('🔐 ¿Es admin?:', isAdmin);
 
-    // Primero buscar la conversación sin restricciones para ver si existe
+    // Primero buscar la conversaciÃ³n sin restricciones para ver si existe
     const conversationExists = await this.temporaryConversationRepository.findOne({
       where: { id },
     });
 
     if (!conversationExists) {
-      console.log('❌ Conversación no existe con ID:', id);
-      throw new NotFoundException('Conversación no encontrada');
+      throw new NotFoundException('ConversaciÃ³n no encontrada');
     }
 
-    console.log('📋 Conversación encontrada:', conversationExists.name, 'creada por:', conversationExists.createdBy);
 
     // Ahora verificar permisos
     const conversation = await this.temporaryConversationRepository.findOne({
@@ -472,21 +496,18 @@ export class TemporaryConversationsService {
     });
 
     if (!conversation) {
-      console.log('❌ Usuario no tiene permisos. isAdmin:', isAdmin, 'userId:', userId, 'createdBy:', conversationExists.createdBy);
-      throw new NotFoundException('No tienes permisos para desactivar esta conversación');
+      throw new NotFoundException('No tienes permisos para desactivar esta conversaciÃ³n');
     }
 
     conversation.isActive = false;
     const updatedConversation = await this.temporaryConversationRepository.save(conversation);
-    console.log('✅ Conversación desactivada:', updatedConversation.name);
 
     return updatedConversation;
   }
 
   async activateConversation(id: number, userId: number, userRole: string): Promise<TemporaryConversation> {
-    console.log('▶️ Activando conversación:', id, 'por usuario:', userId, 'rol:', userRole);
 
-    // Si es ADMIN, JEFEPISO o PROGRAMADOR, puede activar cualquier conversación
+    // Si es ADMIN, JEFEPISO o PROGRAMADOR, puede activar cualquier conversaciÃ³n
     const isAdmin = ['ADMIN', 'JEFEPISO', 'PROGRAMADOR'].includes(userRole);
 
     const conversation = await this.temporaryConversationRepository.findOne({
@@ -494,12 +515,11 @@ export class TemporaryConversationsService {
     });
 
     if (!conversation) {
-      throw new NotFoundException('Conversación no encontrada o no tienes permisos');
+      throw new NotFoundException('ConversaciÃ³n no encontrada o no tienes permisos');
     }
 
     conversation.isActive = true;
     const updatedConversation = await this.temporaryConversationRepository.save(conversation);
-    console.log('✅ Conversación activada:', updatedConversation.name);
 
     return updatedConversation;
   }

@@ -1,4 +1,4 @@
-import {
+﻿import {
   Controller,
   Get,
   Post,
@@ -20,7 +20,6 @@ import { JoinRoomDto } from './dto/join-room.dto';
 // @UseGuards(JwtAuthGuard) // Temporalmente deshabilitado para pruebas
 export class TemporaryRoomsController {
   constructor(private readonly temporaryRoomsService: TemporaryRoomsService) {
-    console.log('🏠 TemporaryRoomsController initialized');
   }
 
   @Post()
@@ -28,13 +27,10 @@ export class TemporaryRoomsController {
     @Body() createDto: CreateTemporaryRoomDto,
     @Request() req,
   ): Promise<TemporaryRoomWithUrl> {
-    console.log('📝 POST /api/temporary-rooms called with data:', createDto);
-    console.log('👤 User ID from request:', req.user?.id);
     // Usar ID de usuario por defecto para pruebas (1)
     const userId = req.user?.id || 1;
     const creatorUsername =
       createDto.creatorUsername || req.user?.username || 'Usuario';
-    console.log('👤 Creator username:', creatorUsername);
     return this.temporaryRoomsService.create(
       createDto,
       userId,
@@ -47,10 +43,10 @@ export class TemporaryRoomsController {
     return this.temporaryRoomsService.findAll();
   }
 
-  // Rutas específicas ANTES de rutas con parámetros
+  // Rutas especÃ­ficas ANTES de rutas con parÃ¡metros
   @Get('admin/rooms')
   getAdminRooms(@Request() req) {
-    // console.log('🔍 GET /api/temporary-rooms/admin/rooms called');
+    // console.log('ðŸ” GET /api/temporary-rooms/admin/rooms called');
     const userId = req.user?.id || 1; // Usar ID por defecto para pruebas
     return this.temporaryRoomsService.getAdminRooms(userId);
   }
@@ -58,7 +54,6 @@ export class TemporaryRoomsController {
   @Get('user/current-room')
   getCurrentUserRoom(@Request() req, @Query('username') username?: string) {
     // Usar username del query param (displayName desde localStorage)
-    console.log('🔍 GET /api/temporary-rooms/user/current-room - username:', username);
     return this.temporaryRoomsService.getCurrentUserRoomByUsername(username);
   }
 
@@ -67,7 +62,7 @@ export class TemporaryRoomsController {
     return this.temporaryRoomsService.findByRoomCode(roomCode);
   }
 
-  // Rutas con parámetros AL FINAL
+  // Rutas con parÃ¡metros AL FINAL
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.temporaryRoomsService.findOne(+id);
@@ -75,18 +70,14 @@ export class TemporaryRoomsController {
 
   @Get(':roomCode/users')
   getRoomUsers(@Param('roomCode') roomCode: string) {
-    console.log('👥 GET /api/temporary-rooms/' + roomCode + '/users called');
     return this.temporaryRoomsService.getRoomUsers(roomCode);
   }
 
   @Post('join')
   joinRoom(@Body() joinDto: JoinRoomDto, @Request() req) {
-    console.log('🚪 POST /api/temporary-rooms/join called with data:', joinDto);
-    console.log('👤 Request user:', req.user);
 
     // Usar username del DTO o del request, con fallback
     const username = joinDto.username || req.user?.username || 'Usuario';
-    console.log('👤 Username to use:', username);
 
     return this.temporaryRoomsService.joinRoom(joinDto, username);
   }
@@ -97,28 +88,23 @@ export class TemporaryRoomsController {
     @Body() body: { username: string },
     @Request() req
   ) {
-    console.log('🚫 POST /api/temporary-rooms/' + roomCode + '/remove-user called');
-    console.log('👤 User to remove:', body.username);
     return this.temporaryRoomsService.removeUserFromRoom(roomCode, body.username);
   }
 
   @Delete(':id')
   remove(@Param('id') id: string, @Request() req) {
-    console.log('🗑️ DELETE /api/temporary-rooms/' + id + ' called');
     const userId = req.user?.id || 1; // Usar ID por defecto para pruebas
     return this.temporaryRoomsService.delete(+id, userId);
   }
 
   @Patch(':id/deactivate')
   deactivateRoom(@Param('id') id: string, @Request() req) {
-    console.log('⏸️ PATCH /api/temporary-rooms/' + id + '/deactivate called');
     const userId = req.user?.id || 1; // Usar ID por defecto para pruebas
     return this.temporaryRoomsService.deactivateRoom(parseInt(id), userId);
   }
 
   @Patch(':id/activate')
   activateRoom(@Param('id') id: string, @Request() req) {
-    console.log('▶️ PATCH /api/temporary-rooms/' + id + '/activate called');
     const userId = req.user?.id || 1; // Usar ID por defecto para pruebas
     return this.temporaryRoomsService.activateRoom(parseInt(id), userId);
   }
@@ -129,7 +115,6 @@ export class TemporaryRoomsController {
     @Body() updateData: { maxCapacity?: number },
     @Request() req
   ) {
-    console.log('✏️ PATCH /api/temporary-rooms/' + id + '/update called');
     const userId = req.user?.id || 1; // Usar ID por defecto para pruebas
     return this.temporaryRoomsService.updateRoom(parseInt(id), userId, updateData);
   }

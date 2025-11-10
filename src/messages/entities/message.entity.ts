@@ -20,6 +20,12 @@ export class Message {
   @Column({ type: 'int', nullable: true })
   fromId: number;
 
+  @Column({ length: 50, nullable: true })
+  senderRole: string; // Role del remitente
+
+  @Column({ length: 20, nullable: true })
+  senderNumeroAgente: string; // Número de agente del remitente
+
   @Column({ length: 255, nullable: true })
   to: string;
 

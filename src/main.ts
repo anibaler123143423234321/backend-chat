@@ -1,4 +1,4 @@
-import { NestFactory } from '@nestjs/core';
+﻿import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 
@@ -28,7 +28,6 @@ async function bootstrap() {
 
   const port = process.env.PORT || 8747;
   await app.listen(port, '0.0.0.0');
-  console.log(`🚀 Chat Backend running on port ${port}`);
-  // console.log(`🌐 CORS enabled for frontend origins`);
+  // console.log(`ðŸŒ CORS enabled for frontend origins`);
 }
 bootstrap();
