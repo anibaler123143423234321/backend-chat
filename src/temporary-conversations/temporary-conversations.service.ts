@@ -123,28 +123,39 @@ export class TemporaryConversationsService {
 
           // ðŸ”¥ NUEVO: Contar solo mensajes no leÃ­dos dirigidos al usuario actual
           if (username && usernameNormalized) {
-            // Filtrar solo mensajes dirigidos al usuario actual
-            const filteredConditions = messageConditions.filter(
-              cond => cond.to?.toLowerCase().trim() === usernameNormalized
+            // Verificar si el usuario es participante de la conversacion
+            const isUserParticipant = participants.some(p =>
+              p?.toLowerCase().trim() === usernameNormalized
             );
 
-            const allMessages = await this.messageRepository.find({
-              where: filteredConditions,
-            });
-
-            // Filtrar mensajes no leÃ­dos (case-insensitive en readBy)
-            unreadCount = allMessages.filter(msg => {
-              if (!msg.readBy || msg.readBy.length === 0) {
-                return true; // No ha sido leÃ­do por nadie
-              }
-              // Verificar si el usuario actual estÃ¡ en readBy (case-insensitive)
-              const isReadByUser = msg.readBy.some(reader =>
-                reader?.toLowerCase().trim() === usernameNormalized
+            if (isUserParticipant) {
+              // Si es participante, contar mensajes no leidos dirigidos a el
+              const filteredConditions = messageConditions.filter(
+                cond => cond.to?.toLowerCase().trim() === usernameNormalized &&
+                        cond.from?.toLowerCase().trim() !== usernameNormalized
               );
-              return !isReadByUser;
-            }).length;
+
+              const allMessages = await this.messageRepository.find({
+                where: filteredConditions,
+              });
+
+              // Filtrar mensajes no leidos (case-insensitive en readBy)
+              unreadCount = allMessages.filter(msg => {
+                if (!msg.readBy || msg.readBy.length === 0) {
+                  return true; // No ha sido leido por nadie
+                }
+                // Verificar si el usuario actual esta en readBy (case-insensitive)
+                const isReadByUser = msg.readBy.some(reader =>
+                  reader?.toLowerCase().trim() === usernameNormalized
+                );
+                return !isReadByUser;
+              }).length;
+            } else {
+              // Si NO es participante (monitoreo), el contador siempre es 0
+              unreadCount = 0;
+            }
           } else {
-            // Si no hay username, contar todos los mensajes no leÃ­dos (comportamiento anterior)
+            // Si no hay username, contar todos los mensajes no leidos (comportamiento anterior)
             const allMessages = await this.messageRepository.find({
               where: messageConditions,
             });
@@ -279,7 +290,8 @@ export class TemporaryConversationsService {
           // ðŸ”¥ Filtrar solo mensajes dirigidos al usuario actual (case-insensitive)
           const usernameNormalized = username?.toLowerCase().trim();
           const filteredConditions = messageConditions.filter(cond =>
-            cond.to?.toLowerCase().trim() === usernameNormalized
+            cond.to?.toLowerCase().trim() === usernameNormalized &&
+            cond.from?.toLowerCase().trim() !== usernameNormalized
           );
 
           // Filtrar solo los mensajes que no han sido leÃ­dos por el usuario actual
@@ -408,6 +420,24 @@ export class TemporaryConversationsService {
     name: string,
     adminId: number,
   ): Promise<TemporaryConversation> {
+
+    // 🔥 VALIDAR: Verificar si ya existe una conversación activa entre estos usuarios
+    const allAssignedConversations = await this.temporaryConversationRepository.find({
+      where: { isActive: true, isAssignedByAdmin: true },
+    });
+
+    // Buscar si existe una conversación con los mismos participantes
+    const existingConversation = allAssignedConversations.find(conv => {
+      const participants = conv.participants || [];
+      // Verificar si ambos usuarios están en los participantes
+      return participants.includes(user1) && participants.includes(user2);
+    });
+
+    if (existingConversation) {
+      // Retornar la conversación existente en lugar de crear una nueva
+      console.log(`⚠️ Conversación duplicada detectada entre ${user1} y ${user2}. Retornando existente.`);
+      return existingConversation;
+    }
 
     const linkId = this.generateLinkId();
     const expiresAt = new Date();

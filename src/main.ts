@@ -15,6 +15,7 @@ async function bootstrap() {
       'http://localhost:4200',
       'https://apisozarusac.com',
       'https://apisozarusac.com/BackendJava',
+      'https://apisozarusac.com/BackendJavaMidas',
       'https://apisozarusac.com/BackendChat',
       'https://chat.mass34.com',
     ],
