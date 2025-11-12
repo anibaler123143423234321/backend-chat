@@ -43,6 +43,21 @@ export class TemporaryConversationsController {
     return this.temporaryConversationsService.findByUser(username);
   }
 
+  @Get('monitoring/list')
+  findMonitoringConversations(
+    @Query('username') username?: string,
+    @Query('page') page: string = '1',
+    @Query('limit') limit: string = '10',
+  ) {
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.max(1, Math.min(100, parseInt(limit) || 10));
+    return this.temporaryConversationsService.findMonitoringConversations(
+      username,
+      pageNum,
+      limitNum,
+    );
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.temporaryConversationsService.findOne(+id);
