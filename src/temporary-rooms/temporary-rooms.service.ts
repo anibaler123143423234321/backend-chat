@@ -339,9 +339,10 @@ export class TemporaryRoomsService {
   }
 
   async getAdminRooms(userId: number): Promise<any[]> {
+    // 🔥 MODIFICADO: Retornar TODAS las salas activas para que ADMIN pueda monitorear todas
     // console.log('ðŸ” Obteniendo salas del admin:', userId);
     const rooms = await this.temporaryRoomRepository.find({
-      where: { createdBy: userId },
+      where: { isActive: true }, // Mostrar TODAS las salas activas para que ADMIN pueda monitorear
       order: { createdAt: 'DESC' },
     });
     // console.log('ðŸ“‹ Salas encontradas:', rooms.length);
@@ -563,6 +564,48 @@ export class TemporaryRoomsService {
       totalUsers: userList.length,
       maxCapacity: room.maxCapacity,
     };
+  }
+
+  // 🔥 NUEVO: Buscar sala por nombre (para grupos)
+  async findByName(name: string): Promise<TemporaryRoom | null> {
+    try {
+      const room = await this.temporaryRoomRepository.findOne({
+        where: { name, isActive: true },
+      });
+      return room || null;
+    } catch (error) {
+      console.error('Error al buscar sala por nombre:', error);
+      return null;
+    }
+  }
+
+  // 🔥 NUEVO: Actualizar miembros de sala (para sincronizar cambios de grupos)
+  async updateRoomMembers(id: number, updateData: Partial<TemporaryRoom>): Promise<TemporaryRoom> {
+    try {
+      const room = await this.temporaryRoomRepository.findOne({
+        where: { id },
+      });
+
+      if (!room) {
+        throw new NotFoundException('Sala no encontrada');
+      }
+
+      // Actualizar solo los campos de miembros
+      if (updateData.members !== undefined) {
+        room.members = updateData.members;
+      }
+      if (updateData.connectedMembers !== undefined) {
+        room.connectedMembers = updateData.connectedMembers;
+      }
+      if (updateData.currentMembers !== undefined) {
+        room.currentMembers = updateData.currentMembers;
+      }
+
+      return await this.temporaryRoomRepository.save(room);
+    } catch (error) {
+      console.error('Error al actualizar miembros de sala:', error);
+      throw error;
+    }
   }
 
   private generateRoomCode(): string {

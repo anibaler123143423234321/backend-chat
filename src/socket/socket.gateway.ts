@@ -3,6 +3,7 @@
   MessageBody,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  OnGatewayInit,
   SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
@@ -24,7 +25,7 @@ import { User } from '../users/entities/user.entity';
   path: '/socket.io/',
 })
 @Injectable()
-export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit {
   @WebSocketServer() server: Server;
 
   // Mapas para el chat
@@ -50,21 +51,47 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.temporaryRoomsService.setSocketGateway(this);
   }
 
+  // 🔥 NUEVO: Cargar grupos al iniciar el servidor
+  async afterInit(server: Server) {
+    console.log('🚀 Inicializando Socket Gateway...');
+    try {
+      // Cargar todas las salas temporales como grupos
+      const rooms = await this.temporaryRoomsService.findAll();
+      console.log(`📦 Cargando ${rooms.length} salas/grupos desde BD...`);
+
+      rooms.forEach(room => {
+        const members = new Set(room.members || []);
+        this.groups.set(room.name, members);
+        console.log(`✅ Grupo "${room.name}" cargado en memoria (${members.size} miembros)`);
+      });
+
+      console.log(`✅ Socket Gateway inicializado con ${this.groups.size} grupos`);
+    } catch (error) {
+      console.error('❌ Error al cargar grupos en afterInit:', error);
+    }
+  }
+
   async handleDisconnect(client: Socket) {
     // Remover usuario del chat si existe
     for (const [username, user] of this.users.entries()) {
       if (user.socket === client) {
+        console.log(`🔌 Desconectando usuario: ${username}`);
+
         // Si el usuario estaba en una sala, solo removerlo de la memoria (NO de la BD)
         if (user.currentRoom) {
           const roomCode = user.currentRoom;
+          console.log(`🏠 Usuario ${username} estaba en sala ${roomCode}`);
 
           // NO remover de la base de datos - mantener en el historial
           // Solo remover de la memoria para marcarlo como desconectado
           const roomUsersSet = this.roomUsers.get(roomCode);
           if (roomUsersSet) {
             roomUsersSet.delete(username);
+            console.log(`✅ Usuario ${username} removido de sala en memoria`);
+
             if (roomUsersSet.size === 0) {
               this.roomUsers.delete(roomCode);
+              console.log(`✅ Sala ${roomCode} removida de memoria (sin usuarios)`);
             }
           }
 
@@ -74,6 +101,8 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
         // Remover usuario del mapa de usuarios conectados
         this.users.delete(username);
+        console.log(`✅ Usuario ${username} removido del mapa de usuarios`);
+
         this.broadcastUserList();
         break;
       }
@@ -121,6 +150,36 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
       }
     } catch (error) {
       console.error(`❌ Error al guardar usuario ${username} en BD:`, error);
+    }
+
+    // 🔥 NUEVO: Restaurar salas del usuario desde BD
+    try {
+      const allRooms = await this.temporaryRoomsService.findAll();
+      const userRooms = allRooms.filter(room =>
+        room.members && room.members.includes(username)
+      );
+
+      console.log(`🏠 Restaurando ${userRooms.length} salas para ${username}`);
+
+      for (const room of userRooms) {
+        // Agregar usuario a la sala en memoria
+        if (!this.roomUsers.has(room.roomCode)) {
+          this.roomUsers.set(room.roomCode, new Set());
+        }
+        this.roomUsers.get(room.roomCode)!.add(username);
+        console.log(`✅ Usuario ${username} restaurado en sala ${room.roomCode}`);
+      }
+
+      // Si el usuario estaba en una sala, actualizar su currentRoom
+      if (userRooms.length > 0) {
+        const user = this.users.get(username);
+        if (user) {
+          user.currentRoom = userRooms[0].roomCode;
+          console.log(`✅ Sala actual del usuario restaurada a ${userRooms[0].roomCode}`);
+        }
+      }
+    } catch (error) {
+      console.error(`❌ Error al restaurar salas para ${username}:`, error);
     }
 
     // Enviar confirmación de registro
@@ -551,7 +610,9 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
           roomUsers.forEach((member) => {
             const memberUser = this.users.get(member);
 
-            if (memberUser && memberUser.socket.connected) {
+            // 🔥 NUEVO: Validar que el socket esté conectado
+            if (memberUser && memberUser.socket && memberUser.socket.connected) {
+              console.log(`✅ Enviando mensaje a ${member} en sala ${roomCode}`);
               memberUser.socket.emit('message', {
                 id: savedMessage?.id, // 🔥 Incluir ID del mensaje
                 from: from || 'Usuario Desconocido',
@@ -569,8 +630,14 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
                 replyToSender,
                 replyToText,
               });
+            } else {
+              // 🔥 NUEVO: Log cuando no se puede enviar
+              console.warn(`⚠️ No se puede enviar mensaje a ${member}: socket no conectado o usuario no existe`);
             }
           });
+        } else {
+          // 🔥 NUEVO: Log cuando no hay usuarios en la sala
+          console.warn(`⚠️ No hay usuarios en la sala ${roomCode}`);
         }
       } else {
         // Es un grupo normal
@@ -794,7 +861,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('createGroup')
-  handleCreateGroup(
+  async handleCreateGroup(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { groupName: string; members: string[]; from: string },
   ) {
@@ -802,11 +869,30 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const groupMembers = new Set(data.members);
     groupMembers.add(data.from || 'Usuario');
     this.groups.set(data.groupName, groupMembers);
+
+    // 🔥 NUEVO: Persistir grupo en BD como sala temporal
+    try {
+      const createRoomDto = {
+        name: data.groupName,
+        maxCapacity: data.members.length + 10,
+        creatorUsername: data.from,
+      };
+
+      await this.temporaryRoomsService.create(
+        createRoomDto,
+        1, // userId por defecto
+        data.from
+      );
+      console.log(`✅ Grupo "${data.groupName}" persistido en BD`);
+    } catch (error) {
+      console.error(`❌ Error al persistir grupo en BD:`, error);
+    }
+
     this.broadcastGroupList();
   }
 
   @SubscribeMessage('joinGroup')
-  handleJoinGroup(
+  async handleJoinGroup(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { groupName: string; from: string },
   ) {
@@ -814,12 +900,28 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const groupToJoin = this.groups.get(data.groupName);
     if (groupToJoin) {
       groupToJoin.add(data.from || 'Usuario');
+
+      // 🔥 NUEVO: Sincronizar cambios en BD
+      try {
+        const room = await this.temporaryRoomsService.findByName(data.groupName);
+        if (room) {
+          const updatedMembers = Array.from(groupToJoin);
+          await this.temporaryRoomsService.updateRoomMembers(room.id, {
+            members: updatedMembers,
+            currentMembers: updatedMembers.length,
+          } as any);
+          console.log(`✅ Grupo "${data.groupName}" actualizado en BD`);
+        }
+      } catch (error) {
+        console.error(`❌ Error al actualizar grupo en BD:`, error);
+      }
+
       this.broadcastGroupList();
     }
   }
 
   @SubscribeMessage('leaveGroup')
-  handleLeaveGroup(
+  async handleLeaveGroup(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { groupName: string; from: string },
   ) {
@@ -827,6 +929,22 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const groupToLeave = this.groups.get(data.groupName);
     if (groupToLeave) {
       groupToLeave.delete(data.from || 'Usuario');
+
+      // 🔥 NUEVO: Sincronizar cambios en BD
+      try {
+        const room = await this.temporaryRoomsService.findByName(data.groupName);
+        if (room) {
+          const updatedMembers = Array.from(groupToLeave);
+          await this.temporaryRoomsService.updateRoomMembers(room.id, {
+            members: updatedMembers,
+            currentMembers: updatedMembers.length,
+          } as any);
+          console.log(`✅ Grupo "${data.groupName}" actualizado en BD`);
+        }
+      } catch (error) {
+        console.error(`❌ Error al actualizar grupo en BD:`, error);
+      }
+
       this.broadcastGroupList();
     }
   }
@@ -902,11 +1020,18 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
     console.log(`🏠 WS: joinRoom - Usuario: ${data.from}, Sala: ${data.roomCode}`);
 
     try {
-      // Actualizar la base de datos usando el servicio
+      // 🔥 Actualizar la base de datos usando el servicio
       const joinDto = { roomCode: data.roomCode, username: data.from };
       await this.temporaryRoomsService.joinRoom(joinDto, data.from);
+      console.log(`✅ Usuario ${data.from} unido a sala en BD`);
     } catch (error) {
-      // Error al unir en BD
+      // 🔥 NUEVO: Notificar al cliente del error
+      console.error(`❌ Error al unir usuario ${data.from} a sala en BD:`, error);
+      client.emit('joinRoomError', {
+        roomCode: data.roomCode,
+        message: error.message || 'Error al unirse a la sala'
+      });
+      return; // No continuar si falla en BD
     }
 
     // Agregar usuario a la sala en memoria
@@ -914,11 +1039,13 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
       this.roomUsers.set(data.roomCode, new Set());
     }
     this.roomUsers.get(data.roomCode)!.add(data.from);
+    console.log(`✅ Usuario ${data.from} agregado a sala en memoria`);
 
     // Actualizar la sala actual del usuario
     const user = this.users.get(data.from);
     if (user) {
       user.currentRoom = data.roomCode;
+      console.log(`✅ Sala actual del usuario actualizada a ${data.roomCode}`);
     }
 
     // Notificar a todos en la sala
@@ -931,6 +1058,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const room = await this.temporaryRoomsService.findByRoomCode(data.roomCode);
       allUsernames = room.members || [];
     } catch (error) {
+      console.error(`❌ Error al obtener sala ${data.roomCode}:`, error);
       allUsernames = connectedUsernamesList;
     }
 
@@ -956,6 +1084,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect {
       roomName: data.roomName,
       users: roomUsersList,
     });
+    console.log(`✅ Confirmación de unión enviada a ${data.from}`);
   }
 
   @SubscribeMessage('kickUser')

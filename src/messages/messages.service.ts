@@ -29,8 +29,9 @@ export class MessagesService {
     offset: number = 0,
   ): Promise<Message[]> {
     // Cargar mensajes en orden DESC (más recientes primero) para paginación estilo WhatsApp
+    // 🔥 Excluir mensajes de hilos (threadId debe ser null)
     const messages = await this.messageRepository.find({
-      where: { roomCode, isDeleted: false },
+      where: { roomCode, isDeleted: false, threadId: IsNull() },
       order: { sentAt: 'DESC' },
       take: limit,
       skip: offset,
@@ -98,8 +99,9 @@ export class MessagesService {
   }
 
   async findRecentMessages(limit: number = 20): Promise<Message[]> {
+    // 🔥 Excluir mensajes de hilos (threadId debe ser null)
     return await this.messageRepository.find({
-      where: { isDeleted: false },
+      where: { isDeleted: false, threadId: IsNull() },
       order: { sentAt: 'DESC' },
       take: limit,
     });
@@ -292,18 +294,21 @@ export class MessagesService {
       return [];
     }
 
-    // Buscar mensajes donde el usuario es el remitente o el destinatario
+    // 🔥 Buscar mensajes donde el usuario es el remitente o el destinatario
+    // Excluir mensajes de hilos (threadId debe ser null)
     const messages = await this.messageRepository.find({
       where: [
         {
           from: username,
           message: Like(`%${searchTerm}%`),
           isDeleted: false,
+          threadId: IsNull(),
         },
         {
           to: username,
           message: Like(`%${searchTerm}%`),
           isDeleted: false,
+          threadId: IsNull(),
         },
       ],
       order: { sentAt: 'DESC' },
