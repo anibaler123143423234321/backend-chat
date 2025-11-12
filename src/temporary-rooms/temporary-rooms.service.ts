@@ -166,13 +166,19 @@ export class TemporaryRoomsService {
       room.connectedMembers = [];
     }
 
+    // 🔥 MODIFICADO: Verificar si el usuario ya estaba en la sala ANTES (en members)
+    const wasAlreadyMember = room.members.includes(username);
+
     // Agregar al historial si no estÃ¡
-    if (!room.members.includes(username)) {
+    if (!wasAlreadyMember) {
       room.members.push(username);
     }
 
+    // Verificar si el usuario ya estaba conectado
+    const wasAlreadyConnected = room.connectedMembers.includes(username);
+
     // Si el usuario ya estÃ¡ conectado, no hacer nada
-    if (room.connectedMembers.includes(username)) {
+    if (wasAlreadyConnected) {
       // console.log('ðŸ‘¤ Usuario ya estÃ¡ conectado en la sala');
       return room;
     }
@@ -187,13 +193,14 @@ export class TemporaryRoomsService {
       room.connectedMembers.push(username);
     }
 
-    room.currentMembers = room.connectedMembers.length;
+    // 🔥 MODIFICADO: currentMembers debe ser el total de usuarios AÑADIDOS (members), no solo conectados
+    room.currentMembers = room.members.length;
     // console.log('ðŸ‘¥ Usuarios conectados en la sala:', room.connectedMembers);
     // console.log('ðŸ“œ Historial de usuarios:', room.members);
     await this.temporaryRoomRepository.save(room);
 
-    // Notificar al gateway para que envÃ­e notificaciÃ³n al usuario
-    if (this.socketGateway) {
+    // 🔥 MODIFICADO: Solo notificar si el usuario fue REALMENTE AGREGADO (no estaba en members antes)
+    if (!wasAlreadyMember && this.socketGateway) {
       this.socketGateway.notifyUserAddedToRoom(username, room.roomCode, room.name);
     }
 
@@ -221,7 +228,8 @@ export class TemporaryRoomsService {
     const userIndex = room.connectedMembers.indexOf(username);
     if (userIndex !== -1) {
       room.connectedMembers.splice(userIndex, 1);
-      room.currentMembers = room.connectedMembers.length;
+      // 🔥 MODIFICADO: currentMembers debe ser el total de usuarios AÑADIDOS (members), no solo conectados
+      room.currentMembers = room.members.length;
 
       // console.log('ðŸ‘¥ Usuarios conectados despuÃ©s de salir:', room.connectedMembers);
       // console.log('ðŸ“œ Historial de usuarios (sin cambios):', room.members);
@@ -257,7 +265,8 @@ export class TemporaryRoomsService {
     // Remover el usuario de connectedMembers
     if (room.connectedMembers && room.connectedMembers.includes(username)) {
       room.connectedMembers = room.connectedMembers.filter(u => u !== username);
-      room.currentMembers = room.connectedMembers.length;
+      // 🔥 MODIFICADO: currentMembers debe ser el total de usuarios AÑADIDOS (members), no solo conectados
+      room.currentMembers = room.members.length;
     }
 
     // Remover el usuario de members (historial)
@@ -530,32 +539,21 @@ export class TemporaryRoomsService {
       throw new NotFoundException('Sala no encontrada o inactiva');
     }
 
-    // Obtener historial completo de usuarios
+    // 🔥 MODIFICADO: Usar TODOS los usuarios añadidos a la sala (members)
     const allUsers = room.members || [];
-    const connectedUsers = room.connectedMembers || [];
 
-    // Crear lista con todos los usuarios del historial y su estado de conexiÃ³n
+    // Crear lista con TODOS los usuarios añadidos a la sala
     let userList = [];
     if (allUsers.length > 0) {
       userList = allUsers.map((username, index) => ({
         id: index + 1,
         username: username,
         displayName: username === 'Usuario' ? `Usuario ${index + 1}` : username,
-        isOnline: connectedUsers.includes(username), // true si estÃ¡ en connectedMembers
+        isOnline: true,
       }));
-    } else if (room.currentMembers > 0) {
-      // Si hay miembros pero no en el array, crear usuarios genÃ©ricos
-      for (let i = 1; i <= room.currentMembers; i++) {
-        userList.push({
-          id: i,
-          username: `Usuario ${i}`,
-          displayName: `Usuario ${i}`,
-          isOnline: true,
-        });
-      }
     }
 
-    // console.log('âœ… Usuarios en la sala (historial):', userList);
+    // console.log('✅ Usuarios en la sala (añadidos):', userList);
 
     return {
       roomCode: room.roomCode,

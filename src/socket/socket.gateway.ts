@@ -1051,18 +1051,19 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     // Notificar a todos en la sala
     await this.broadcastRoomUsers(data.roomCode);
 
-    // Obtener historial completo de usuarios para roomJoined
+    // Obtener TODOS los usuarios añadidos a la sala para roomJoined
     const connectedUsernamesList = Array.from(this.roomUsers.get(data.roomCode) || []);
     let allUsernames: string[] = [];
     try {
       const room = await this.temporaryRoomsService.findByRoomCode(data.roomCode);
+      // 🔥 MODIFICADO: Usar TODOS los usuarios añadidos (members)
       allUsernames = room.members || [];
     } catch (error) {
       console.error(`❌ Error al obtener sala ${data.roomCode}:`, error);
       allUsernames = connectedUsernamesList;
     }
 
-    // Crear lista con TODOS los usuarios (historial) y su estado de conexión
+    // Crear lista con TODOS los usuarios añadidos a la sala y su estado de conexión
     const roomUsersList = allUsernames.map(username => {
       const user = this.users.get(username);
       const isOnline = connectedUsernamesList.includes(username);
@@ -1129,12 +1130,8 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       });
     }
 
-    // Actualizar lista de usuarios en la sala
-    const roomUsersList = Array.from(roomUsersSet || []);
-    this.server.to(data.roomCode).emit('roomUsers', {
-      roomCode: data.roomCode,
-      users: roomUsersList,
-    });
+    // Actualizar lista de usuarios en la sala usando broadcastRoomUsers
+    await this.broadcastRoomUsers(data.roomCode);
 
     console.log(`✅ Usuario ${data.username} expulsado de la sala ${data.roomCode}`);
   }
@@ -1355,17 +1352,22 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
   private async broadcastRoomUsers(roomCode: string) {
     const connectedUsernamesList = Array.from(this.roomUsers.get(roomCode) || []);
 
-    // Obtener el historial completo de usuarios de la base de datos
+    // Obtener TODOS los usuarios añadidos a la sala (historial)
     let allUsernames: string[] = [];
+    let memberCount: number = 0;
     try {
       const room = await this.temporaryRoomsService.findByRoomCode(roomCode);
+      // 🔥 MODIFICADO: Usar TODOS los usuarios añadidos (members) para mostrar en la lista
       allUsernames = room.members || [];
+      // 🔥 El contador debe ser el total de usuarios añadidos a la sala
+      memberCount = room.members?.length || 0;
     } catch (error) {
       // Si hay error, usar solo los usuarios conectados
       allUsernames = connectedUsernamesList;
+      memberCount = connectedUsernamesList.length;
     }
 
-    // Crear lista con TODOS los usuarios (historial) y su estado de conexión
+    // Crear lista con TODOS los usuarios añadidos a la sala y su estado de conexión
     const roomUsersList = allUsernames.map(username => {
       const user = this.users.get(username);
       const isOnline = connectedUsernamesList.includes(username);
@@ -1394,8 +1396,9 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       }
     });
 
+    // 🔥 MODIFICADO: Usar members.length para el contador (total de usuarios añadidos a la sala)
     // Notificar a todos los ADMIN y JEFEPISO sobre el cambio en el contador de usuarios
-    this.broadcastRoomCountUpdate(roomCode, roomUsersList.length);
+    this.broadcastRoomCountUpdate(roomCode, memberCount);
   }
 
   private broadcastRoomCountUpdate(roomCode: string, currentMembers: number) {
