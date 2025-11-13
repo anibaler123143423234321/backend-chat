@@ -1639,14 +1639,36 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
         }
       } else {
         // Mensaje de hilo en conversación 1-a-1
-        // Enviar al remitente (para sincronizar otras pestañas/dispositivos)
-        const senderUser = this.users.get(from);
+        // 🔥 Búsqueda case-insensitive del remitente
+        let senderUser = this.users.get(from);
+        if (!senderUser && from) {
+          const fromNormalized = from.toLowerCase().trim();
+          const foundUsername = Array.from(this.users.keys()).find(
+            key => key?.toLowerCase().trim() === fromNormalized
+          );
+          if (foundUsername) {
+            senderUser = this.users.get(foundUsername);
+            console.log(`✅ Remitente encontrado con búsqueda case-insensitive: ${foundUsername}`);
+          }
+        }
+
         if (senderUser && senderUser.socket.connected) {
           senderUser.socket.emit('threadMessage', data);
         }
 
-        // Enviar al destinatario
-        const recipientUser = this.users.get(to);
+        // 🔥 Búsqueda case-insensitive del destinatario
+        let recipientUser = this.users.get(to);
+        if (!recipientUser && to) {
+          const toNormalized = to.toLowerCase().trim();
+          const foundUsername = Array.from(this.users.keys()).find(
+            key => key?.toLowerCase().trim() === toNormalized
+          );
+          if (foundUsername) {
+            recipientUser = this.users.get(foundUsername);
+            console.log(`✅ Destinatario encontrado con búsqueda case-insensitive: ${foundUsername}`);
+          }
+        }
+
         if (recipientUser && recipientUser.socket.connected) {
           recipientUser.socket.emit('threadMessage', data);
         }
@@ -1664,7 +1686,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     @ConnectedSocket() client: Socket,
     @MessageBody() data: any,
   ) {
-    console.log(`🔢 WS: threadCountUpdated - MessageID: ${data.messageId}, LastReply: ${data.lastReplyFrom}`);
+    console.log(`🔢 WS: threadCountUpdated - MessageID: ${data.messageId}, LastReply: ${data.lastReplyFrom}, From: ${data.from}, To: ${data.to}`);
 
     try {
       const { messageId, lastReplyFrom, isGroup, roomCode, to, from } = data;
@@ -1685,22 +1707,52 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
         }
       } else {
         // Actualización en conversación 1-a-1
-        // Enviar al destinatario
-        const recipientUser = this.users.get(to);
+        // 🔥 Búsqueda case-insensitive del destinatario
+        let recipientUser = this.users.get(to);
+        if (!recipientUser && to) {
+          const toNormalized = to.toLowerCase().trim();
+          const foundUsername = Array.from(this.users.keys()).find(
+            key => key?.toLowerCase().trim() === toNormalized
+          );
+          if (foundUsername) {
+            recipientUser = this.users.get(foundUsername);
+            console.log(`✅ Destinatario encontrado con búsqueda case-insensitive: ${foundUsername}`);
+          }
+        }
+
         if (recipientUser && recipientUser.socket.connected) {
+          console.log(`✅ Enviando threadCountUpdated al destinatario: ${to}`);
           recipientUser.socket.emit('threadCountUpdated', {
             messageId,
             lastReplyFrom
           });
+        } else {
+          console.log(`⚠️ Destinatario no encontrado o no conectado: ${to}`);
         }
 
-        // 🔥 TAMBIÉN enviar al remitente para que vea el contador actualizado
-        const senderUser = this.users.get(from);
+        // 🔥 Búsqueda case-insensitive del remitente
+        let senderUser = this.users.get(from);
+        if (!senderUser && from) {
+          const fromNormalized = from.toLowerCase().trim();
+          const foundUsername = Array.from(this.users.keys()).find(
+            key => key?.toLowerCase().trim() === fromNormalized
+          );
+          if (foundUsername) {
+            senderUser = this.users.get(foundUsername);
+            console.log(`✅ Remitente encontrado con búsqueda case-insensitive: ${foundUsername}`);
+          }
+        }
+
         if (senderUser && senderUser.socket.connected && from !== to) {
+          console.log(`✅ Enviando threadCountUpdated al remitente: ${from}`);
           senderUser.socket.emit('threadCountUpdated', {
             messageId,
             lastReplyFrom
           });
+        } else if (from === to) {
+          console.log(`ℹ️ Remitente y destinatario son el mismo usuario, no se envía duplicado`);
+        } else {
+          console.log(`⚠️ Remitente no encontrado o no conectado: ${from}`);
         }
       }
 

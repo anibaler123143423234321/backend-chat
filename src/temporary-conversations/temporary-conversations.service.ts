@@ -84,8 +84,8 @@ export class TemporaryConversationsService {
           for (let i = 0; i < participants.length; i++) {
             for (let j = i + 1; j < participants.length; j++) {
               messageConditions.push(
-                { from: participants[i], to: participants[j], isDeleted: false, threadId: IsNull() },
-                { from: participants[j], to: participants[i], isDeleted: false, threadId: IsNull() }
+                { from: participants[i], to: participants[j], isDeleted: false, threadId: IsNull(), isGroup: false },
+                { from: participants[j], to: participants[i], isDeleted: false, threadId: IsNull(), isGroup: false }
               );
             }
           }
@@ -279,8 +279,8 @@ export class TemporaryConversationsService {
           for (let i = 0; i < participants.length; i++) {
             for (let j = i + 1; j < participants.length; j++) {
               messageConditions.push(
-                { from: participants[i], to: participants[j], isDeleted: false, threadId: IsNull() },
-                { from: participants[j], to: participants[i], isDeleted: false, threadId: IsNull() }
+                { from: participants[i], to: participants[j], isDeleted: false, threadId: IsNull(), isGroup: false },
+                { from: participants[j], to: participants[i], isDeleted: false, threadId: IsNull(), isGroup: false }
               );
             }
           }
@@ -643,8 +643,8 @@ export class TemporaryConversationsService {
           for (let i = 0; i < participants.length; i++) {
             for (let j = i + 1; j < participants.length; j++) {
               messageConditions.push(
-                { from: participants[i], to: participants[j], isDeleted: false, threadId: IsNull() },
-                { from: participants[j], to: participants[i], isDeleted: false, threadId: IsNull() }
+                { from: participants[i], to: participants[j], isDeleted: false, threadId: IsNull(), isGroup: false },
+                { from: participants[j], to: participants[i], isDeleted: false, threadId: IsNull(), isGroup: false }
               );
             }
           }

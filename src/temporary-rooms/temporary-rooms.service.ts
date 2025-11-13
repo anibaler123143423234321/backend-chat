@@ -155,10 +155,6 @@ export class TemporaryRoomsService {
     const room = await this.findByRoomCode(joinDto.roomCode);
     // console.log('ðŸ  Sala encontrada:', room);
 
-    if (room.currentMembers >= room.maxCapacity) {
-      throw new BadRequestException('La sala ha alcanzado su capacidad mÃ¡xima');
-    }
-
     if (!room.members) {
       room.members = [];
     }
@@ -169,9 +165,21 @@ export class TemporaryRoomsService {
     // 🔥 MODIFICADO: Verificar si el usuario ya estaba en la sala ANTES (en members)
     const wasAlreadyMember = room.members.includes(username);
 
+    console.log(`🔄 joinRoom - Usuario: ${username}, Sala: ${room.name}, Ya era miembro: ${wasAlreadyMember}, Capacidad: ${room.members.length}/${room.maxCapacity}`);
+
+    // 🔥 IMPORTANTE: Verificar capacidad ANTES de agregar
+    // Solo contar si el usuario NO era miembro antes
+    if (!wasAlreadyMember && room.members.length >= room.maxCapacity) {
+      console.error(`❌ Sala llena: ${room.members.length}/${room.maxCapacity} - No se puede agregar a ${username}`);
+      throw new BadRequestException(
+        `La sala ha alcanzado su capacidad máxima (${room.maxCapacity} usuarios)`
+      );
+    }
+
     // Agregar al historial si no estÃ¡
     if (!wasAlreadyMember) {
       room.members.push(username);
+      console.log(`➕ Usuario ${username} agregado a members. Total: ${room.members.length}/${room.maxCapacity}`);
     }
 
     // Verificar si el usuario ya estaba conectado
@@ -195,6 +203,7 @@ export class TemporaryRoomsService {
 
     // 🔥 MODIFICADO: currentMembers debe ser el total de usuarios AÑADIDOS (members), no solo conectados
     room.currentMembers = room.members.length;
+    console.log(`💾 Guardando sala - Members: ${room.members.length}, Connected: ${room.connectedMembers.length}`);
     // console.log('ðŸ‘¥ Usuarios conectados en la sala:', room.connectedMembers);
     // console.log('ðŸ“œ Historial de usuarios:', room.members);
     await this.temporaryRoomRepository.save(room);
@@ -202,7 +211,10 @@ export class TemporaryRoomsService {
     // 🔥 MODIFICADO: Solo notificar si el usuario fue REALMENTE AGREGADO (no estaba en members antes)
     if (!wasAlreadyMember && this.socketGateway) {
       this.socketGateway.notifyUserAddedToRoom(username, room.roomCode, room.name);
+      console.log(`📢 Notificación enviada para ${username}`);
     }
+
+    console.log(`✅ Usuario ${username} unido exitosamente a la sala ${room.name}`);
 
     // console.log('âœ… Usuario unido exitosamente a la sala');
     return room;

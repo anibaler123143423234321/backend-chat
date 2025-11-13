@@ -66,10 +66,12 @@ export class MessagesService {
     limit: number = 50,
     offset: number = 0,
   ): Promise<Message[]> {
+    // 🔥 CORREGIDO: Agregar isGroup: false para excluir mensajes de grupo
+    // Esto asegura que solo se retornen mensajes privados entre los dos usuarios específicos
     const messages = await this.messageRepository.find({
       where: [
-        { from, to, isDeleted: false, threadId: IsNull() },
-        { from: to, to: from, isDeleted: false, threadId: IsNull() },
+        { from, to, isDeleted: false, threadId: IsNull(), isGroup: false },
+        { from: to, to: from, isDeleted: false, threadId: IsNull(), isGroup: false },
       ],
       order: { sentAt: 'ASC' },
       take: limit,
@@ -253,9 +255,26 @@ export class MessagesService {
     username: string,
     newText: string,
   ): Promise<Message | null> {
-    const message = await this.messageRepository.findOne({
+    // 🔥 Primero intentar búsqueda exacta
+    let message = await this.messageRepository.findOne({
       where: { id: messageId, from: username },
     });
+
+    // 🔥 Si no se encuentra, intentar búsqueda case-insensitive
+    if (!message) {
+      const allMessages = await this.messageRepository.find({
+        where: { id: messageId },
+      });
+
+      // Buscar el mensaje con coincidencia case-insensitive
+      message = allMessages.find(
+        msg => msg.from?.toLowerCase().trim() === username?.toLowerCase().trim()
+      );
+
+      if (message) {
+        console.log(`✅ Mensaje encontrado con búsqueda case-insensitive: "${message.from}" vs "${username}"`);
+      }
+    }
 
     if (message) {
       message.message = newText;
@@ -264,6 +283,8 @@ export class MessagesService {
       await this.messageRepository.save(message);
       return message;
     }
+
+    console.log(`⚠️ No se encontró mensaje con ID ${messageId} del usuario "${username}"`);
     return null;
   }
 
@@ -296,6 +317,7 @@ export class MessagesService {
 
     // 🔥 Buscar mensajes donde el usuario es el remitente o el destinatario
     // Excluir mensajes de hilos (threadId debe ser null)
+    // 🔥 CORREGIDO: Agregar isGroup: false para excluir mensajes de grupo
     const messages = await this.messageRepository.find({
       where: [
         {
@@ -303,12 +325,14 @@ export class MessagesService {
           message: Like(`%${searchTerm}%`),
           isDeleted: false,
           threadId: IsNull(),
+          isGroup: false,
         },
         {
           to: username,
           message: Like(`%${searchTerm}%`),
           isDeleted: false,
           threadId: IsNull(),
+          isGroup: false,
         },
       ],
       order: { sentAt: 'DESC' },
