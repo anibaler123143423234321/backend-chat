@@ -4,6 +4,7 @@ import { Repository, Like, IsNull } from 'typeorm';
 import { Message } from './entities/message.entity';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { TemporaryRoom } from '../temporary-rooms/entities/temporary-room.entity';
+import { getPeruDate } from '../utils/date.utils';
 
 @Injectable()
 export class MessagesService {
@@ -17,7 +18,7 @@ export class MessagesService {
   async create(createMessageDto: CreateMessageDto): Promise<Message> {
     const message = this.messageRepository.create({
       ...createMessageDto,
-      sentAt: createMessageDto.sentAt || new Date(),
+      sentAt: createMessageDto.sentAt || getPeruDate(),
     });
 
     return await this.messageRepository.save(message);

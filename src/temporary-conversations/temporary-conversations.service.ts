@@ -10,6 +10,7 @@ import { CreateTemporaryConversationDto } from './dto/create-temporary-conversat
 import { Message } from '../messages/entities/message.entity';
 import { User } from '../users/entities/user.entity'; // ðŸ”¥ Importar entidad User
 import { randomBytes } from 'crypto';
+import { getPeruDate } from '../utils/date.utils';
 
 @Injectable()
 export class TemporaryConversationsService {
@@ -27,7 +28,7 @@ export class TemporaryConversationsService {
     userId: number,
   ): Promise<TemporaryConversation> {
     const linkId = this.generateLinkId();
-    const expiresAt = new Date();
+    const expiresAt = getPeruDate();
     expiresAt.setHours(expiresAt.getHours() + createDto.durationHours);
 
     const conversation = this.temporaryConversationRepository.create({
@@ -476,7 +477,7 @@ export class TemporaryConversationsService {
     }
 
     const linkId = this.generateLinkId();
-    const expiresAt = new Date();
+    const expiresAt = getPeruDate();
     // Conversaciones asignadas por admin no expiran (o expiran en 1 aÃ±o)
     expiresAt.setFullYear(expiresAt.getFullYear() + 1);
 

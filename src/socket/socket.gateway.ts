@@ -16,6 +16,7 @@ import * as crypto from 'crypto';
 import { TemporaryRoomsService } from '../temporary-rooms/temporary-rooms.service';
 import { MessagesService } from '../messages/messages.service';
 import { User } from '../users/entities/user.entity';
+import { getPeruDate, formatPeruTime } from '../utils/date.utils';
 
 @WebSocketGateway({
   cors: {
@@ -570,12 +571,33 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       replyToMessageId,
       replyToSender,
       replyToText,
+      roomCode: messageRoomCode, // 🔥 roomCode del mensaje (si viene del frontend)
     } = data;
 
     // 🔥 Obtener información del remitente (role y numeroAgente)
     const senderUser = this.users.get(from);
-    const senderRole = senderUser?.userData?.role || null;
-    const senderNumeroAgente = senderUser?.userData?.numeroAgente || null;
+    let senderRole = senderUser?.userData?.role || null;
+    let senderNumeroAgente = senderUser?.userData?.numeroAgente || null;
+
+    // 🔥 CRÍTICO: Si el usuario no está conectado, buscar en la BD
+    if (!senderRole || !senderNumeroAgente) {
+      try {
+        // Construir el nombre completo del usuario (nombre + apellido)
+        const dbUser = await this.userRepository.findOne({
+          where: { username: from },
+        });
+
+        if (dbUser) {
+          senderRole = dbUser.role || senderRole;
+          senderNumeroAgente = dbUser.numeroAgente || senderNumeroAgente;
+          console.log(`✅ Información del remitente obtenida de BD: role=${senderRole}, numeroAgente=${senderNumeroAgente}`);
+        } else {
+          console.warn(`⚠️ Usuario ${from} no encontrado en BD`);
+        }
+      } catch (error) {
+        console.error(`❌ Error al buscar usuario en BD:`, error);
+      }
+    }
 
     // 🔥 GUARDAR MENSAJE EN BD PRIMERO para obtener el ID
     let savedMessage = null;
@@ -594,15 +616,20 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       console.log(`🔵 Procesando mensaje de GRUPO`);
       // Verificar si es una sala temporal
       const user = this.users.get(from);
+
+      // 🔥 CRÍTICO: Usar roomCode del mensaje si está disponible, sino usar currentRoom del usuario
+      const roomCode = messageRoomCode || user?.currentRoom;
+
       console.log(`👤 Usuario remitente:`, {
         username: from,
+        messageRoomCode,
         currentRoom: user?.currentRoom,
+        finalRoomCode: roomCode,
         hasUser: !!user
       });
 
-      if (user && user.currentRoom) {
+      if (roomCode) {
         // Es una sala temporal
-        const roomCode = user.currentRoom;
         const roomUsers = this.roomUsers.get(roomCode);
         console.log(`🏠 Enviando a sala temporal: ${roomCode}, Miembros: ${roomUsers?.size || 0}`);
 
@@ -619,9 +646,10 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
                 senderRole, // 🔥 Incluir role del remitente
                 senderNumeroAgente, // 🔥 Incluir numeroAgente del remitente
                 group: to,
+                roomCode: roomCode, // 🔥 CRÍTICO: Incluir roomCode para validación en frontend
                 message,
                 isGroup: true,
-                time: time || new Date().toLocaleTimeString(),
+                time: time || formatPeruTime(),
                 mediaType,
                 mediaData,
                 fileName,
@@ -644,6 +672,15 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
         const group = this.groups.get(to);
         console.log(`👥 Enviando a grupo normal: ${to}, Miembros: ${group?.size || 0}`);
         if (group) {
+          // 🔥 Obtener el roomCode del grupo (buscar en roomUsers)
+          let groupRoomCode = null;
+          for (const [code, users] of this.roomUsers.entries()) {
+            if (users.has(from)) {
+              groupRoomCode = code;
+              break;
+            }
+          }
+
           const groupMembers = Array.from(group);
           groupMembers.forEach((member) => {
             const user = this.users.get(member);
@@ -654,9 +691,10 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
                 senderRole, // 🔥 Incluir role del remitente
                 senderNumeroAgente, // 🔥 Incluir numeroAgente del remitente
                 group: to,
+                roomCode: groupRoomCode, // 🔥 CRÍTICO: Incluir roomCode para validación en frontend
                 message,
                 isGroup: true,
-                time: time || new Date().toLocaleTimeString(),
+                time: time || formatPeruTime(),
                 mediaType,
                 mediaData,
                 fileName,
@@ -718,7 +756,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
           to: recipientUsername,
           message,
           isGroup: false,
-          time: time || new Date().toLocaleTimeString(),
+          time: time || formatPeruTime(),
           mediaType,
           mediaData,
           fileName,
@@ -782,8 +820,8 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
         mediaData,
         fileName,
         fileSize,
-        sentAt: new Date(),
-        time: time || new Date().toLocaleTimeString(),
+        sentAt: getPeruDate(),
+        time: time || formatPeruTime(),
         replyToMessageId,
         replyToSender,
         replyToText,
@@ -983,7 +1021,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     const { linkId, from } = data;
     const link = this.temporaryLinks.get(linkId);
 
-    if (link && link.isActive && link.expiresAt > new Date()) {
+    if (link && link.isActive && link.expiresAt > getPeruDate()) {
       if (link.type === 'conversation') {
         const groupName = `Conversación Temporal ${linkId.substring(0, 8)}`;
         const tempGroup = new Set<string>(
@@ -1193,14 +1231,14 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       expiresAt,
       createdBy,
       isActive: true,
-      createdAt: new Date(),
+      createdAt: getPeruDate(),
     });
 
     return linkId;
   }
 
   private cleanExpiredLinks() {
-    const now = new Date();
+    const now = getPeruDate();
     for (const [linkId, link] of this.temporaryLinks.entries()) {
       if (link.expiresAt < now) {
         this.temporaryLinks.delete(linkId);
@@ -1562,7 +1600,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
           senderUser.socket.emit('conversationRead', {
             readBy: data.to,
             messageIds: messages.map(m => m.id),
-            readAt: new Date(),
+            readAt: getPeruDate(),
           });
         } else {
           console.log(`❌ No se pudo notificar a ${data.from} (usuario no conectado o no encontrado)`);
@@ -1571,7 +1609,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
         // Confirmar al lector
         client.emit('conversationReadConfirmed', {
           messagesUpdated: messages.length,
-          readAt: new Date(),
+          readAt: getPeruDate(),
         });
       }
     } catch (error) {
