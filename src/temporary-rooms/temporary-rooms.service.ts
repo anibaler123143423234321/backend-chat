@@ -6,11 +6,12 @@
   forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like } from 'typeorm';
+import { Repository, Like, IsNull } from 'typeorm';
 import { TemporaryRoom } from './entities/temporary-room.entity';
 import { CreateTemporaryRoomDto } from './dto/create-temporary-room.dto';
 import { JoinRoomDto } from './dto/join-room.dto';
 import { User } from '../users/entities/user.entity';
+import { Message } from '../messages/entities/message.entity';
 import { randomBytes } from 'crypto';
 
 export interface TemporaryRoomWithUrl {
@@ -33,6 +34,8 @@ export class TemporaryRoomsService {
     private temporaryRoomRepository: Repository<TemporaryRoom>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @InjectRepository(Message)
+    private messageRepository: Repository<Message>,
   ) {}
 
   // MÃ©todo para inyectar el gateway de WebSocket (evita dependencia circular)
@@ -391,8 +394,32 @@ export class TemporaryRoomsService {
 
     // console.log('ðŸ“‹ Salas encontradas:', rooms.length, 'Total:', total);
 
+    // 🔥 NUEVO: Agregar el último mensaje de cada sala
+    const roomsWithLastMessage = await Promise.all(
+      rooms.map(async (room) => {
+        // Obtener el último mensaje de la sala
+        const lastMessage = await this.messageRepository.findOne({
+          where: { roomCode: room.roomCode, isDeleted: false, threadId: IsNull() },
+          order: { id: 'DESC' },
+        });
+
+        return {
+          ...room,
+          lastMessage: lastMessage ? {
+            id: lastMessage.id,
+            text: lastMessage.message,
+            from: lastMessage.from,
+            sentAt: lastMessage.sentAt,
+            time: lastMessage.time,
+            mediaType: lastMessage.mediaType,
+            fileName: lastMessage.fileName,
+          } : null,
+        };
+      })
+    );
+
     return {
-      data: rooms,
+      data: roomsWithLastMessage,
       total: total,
       page: page,
       limit: limit,

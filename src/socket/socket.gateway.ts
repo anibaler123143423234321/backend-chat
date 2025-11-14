@@ -676,12 +676,27 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
         console.log(`🏠 Enviando a sala temporal: ${roomCode}, Miembros: ${roomUsers?.size || 0}`);
 
         if (roomUsers) {
+          // 🔥 Detectar menciones en el mensaje
+          const mentionRegex = /@([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]+?)(?=\s{2,}|$|[.,!?;:]|\n)/g;
+          const mentions = [];
+          let match;
+          while ((match = mentionRegex.exec(message)) !== null) {
+            mentions.push(match[1].trim());
+          }
+          console.log(`📢 Menciones detectadas en mensaje:`, mentions);
+
           roomUsers.forEach((member) => {
             const memberUser = this.users.get(member);
 
             // 🔥 NUEVO: Validar que el socket esté conectado
             if (memberUser && memberUser.socket && memberUser.socket.connected) {
-              console.log(`✅ Enviando mensaje a ${member} en sala ${roomCode}`);
+              // 🔥 Verificar si este usuario fue mencionado
+              const isMentioned = mentions.some(mention =>
+                member.toUpperCase().includes(mention.toUpperCase()) ||
+                mention.toUpperCase().includes(member.toUpperCase())
+              );
+
+              console.log(`✅ Enviando mensaje a ${member} en sala ${roomCode}${isMentioned ? ' (MENCIONADO)' : ''}`);
               memberUser.socket.emit('message', {
                 id: savedMessage?.id, // 🔥 Incluir ID del mensaje
                 from: from || 'Usuario Desconocido',
@@ -700,6 +715,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
                 replyToMessageId,
                 replyToSender,
                 replyToText,
+                hasMention: isMentioned, // 🔥 NUEVO: Indicar si el usuario fue mencionado
               });
             } else {
               // 🔥 NUEVO: Log cuando no se puede enviar
@@ -724,10 +740,25 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
             }
           }
 
+          // 🔥 Detectar menciones en el mensaje
+          const mentionRegex = /@([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑa-záéíóúñ\s]+?)(?=\s{2,}|$|[.,!?;:]|\n)/g;
+          const mentions = [];
+          let match;
+          while ((match = mentionRegex.exec(message)) !== null) {
+            mentions.push(match[1].trim());
+          }
+          console.log(`📢 Menciones detectadas en mensaje de grupo:`, mentions);
+
           const groupMembers = Array.from(group);
           groupMembers.forEach((member) => {
             const user = this.users.get(member);
             if (user && user.socket.connected) {
+              // 🔥 Verificar si este usuario fue mencionado
+              const isMentioned = mentions.some(mention =>
+                member.toUpperCase().includes(mention.toUpperCase()) ||
+                mention.toUpperCase().includes(member.toUpperCase())
+              );
+
               user.socket.emit('message', {
                 id: savedMessage?.id, // 🔥 Incluir ID del mensaje
                 from: from || 'Usuario Desconocido',
@@ -746,6 +777,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
                 replyToMessageId,
                 replyToSender,
                 replyToText,
+                hasMention: isMentioned, // 🔥 NUEVO: Indicar si el usuario fue mencionado
               });
             }
           });

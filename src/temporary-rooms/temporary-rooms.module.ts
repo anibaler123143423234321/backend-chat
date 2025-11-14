@@ -4,10 +4,11 @@ import { TemporaryRoomsService } from './temporary-rooms.service';
 import { TemporaryRoomsController } from './temporary-rooms.controller';
 import { TemporaryRoom } from './entities/temporary-room.entity';
 import { User } from '../users/entities/user.entity';
+import { Message } from '../messages/entities/message.entity';
 import { AuthModule } from '../auth/auth.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([TemporaryRoom, User]), AuthModule],
+  imports: [TypeOrmModule.forFeature([TemporaryRoom, User, Message]), AuthModule],
   controllers: [TemporaryRoomsController],
   providers: [TemporaryRoomsService],
   exports: [TemporaryRoomsService],
