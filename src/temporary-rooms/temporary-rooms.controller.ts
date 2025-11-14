@@ -45,10 +45,15 @@ export class TemporaryRoomsController {
 
   // Rutas especÃ­ficas ANTES de rutas con parÃ¡metros
   @Get('admin/rooms')
-  getAdminRooms(@Request() req) {
+  getAdminRooms(
+    @Request() req,
+    @Query('page') page?: number,
+    @Query('limit') limit?: number,
+    @Query('search') search?: string,
+  ) {
     // console.log('ðŸ” GET /api/temporary-rooms/admin/rooms called');
     const userId = req.user?.id || 1; // Usar ID por defecto para pruebas
-    return this.temporaryRoomsService.getAdminRooms(userId);
+    return this.temporaryRoomsService.getAdminRooms(userId, page, limit, search);
   }
 
   @Get('user/current-room')

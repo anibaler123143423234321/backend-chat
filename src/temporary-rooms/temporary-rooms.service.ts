@@ -6,7 +6,7 @@
   forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, Like } from 'typeorm';
 import { TemporaryRoom } from './entities/temporary-room.entity';
 import { CreateTemporaryRoomDto } from './dto/create-temporary-room.dto';
 import { JoinRoomDto } from './dto/join-room.dto';
@@ -359,17 +359,45 @@ export class TemporaryRoomsService {
     }
   }
 
-  async getAdminRooms(userId: number): Promise<any[]> {
-    // 🔥 MODIFICADO: Retornar TODAS las salas activas para que ADMIN pueda monitorear todas
-    // console.log('ðŸ” Obteniendo salas del admin:', userId);
-    const rooms = await this.temporaryRoomRepository.find({
-      where: { isActive: true }, // Mostrar TODAS las salas activas para que ADMIN pueda monitorear
-      order: { createdAt: 'DESC' },
-    });
-    // console.log('ðŸ“‹ Salas encontradas:', rooms.length);
+  async getAdminRooms(
+    userId: number,
+    page: number = 1,
+    limit: number = 10,
+    search?: string,
+  ): Promise<any> {
+    // 🔥 MODIFICADO: Retornar salas con paginación y búsqueda
+    // console.log('ðŸ” Obteniendo salas del admin:', userId, 'page:', page, 'limit:', limit, 'search:', search);
 
-    // Usar la duraciÃ³n guardada en la base de datos
-    return rooms;
+    const skip = (page - 1) * limit;
+
+    // Construir condiciones de búsqueda
+    let whereConditions: any = { isActive: true };
+
+    if (search && search.trim()) {
+      // Buscar por nombre O código de sala
+      whereConditions = [
+        { isActive: true, name: Like(`%${search}%`) },
+        { isActive: true, roomCode: Like(`%${search}%`) }
+      ];
+    }
+
+    // Obtener total de registros
+    const [rooms, total] = await this.temporaryRoomRepository.findAndCount({
+      where: whereConditions,
+      order: { createdAt: 'DESC' },
+      skip: skip,
+      take: limit,
+    });
+
+    // console.log('ðŸ“‹ Salas encontradas:', rooms.length, 'Total:', total);
+
+    return {
+      data: rooms,
+      total: total,
+      page: page,
+      limit: limit,
+      totalPages: Math.ceil(total / limit),
+    };
   }
 
   async deactivateRoom(id: number, userId: number): Promise<TemporaryRoom> {

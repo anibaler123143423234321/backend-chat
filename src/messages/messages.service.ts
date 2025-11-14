@@ -353,67 +353,45 @@ export class MessagesService {
       return [];
     }
 
-    // 🔥 Buscar mensajes donde el usuario es el remitente o el destinatario
-    // Excluir mensajes de hilos (threadId debe ser null)
-    // 🔥 CORREGIDO: Agregar isGroup: false para excluir mensajes de grupo
+    // 🔥 Buscar TODOS los mensajes donde el usuario es el remitente
+    // Incluye: chats directos, grupos, archivos, etc.
+    // Excluir solo mensajes de hilos (threadId debe ser null) y mensajes eliminados
     const messages = await this.messageRepository.find({
-      where: [
-        {
-          from: username,
-          message: Like(`%${searchTerm}%`),
-          isDeleted: false,
-          threadId: IsNull(),
-          isGroup: false,
-        },
-        {
-          to: username,
-          message: Like(`%${searchTerm}%`),
-          isDeleted: false,
-          threadId: IsNull(),
-          isGroup: false,
-        },
-      ],
+      where: {
+        from: username,
+        isDeleted: false,
+        threadId: IsNull(),
+      },
       order: { sentAt: 'DESC' },
       take: limit,
     });
 
-    // Agrupar mensajes por conversación
-    const conversationsMap = new Map();
+    // Filtrar por búsqueda en mensaje o nombre de archivo
+    const filteredMessages = messages.filter(msg => {
+      const searchLower = searchTerm.toLowerCase();
+      const messageText = (msg.message || '').toLowerCase();
+      const fileName = (msg.fileName || '').toLowerCase();
+      return messageText.includes(searchLower) || fileName.includes(searchLower);
+    });
 
-    for (const msg of messages) {
-      // Determinar el otro usuario en la conversación
-      const otherUser = msg.from === username ? msg.to : msg.from;
-
-      if (!conversationsMap.has(otherUser)) {
-        conversationsMap.set(otherUser, {
-          user: otherUser,
-          messages: [],
-          lastMessage: {
-            id: msg.id,
-            text: msg.message,
-            from: msg.from,
-            to: msg.to,
-            sentAt: msg.sentAt,
-          },
-          lastMessageTime: msg.sentAt,
-        });
-      }
-
-      conversationsMap.get(otherUser).messages.push({
-        id: msg.id,
-        text: msg.message,
-        from: msg.from,
-        to: msg.to,
-        sentAt: msg.sentAt,
-      });
-    }
-
-    // Convertir el mapa a array y ordenar por último mensaje
-    const conversations = Array.from(conversationsMap.values()).sort(
-      (a, b) => b.lastMessageTime.getTime() - a.lastMessageTime.getTime(),
-    );
-
-    return conversations;
+    // Retornar los mensajes con información de la conversación
+    return filteredMessages.map(msg => ({
+      id: msg.id,
+      message: msg.message,
+      from: msg.from,
+      to: msg.to,
+      sentAt: msg.sentAt,
+      isGroup: msg.isGroup,
+      roomCode: msg.roomCode,
+      mediaType: msg.mediaType,
+      mediaData: msg.mediaData,
+      fileName: msg.fileName,
+      fileSize: msg.fileSize,
+      // Información adicional para identificar la conversación
+      conversationType: msg.isGroup ? 'group' : 'direct',
+      conversationId: msg.isGroup ? msg.roomCode : msg.to,
+      conversationName: msg.isGroup ? msg.roomCode : msg.to,
+    }));
   }
 
   // Obtener mensajes de un hilo específico
