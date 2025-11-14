@@ -1901,6 +1901,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     @MessageBody() data: { messageId: number; username: string; emoji: string; roomCode?: string; to?: string },
   ) {
     console.log(`😊 WS: toggleReaction - Mensaje ${data.messageId}, Usuario: ${data.username}, Emoji: ${data.emoji}`);
+    console.log(`📍 toggleReaction - roomCode: ${data.roomCode}, to: ${data.to}`);
 
     try {
       const message = await this.messagesService.toggleReaction(
@@ -1910,11 +1911,16 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       );
 
       if (message) {
+        console.log(`✅ Reacción guardada, emitiendo evento reactionUpdated...`);
+
         // Emitir la actualización a todos los usuarios relevantes
         if (data.roomCode) {
-          // Si es un mensaje de sala, notificar a todos los miembros
+          console.log(`📢 Es mensaje de sala (${data.roomCode}), notificando a miembros...`);
           const roomUsers = this.roomUsers.get(data.roomCode);
+          console.log(`👥 Usuarios en sala:`, roomUsers ? Array.from(roomUsers) : 'No hay usuarios');
+
           if (roomUsers) {
+            let notifiedCount = 0;
             roomUsers.forEach((member) => {
               const memberUser = this.users.get(member);
               if (memberUser && memberUser.socket.connected) {
@@ -1923,10 +1929,16 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
                   reactions: message.reactions,
                   roomCode: data.roomCode,
                 });
+                notifiedCount++;
               }
             });
+            console.log(`✅ Notificados ${notifiedCount} usuarios en sala ${data.roomCode}`);
+          } else {
+            console.log(`⚠️ No se encontraron usuarios en la sala ${data.roomCode}`);
           }
         } else if (data.to) {
+          console.log(`📢 Es mensaje 1-a-1, notificando a ${data.to}...`);
+
           // Si es un mensaje 1-a-1, notificar al otro usuario
           const otherUser = this.users.get(data.to);
           if (otherUser && otherUser.socket.connected) {
@@ -1935,6 +1947,9 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
               reactions: message.reactions,
               to: data.to,
             });
+            console.log(`✅ Notificado usuario ${data.to}`);
+          } else {
+            console.log(`⚠️ Usuario ${data.to} no encontrado o desconectado`);
           }
 
           // También notificar al usuario que reaccionó
@@ -1943,10 +1958,15 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
             reactions: message.reactions,
             to: data.to,
           });
+          console.log(`✅ Notificado usuario que reaccionó (${data.username})`);
+        } else {
+          console.log(`⚠️ No hay roomCode ni to, no se puede notificar`);
         }
+      } else {
+        console.log(`❌ No se pudo guardar la reacción (mensaje no encontrado)`);
       }
     } catch (error) {
-      console.error('Error al alternar reacción:', error);
+      console.error('❌ Error al alternar reacción:', error);
       client.emit('error', { message: 'Error al alternar reacción' });
     }
   }

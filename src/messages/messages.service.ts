@@ -26,7 +26,7 @@ export class MessagesService {
 
   async findByRoom(
     roomCode: string,
-    limit: number = 50,
+    limit: number = 20,
     offset: number = 0,
   ): Promise<Message[]> {
     // Cargar mensajes en orden DESC (más recientes primero) para paginación estilo WhatsApp
@@ -65,7 +65,7 @@ export class MessagesService {
   async findByUser(
     from: string,
     to: string,
-    limit: number = 50,
+    limit: number = 20,
     offset: number = 0,
   ): Promise<Message[]> {
     // 🔥 CORREGIDO: Agregar isGroup: false para excluir mensajes de grupo
@@ -182,17 +182,24 @@ export class MessagesService {
     username: string,
     emoji: string,
   ): Promise<Message | null> {
+    console.log(`🔍 toggleReaction - Buscando mensaje ID: ${messageId}`);
+
     const message = await this.messageRepository.findOne({
       where: { id: messageId },
     });
 
     if (!message) {
+      console.log(`❌ toggleReaction - Mensaje ${messageId} NO encontrado`);
       return null;
     }
+
+    console.log(`✅ toggleReaction - Mensaje ${messageId} encontrado`);
+    console.log(`📝 Reacciones actuales:`, JSON.stringify(message.reactions));
 
     // Inicializar reactions si no existe
     if (!message.reactions) {
       message.reactions = [];
+      console.log(`🆕 Inicializando array de reacciones vacío`);
     }
 
     // Buscar si el usuario ya reaccionó con este emoji
@@ -202,23 +209,40 @@ export class MessagesService {
 
     if (existingReactionIndex !== -1) {
       // Si ya existe, quitarla
+      console.log(`🗑️ Quitando reacción existente de ${username} con emoji ${emoji}`);
       message.reactions.splice(existingReactionIndex, 1);
     } else {
       // Quitar cualquier otra reacción del usuario (solo una reacción por usuario)
+      const previousReactions = message.reactions.filter((r) => r.username === username);
+      if (previousReactions.length > 0) {
+        console.log(`🔄 Usuario ${username} ya tenía reacciones, quitándolas:`, previousReactions);
+      }
+
       message.reactions = message.reactions.filter(
         (r) => r.username !== username,
       );
 
       // Agregar la nueva reacción
+      console.log(`➕ Agregando nueva reacción de ${username} con emoji ${emoji}`);
+
+      // 🔥 Crear timestamp en hora de Perú (UTC-5)
+      const now = new Date();
+      const peruTime = new Date(now.getTime() - (5 * 60 * 60 * 1000));
+
       message.reactions.push({
         emoji,
         username,
-        timestamp: new Date(),
+        timestamp: peruTime,
       });
     }
 
-    await this.messageRepository.save(message);
-    return message;
+    console.log(`📝 Reacciones después del cambio:`, JSON.stringify(message.reactions));
+    console.log(`💾 Guardando mensaje en BD...`);
+
+    const savedMessage = await this.messageRepository.save(message);
+
+    console.log(`✅ Mensaje guardado exitosamente con reacciones actualizadas`);
+    return savedMessage;
   }
 
   async deleteMessage(messageId: number, username: string, isAdmin: boolean = false, deletedBy?: string): Promise<boolean> {
@@ -347,7 +371,7 @@ export class MessagesService {
   async searchMessages(
     username: string,
     searchTerm: string,
-    limit: number = 50,
+    limit: number = 20,
   ): Promise<any[]> {
     console.log('🔍 searchMessages llamado con:', { username, searchTerm, limit });
 
@@ -423,7 +447,7 @@ export class MessagesService {
   async searchMessagesByUserId(
     userId: number,
     searchTerm: string,
-    limit: number = 50,
+    limit: number = 20,
   ): Promise<any[]> {
     console.log('🔍 searchMessagesByUserId llamado con:', { userId, searchTerm, limit });
 
@@ -489,7 +513,7 @@ export class MessagesService {
   // Obtener mensajes de un hilo específico
   async findThreadMessages(
     threadId: number,
-    limit: number = 50,
+    limit: number = 20,
     offset: number = 0,
   ): Promise<Message[]> {
     return await this.messageRepository.find({

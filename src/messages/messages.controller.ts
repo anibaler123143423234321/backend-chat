@@ -26,7 +26,7 @@ export class MessagesController {
   @Get('room/:roomCode')
   async findByRoom(
     @Param('roomCode') roomCode: string,
-    @Query('limit') limit: string = '50',
+    @Query('limit') limit: string = '20',
     @Query('offset') offset: string = '0',
   ) {
     // console.log(`ðŸ“‹ Obteniendo mensajes de la sala: ${roomCode}`);
@@ -41,7 +41,7 @@ export class MessagesController {
   async findByUser(
     @Param('from') from: string,
     @Param('to') to: string,
-    @Query('limit') limit: string = '50',
+    @Query('limit') limit: string = '20',
     @Query('offset') offset: string = '0',
   ) {
     // console.log(`ðŸ‘¤ Obteniendo mensajes entre ${from} y ${to}`);
@@ -144,7 +144,7 @@ export class MessagesController {
   async searchMessages(
     @Param('username') username: string,
     @Query('q') searchTerm: string,
-    @Query('limit') limit: string = '50',
+    @Query('limit') limit: string = '20',
   ) {
     return await this.messagesService.searchMessages(
       username,
@@ -157,7 +157,7 @@ export class MessagesController {
   async searchMessagesByUserId(
     @Param('userId') userId: string,
     @Query('q') searchTerm: string,
-    @Query('limit') limit: string = '50',
+    @Query('limit') limit: string = '20',
   ) {
     return await this.messagesService.searchMessagesByUserId(
       parseInt(userId),
@@ -169,7 +169,7 @@ export class MessagesController {
   @Get('thread/:threadId')
   async findThreadMessages(
     @Param('threadId') threadId: string,
-    @Query('limit') limit: string = '50',
+    @Query('limit') limit: string = '20',
     @Query('offset') offset: string = '0',
   ) {
     return await this.messagesService.findThreadMessages(
