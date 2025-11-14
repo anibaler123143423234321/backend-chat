@@ -662,9 +662,11 @@ export class MessagesService {
     limit: number = 20,
     offset: number = 0,
   ): Promise<Message[]> {
+    // 🔥 CORREGIDO: Usar ID en lugar de sentAt para ordenamiento consistente
+    // sentAt puede estar corrupto, así que usamos ID que es más confiable
     return await this.messageRepository.find({
       where: { threadId, isDeleted: false },
-      order: { sentAt: 'ASC' },
+      order: { id: 'ASC' },
       take: limit,
       skip: offset,
     });
