@@ -15,6 +15,7 @@ import { Repository } from 'typeorm';
 import * as crypto from 'crypto';
 import { TemporaryRoomsService } from '../temporary-rooms/temporary-rooms.service';
 import { MessagesService } from '../messages/messages.service';
+import { TemporaryConversationsService } from '../temporary-conversations/temporary-conversations.service';
 import { User } from '../users/entities/user.entity';
 import { getPeruDate, formatPeruTime } from '../utils/date.utils';
 
@@ -42,6 +43,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
   constructor(
     private temporaryRoomsService: TemporaryRoomsService,
     private messagesService: MessagesService,
+    private temporaryConversationsService: TemporaryConversationsService,
     @InjectRepository(User)
     private userRepository: Repository<User>,
   ) {
@@ -53,7 +55,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
   }
 
   // 🔥 NUEVO: Cargar grupos al iniciar el servidor
-  async afterInit(server: Server) {
+  async afterInit(_server: Server) {
     console.log('🚀 Inicializando Socket Gateway...');
     try {
       // Cargar todas las salas temporales como grupos
@@ -109,7 +111,14 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
         this.users.delete(username);
         console.log(`✅ Usuario ${username} removido del mapa de usuarios`);
 
-        this.broadcastUserList();
+        // 🔥 Obtener todas las conversaciones asignadas para actualizar correctamente la lista de usuarios
+        try {
+          const allAssignedConversations = await this.temporaryConversationsService.findAll();
+          await this.broadcastUserList(allAssignedConversations);
+        } catch (error) {
+          console.error('❌ Error al obtener conversaciones asignadas en handleDisconnect:', error);
+          this.broadcastUserList();
+        }
         break;
       }
     }
@@ -199,8 +208,14 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       message: `Registrado como ${username}`,
     });
 
-    // Enviar lista de usuarios (incluyendo usuarios de conversaciones asignadas si aplica)
-    this.broadcastUserList(assignedConversations);
+    // 🔥 Obtener todas las conversaciones asignadas para actualizar correctamente la lista de usuarios
+    try {
+      const allAssignedConversations = await this.temporaryConversationsService.findAll();
+      await this.broadcastUserList(allAssignedConversations);
+    } catch (error) {
+      console.error('❌ Error al obtener conversaciones asignadas en handleRegister:', error);
+      this.broadcastUserList(assignedConversations);
+    }
   }
 
   @SubscribeMessage('requestUserListPage')
@@ -314,7 +329,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
                 }
 
                 // Primero buscar en usuarios conectados
-                let participantData = connectedUsersMap.get(participantName);
+                const participantData = connectedUsersMap.get(participantName);
 
                 if (participantData) {
                   // Usuario está conectado
@@ -431,7 +446,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
         );
         if (ownUserData) {
           // Remover fullName antes de enviar
-          const { fullName, ...userDataToSend } = ownUserData;
+          const { fullName: _fullName1, ...userDataToSend } = ownUserData;
           usersToSend.push(userDataToSend);
         }
 
@@ -441,7 +456,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
         );
         if (user2Data) {
           // Remover fullName antes de enviar
-          const { fullName, ...userDataToSend } = user2Data;
+          const { fullName: _fullName2, ...userDataToSend } = user2Data;
           usersToSend.push(userDataToSend);
         }
 
@@ -464,7 +479,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
         );
         if (ownUserData) {
           // Remover fullName antes de enviar
-          const { fullName, ...userDataToSend } = ownUserData;
+          const { fullName: _fullName3, ...userDataToSend } = ownUserData;
           usersToSend.push(userDataToSend);
         }
 
@@ -474,7 +489,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
         );
         if (user1Data) {
           // Remover fullName antes de enviar
-          const { fullName, ...userDataToSend } = user1Data;
+          const { fullName: _fullName4, ...userDataToSend } = user1Data;
           usersToSend.push(userDataToSend);
         }
 
@@ -677,6 +692,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
                 message,
                 isGroup: true,
                 time: time || formatPeruTime(),
+                sentAt: savedMessage?.sentAt, // 🔥 Incluir sentAt para extraer hora correcta en frontend
                 mediaType,
                 mediaData,
                 fileName,
@@ -722,6 +738,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
                 message,
                 isGroup: true,
                 time: time || formatPeruTime(),
+                sentAt: savedMessage?.sentAt, // 🔥 Incluir sentAt para extraer hora correcta en frontend
                 mediaType,
                 mediaData,
                 fileName,
@@ -784,6 +801,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
           message,
           isGroup: false,
           time: time || formatPeruTime(),
+          sentAt: savedMessage?.sentAt, // 🔥 Incluir sentAt para extraer hora correcta en frontend
           mediaType,
           mediaData,
           fileName,
@@ -803,6 +821,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
           message,
           isGroup: false,
           time: time || formatPeruTime(),
+          sentAt: savedMessage?.sentAt, // 🔥 Incluir sentAt para extraer hora correcta en frontend
           mediaType,
           mediaData,
           fileName,
@@ -829,7 +848,6 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       to,
       message,
       isGroup,
-      time,
       from,
       fromId,
       senderRole, // 🔥 Extraer role del remitente
@@ -854,6 +872,10 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
 
       console.log(`🔍 Guardando mensaje - isAssignedConversation: ${isAssignedConversation}, actualRecipient: ${actualRecipient}, to: ${to}, recipientForDB: ${recipientForDB}`);
 
+      // 🔥 CRÍTICO: Calcular sentAt y time desde el servidor (no confiar en el cliente)
+      const peruDate = getPeruDate();
+      const calculatedTime = formatPeruTime(peruDate);
+
       const messageData = {
         from,
         fromId,
@@ -868,8 +890,8 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
         mediaData,
         fileName,
         fileSize,
-        sentAt: getPeruDate(),
-        time: time || formatPeruTime(),
+        sentAt: peruDate,
+        time: calculatedTime, // 🔥 SIEMPRE calcular desde sentAt, no usar el time del cliente
         replyToMessageId,
         replyToSender,
         replyToText,
@@ -1383,17 +1405,18 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     // console.log('📋 Enviando lista de usuarios con datos completos:', userListWithData);
 
     // Procesar cada usuario conectado
-    for (const [username, { socket, userData, currentRoom }] of this.users.entries()) {
+    for (const [_username, { socket, userData, currentRoom }] of this.users.entries()) {
       if (socket.connected) {
-        // Si el usuario está en una sala, no enviar lista general
-        if (currentRoom) {
-          // console.log(
-          //   `🚫 Usuario ${userData?.username || 'Usuario'} está en sala ${currentRoom}, no enviar lista general`,
-          // );
-          continue;
-        }
+        // 🔥 COMENTADO: Ahora enviamos la lista incluso si el usuario está en una sala
+        // para que reciban actualizaciones de estado online/offline en tiempo real
+        // if (currentRoom) {
+        //   console.log(
+        //     `🚫 Usuario ${userData?.username || 'Usuario'} está en sala ${currentRoom}, no enviar lista general`,
+        //   );
+        //   continue;
+        // }
 
-        // Solo enviar lista completa a usuarios admin (cuando NO están en una sala)
+        // Solo enviar lista completa a usuarios admin
         const isAdmin =
           userData?.role &&
           userData.role.toString().toUpperCase().trim() === 'ADMIN';
@@ -1422,9 +1445,20 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
             usersToSend.push(ownUserData);
           }
 
+          // 🔥 Obtener conversaciones del usuario actual desde la BD
+          let userConversations = assignedConversations;
+          if (!userConversations) {
+            try {
+              userConversations = await this.temporaryConversationsService.findAll(userData?.username);
+            } catch (error) {
+              console.error(`❌ Error al obtener conversaciones de ${userData?.username}:`, error);
+              userConversations = [];
+            }
+          }
+
           // Si tiene conversaciones asignadas, agregar información de los otros usuarios
-          if (assignedConversations && assignedConversations.length > 0) {
-            for (const conv of assignedConversations) {
+          if (userConversations && userConversations.length > 0) {
+            for (const conv of userConversations) {
               if (conv.participants && Array.isArray(conv.participants)) {
                 for (const participantName of conv.participants) {
                   // No agregar al usuario actual
@@ -1435,7 +1469,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
                     }
 
                     // Primero buscar en usuarios conectados
-                    let participantData = connectedUsersMap.get(participantName);
+                    const participantData = connectedUsersMap.get(participantName);
 
                     if (participantData) {
                       // Usuario está conectado
@@ -1775,7 +1809,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     console.log(`🧵 WS: threadMessage - ThreadID: ${data.threadId}, De: ${data.from}, Para: ${data.to}`);
 
     try {
-      const { threadId, from, to, isGroup, roomCode } = data;
+      const { from, to, isGroup, roomCode } = data;
 
       if (isGroup && roomCode) {
         // Mensaje de hilo en grupo/sala - enviar a todos los miembros de la sala
@@ -1842,6 +1876,16 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     try {
       const { messageId, lastReplyFrom, isGroup, roomCode, to, from } = data;
 
+      // 🔥 Preparar el payload completo con toda la información necesaria
+      const updatePayload = {
+        messageId,
+        lastReplyFrom,
+        from,
+        to,
+        isGroup,
+        roomCode
+      };
+
       if (isGroup && roomCode) {
         // Actualización en grupo/sala - enviar a todos los miembros de la sala
         const roomUsers = this.roomUsers.get(roomCode);
@@ -1849,10 +1893,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
           roomUsers.forEach((member) => {
             const memberUser = this.users.get(member);
             if (memberUser && memberUser.socket.connected) {
-              memberUser.socket.emit('threadCountUpdated', {
-                messageId,
-                lastReplyFrom
-              });
+              memberUser.socket.emit('threadCountUpdated', updatePayload);
             }
           });
         }
@@ -1873,10 +1914,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
 
         if (recipientUser && recipientUser.socket.connected) {
           console.log(`✅ Enviando threadCountUpdated al destinatario: ${to}`);
-          recipientUser.socket.emit('threadCountUpdated', {
-            messageId,
-            lastReplyFrom
-          });
+          recipientUser.socket.emit('threadCountUpdated', updatePayload);
         } else {
           console.log(`⚠️ Destinatario no encontrado o no conectado: ${to}`);
         }
@@ -1896,10 +1934,7 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
 
         if (senderUser && senderUser.socket.connected && from !== to) {
           console.log(`✅ Enviando threadCountUpdated al remitente: ${from}`);
-          senderUser.socket.emit('threadCountUpdated', {
-            messageId,
-            lastReplyFrom
-          });
+          senderUser.socket.emit('threadCountUpdated', updatePayload);
         } else if (from === to) {
           console.log(`ℹ️ Remitente y destinatario son el mismo usuario, no se envía duplicado`);
         } else {

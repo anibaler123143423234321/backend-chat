@@ -17,22 +17,39 @@ export class MessagesService {
 
   async create(createMessageDto: CreateMessageDto): Promise<Message> {
     // 🔥 NUEVO: Verificar duplicados antes de guardar
-    const { from, to, message: messageText, time, isGroup } = createMessageDto;
+    const { from, to, message: messageText, time, isGroup, roomCode } = createMessageDto;
 
-    // Buscar un mensaje duplicado reciente (dentro de los últimos 5 segundos)
+    // 🔥 Construir condiciones de búsqueda de duplicados
+    const duplicateConditions: any = {
+      from,
+      message: messageText,
+      time,
+      isDeleted: false,
+    };
+
+    // Agregar condiciones específicas según el tipo de mensaje
+    if (isGroup && roomCode) {
+      duplicateConditions.roomCode = roomCode;
+      duplicateConditions.isGroup = true;
+    } else if (!isGroup && to) {
+      duplicateConditions.to = to;
+      duplicateConditions.isGroup = false;
+    }
+
+    // Buscar un mensaje duplicado reciente
     const recentDuplicate = await this.messageRepository.findOne({
-      where: {
-        from,
-        to: isGroup ? null : to,
-        message: messageText,
-        time,
-        isDeleted: false,
-      },
+      where: duplicateConditions,
       order: { id: 'DESC' },
     });
 
     if (recentDuplicate) {
-      console.log(`⚠️ Duplicado detectado - Retornando mensaje existente ID: ${recentDuplicate.id}`);
+      console.log(`⚠️ Duplicado detectado - Retornando mensaje existente ID: ${recentDuplicate.id}`, {
+        from,
+        to,
+        roomCode,
+        isGroup,
+        message: messageText?.substring(0, 30)
+      });
       return recentDuplicate;
     }
 
@@ -87,10 +104,10 @@ export class MessagesService {
     limit: number = 20,
     offset: number = 0,
   ): Promise<any[]> {
-    // Obtener mensajes ordenados por ID con numeración
+    // 🔥 Obtener mensajes más recientes primero (DESC), luego invertir para mostrar cronológicamente
     const messages = await this.messageRepository.find({
-      where: { roomCode, threadId: IsNull() },
-      order: { id: 'ASC' },
+      where: { roomCode, threadId: IsNull(), isDeleted: false },
+      order: { id: 'DESC' },
       take: limit,
       skip: offset,
     });
@@ -133,8 +150,11 @@ export class MessagesService {
       });
     }
 
+    // 🔥 Invertir el orden para que se muestren cronológicamente (más antiguos primero)
+    const reversedMessages = messages.reverse();
+
     // Retornar con numeración por ID y threadCount
-    return messages.map((msg, index) => ({
+    return reversedMessages.map((msg, index) => ({
       ...msg,
       numberInList: index + 1 + offset,
       threadCount: threadCountMap[msg.id] || 0,
@@ -190,12 +210,12 @@ export class MessagesService {
     limit: number = 20,
     offset: number = 0,
   ): Promise<any[]> {
-    // 🔥 Ordenar por ID (orden de inserción) en lugar de sentAt
+    // 🔥 Obtener mensajes más recientes primero (DESC), luego invertir para mostrar cronológicamente
     const messages = await this.messageRepository
       .createQueryBuilder('message')
-      .where('LOWER(message.from) = LOWER(:from) AND LOWER(message.to) = LOWER(:to) AND message.threadId IS NULL AND message.isGroup = false', { from, to })
-      .orWhere('LOWER(message.from) = LOWER(:to) AND LOWER(message.to) = LOWER(:from) AND message.threadId IS NULL AND message.isGroup = false', { from, to })
-      .orderBy('message.id', 'ASC')
+      .where('LOWER(message.from) = LOWER(:from) AND LOWER(message.to) = LOWER(:to) AND message.threadId IS NULL AND message.isGroup = false AND message.isDeleted = false', { from, to })
+      .orWhere('LOWER(message.from) = LOWER(:to) AND LOWER(message.to) = LOWER(:from) AND message.threadId IS NULL AND message.isGroup = false AND message.isDeleted = false', { from, to })
+      .orderBy('message.id', 'DESC')
       .take(limit)
       .skip(offset)
       .getMany();
@@ -238,8 +258,11 @@ export class MessagesService {
       });
     }
 
+    // 🔥 Invertir el orden para que se muestren cronológicamente (más antiguos primero)
+    const reversedMessages = messages.reverse();
+
     // Agregar numeración secuencial y threadCount
-    const messagesWithNumber = messages.map((msg, index) => ({
+    const messagesWithNumber = reversedMessages.map((msg, index) => ({
       ...msg,
       numberInList: index + 1 + offset,
       threadCount: threadCountMap[msg.id] || 0,
