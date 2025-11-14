@@ -650,12 +650,14 @@ export class TemporaryConversationsService {
             }
           }
 
-          // Obtener el último mensaje
+          // 🔥 CORREGIDO: Obtener el último mensaje ordenando por ID (no por sentAt que puede estar corrupto)
           const messages = await this.messageRepository.find({
             where: messageConditions,
-            order: { sentAt: 'DESC' },
+            order: { id: 'DESC' },
             take: 1,
           });
+
+          console.log(`📊 Monitoreo - Conversación: ${conv.name}, Participantes: ${JSON.stringify(participants)}, Último mensaje ID: ${messages[0]?.id}, Texto: "${messages[0]?.message?.substring(0, 50)}"`);
 
           if (messages.length > 0) {
             // Calcular el threadCount del último mensaje

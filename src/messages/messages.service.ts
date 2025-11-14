@@ -16,6 +16,26 @@ export class MessagesService {
   ) {}
 
   async create(createMessageDto: CreateMessageDto): Promise<Message> {
+    // 🔥 NUEVO: Verificar duplicados antes de guardar
+    const { from, to, message: messageText, time, isGroup } = createMessageDto;
+
+    // Buscar un mensaje duplicado reciente (dentro de los últimos 5 segundos)
+    const recentDuplicate = await this.messageRepository.findOne({
+      where: {
+        from,
+        to: isGroup ? null : to,
+        message: messageText,
+        time,
+        isDeleted: false,
+      },
+      order: { id: 'DESC' },
+    });
+
+    if (recentDuplicate) {
+      console.log(`⚠️ Duplicado detectado - Retornando mensaje existente ID: ${recentDuplicate.id}`);
+      return recentDuplicate;
+    }
+
     const message = this.messageRepository.create({
       ...createMessageDto,
       sentAt: createMessageDto.sentAt || getPeruDate(),

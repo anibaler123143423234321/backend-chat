@@ -794,6 +794,25 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
         });
 
         console.log(`✅ Mensaje emitido exitosamente a ${recipientUsername}`);
+
+        // 🔥 NUEVO: Emitir evento de monitoreo a todos los ADMIN/JEFEPISO
+        this.broadcastMonitoringMessage({
+          id: savedMessage?.id,
+          from: from || 'Usuario Desconocido',
+          to: recipientUsername,
+          message,
+          isGroup: false,
+          time: time || formatPeruTime(),
+          mediaType,
+          mediaData,
+          fileName,
+          fileSize,
+          senderRole,
+          senderNumeroAgente,
+          replyToMessageId,
+          replyToSender,
+          replyToText,
+        });
       } else {
         console.log(`❌ No se pudo enviar mensaje a ${recipientUsername} (usuario no conectado o no encontrado)`);
         if (recipient) {
@@ -2092,5 +2111,35 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
 
     // Reenviar lista general de usuarios
     this.broadcastUserList();
+  }
+
+  /**
+   * 🔥 NUEVO: Emitir evento de monitoreo a todos los ADMIN/JEFEPISO
+   * Cuando se envía un mensaje entre dos usuarios, notificar a los monitores
+   */
+  private broadcastMonitoringMessage(messageData: any) {
+    console.log(`📡 Broadcasting monitoringMessage a ADMIN/JEFEPISO - De: ${messageData.from}, Para: ${messageData.to}`);
+
+    this.users.forEach(({ socket, userData }) => {
+      const role = userData?.role?.toString().toUpperCase().trim();
+      if (socket.connected && (role === 'ADMIN' || role === 'JEFEPISO')) {
+        socket.emit('monitoringMessage', messageData);
+      }
+    });
+  }
+
+  /**
+   * 🔥 NUEVO: Método público para emitir evento de monitoreo desde el controller HTTP
+   * Se usa cuando se crea un mensaje a través del endpoint POST /api/messages
+   */
+  public broadcastMonitoringMessagePublic(messageData: any) {
+    console.log(`📡 Broadcasting monitoringMessage (PUBLIC) a ADMIN/JEFEPISO - De: ${messageData.from}, Para: ${messageData.to}`);
+
+    this.users.forEach(({ socket, userData }) => {
+      const role = userData?.role?.toString().toUpperCase().trim();
+      if (socket.connected && (role === 'ADMIN' || role === 'JEFEPISO')) {
+        socket.emit('monitoringMessage', messageData);
+      }
+    });
   }
 }

@@ -12,7 +12,6 @@
 import { MessagesService } from './messages.service';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { MarkReadDto } from './dto/mark-read.dto';
-
 @Controller('messages')
 export class MessagesController {
   constructor(private readonly messagesService: MessagesService) {}
@@ -20,7 +19,9 @@ export class MessagesController {
   @Post()
   async create(@Body() createMessageDto: CreateMessageDto) {
     // console.log('ðŸ’¬ Creando mensaje:', createMessageDto);
-    return await this.messagesService.create(createMessageDto);
+    const savedMessage = await this.messagesService.create(createMessageDto);
+
+    return savedMessage;
   }
 
   @Get('room/:roomCode')
