@@ -29,12 +29,12 @@ export class MessagesService {
     limit: number = 20,
     offset: number = 0,
   ): Promise<Message[]> {
-    // Cargar mensajes en orden DESC (más recientes primero) para paginación estilo WhatsApp
+    // Cargar mensajes en orden ASC por ID (cronológico)
     // 🔥 Excluir mensajes de hilos (threadId debe ser null)
     // 🔥 INCLUIR mensajes eliminados para mostrarlos como "Mensaje eliminado por..."
     const messages = await this.messageRepository.find({
       where: { roomCode, threadId: IsNull() },
-      order: { sentAt: 'DESC' },
+      order: { id: 'ASC' },
       take: limit,
       skip: offset,
     });
@@ -58,9 +58,48 @@ export class MessagesService {
       }
     }
 
-    // Revertir el orden para mostrar cronológicamente (más antiguos arriba, más recientes abajo)
-    return messages.reverse();
+    // Los mensajes ya están en orden cronológico por ID
+    return messages;
   }
+
+  async findByRoomOrderedById(
+    roomCode: string,
+    limit: number = 20,
+    offset: number = 0,
+  ): Promise<any[]> {
+    // Obtener mensajes ordenados por ID con numeración
+    const messages = await this.messageRepository.find({
+      where: { roomCode, threadId: IsNull() },
+      order: { id: 'ASC' },
+      take: limit,
+      skip: offset,
+    });
+
+    // Calcular el threadCount real para cada mensaje
+    for (const message of messages) {
+      const threadCount = await this.messageRepository.count({
+        where: { threadId: message.id, isDeleted: false },
+      });
+      message.threadCount = threadCount;
+
+      if (threadCount > 0) {
+        const lastThreadMessage = await this.messageRepository.findOne({
+          where: { threadId: message.id, isDeleted: false },
+          order: { sentAt: 'DESC' },
+        });
+        if (lastThreadMessage) {
+          message.lastReplyFrom = lastThreadMessage.from;
+        }
+      }
+    }
+
+    // Retornar con numeración por ID
+    return messages.map((msg, index) => ({
+      ...msg,
+      numberInList: index + 1 + offset,
+    }));
+  }
+
 
   async findByUser(
     from: string,
@@ -68,18 +107,17 @@ export class MessagesService {
     limit: number = 20,
     offset: number = 0,
   ): Promise<Message[]> {
-    // 🔥 CORREGIDO: Agregar isGroup: false para excluir mensajes de grupo
+    // 🔥 CORREGIDO: Usar búsqueda case-insensitive para nombres de usuarios
     // Esto asegura que solo se retornen mensajes privados entre los dos usuarios específicos
     // 🔥 INCLUIR mensajes eliminados para mostrarlos como "Mensaje eliminado por..."
-    const messages = await this.messageRepository.find({
-      where: [
-        { from, to, threadId: IsNull(), isGroup: false },
-        { from: to, to: from, threadId: IsNull(), isGroup: false },
-      ],
-      order: { sentAt: 'ASC' },
-      take: limit,
-      skip: offset,
-    });
+    const messages = await this.messageRepository
+      .createQueryBuilder('message')
+      .where('LOWER(message.from) = LOWER(:from) AND LOWER(message.to) = LOWER(:to) AND message.threadId IS NULL AND message.isGroup = false', { from, to })
+      .orWhere('LOWER(message.from) = LOWER(:to) AND LOWER(message.to) = LOWER(:from) AND message.threadId IS NULL AND message.isGroup = false', { from, to })
+      .orderBy('message.sentAt', 'ASC')
+      .take(limit)
+      .skip(offset)
+      .getMany();
 
     // Calcular el threadCount real para cada mensaje y el último usuario que respondió
     for (const message of messages) {

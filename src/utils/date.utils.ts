@@ -9,18 +9,14 @@
 export function getPeruDate(): Date {
   // Obtener la fecha actual en UTC
   const now = new Date();
-  
+
   // Convertir a zona horaria de Lima (UTC-5)
   // Nota: Perú no usa horario de verano, siempre es UTC-5
-  const peruOffset = -5 * 60; // -5 horas en minutos
-  const utcOffset = now.getTimezoneOffset(); // Offset del servidor en minutos
-  
-  // Calcular la diferencia entre el offset del servidor y el de Perú
-  const offsetDiff = utcOffset - peruOffset;
-  
-  // Crear nueva fecha ajustada
-  const peruDate = new Date(now.getTime() + offsetDiff * 60 * 1000);
-  
+  const peruOffset = -5 * 60 * 60 * 1000; // -5 horas en milisegundos
+
+  // Crear nueva fecha ajustada a Perú
+  const peruDate = new Date(now.getTime() + peruOffset);
+
   return peruDate;
 }
 

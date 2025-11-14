@@ -37,6 +37,20 @@ export class MessagesController {
     );
   }
 
+  @Get('room/:roomCode/by-id')
+  async findByRoomOrderedById(
+    @Param('roomCode') roomCode: string,
+    @Query('limit') limit: string = '20',
+    @Query('offset') offset: string = '0',
+  ) {
+    return await this.messagesService.findByRoomOrderedById(
+      roomCode,
+      parseInt(limit),
+      parseInt(offset),
+    );
+  }
+
+
   @Get('user/:from/:to')
   async findByUser(
     @Param('from') from: string,

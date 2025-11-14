@@ -833,6 +833,8 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
         recipientForDB = actualRecipient;
       }
 
+      console.log(`🔍 Guardando mensaje - isAssignedConversation: ${isAssignedConversation}, actualRecipient: ${actualRecipient}, to: ${to}, recipientForDB: ${recipientForDB}`);
+
       const messageData = {
         from,
         fromId,
