@@ -31,8 +31,9 @@ export class MessagesService {
   ): Promise<Message[]> {
     // Cargar mensajes en orden DESC (más recientes primero) para paginación estilo WhatsApp
     // 🔥 Excluir mensajes de hilos (threadId debe ser null)
+    // 🔥 INCLUIR mensajes eliminados para mostrarlos como "Mensaje eliminado por..."
     const messages = await this.messageRepository.find({
-      where: { roomCode, isDeleted: false, threadId: IsNull() },
+      where: { roomCode, threadId: IsNull() },
       order: { sentAt: 'DESC' },
       take: limit,
       skip: offset,
@@ -69,10 +70,11 @@ export class MessagesService {
   ): Promise<Message[]> {
     // 🔥 CORREGIDO: Agregar isGroup: false para excluir mensajes de grupo
     // Esto asegura que solo se retornen mensajes privados entre los dos usuarios específicos
+    // 🔥 INCLUIR mensajes eliminados para mostrarlos como "Mensaje eliminado por..."
     const messages = await this.messageRepository.find({
       where: [
-        { from, to, isDeleted: false, threadId: IsNull(), isGroup: false },
-        { from: to, to: from, isDeleted: false, threadId: IsNull(), isGroup: false },
+        { from, to, threadId: IsNull(), isGroup: false },
+        { from: to, to: from, threadId: IsNull(), isGroup: false },
       ],
       order: { sentAt: 'ASC' },
       take: limit,
@@ -219,14 +221,15 @@ export class MessagesService {
     return message;
   }
 
-  async deleteMessage(messageId: number, username: string): Promise<boolean> {
-    const message = await this.messageRepository.findOne({
-      where: { id: messageId, from: username },
-    });
+  async deleteMessage(messageId: number, username: string, isAdmin: boolean = false, deletedBy?: string): Promise<boolean> {
+    // 🔥 Si es ADMIN, puede eliminar cualquier mensaje
+    const message = isAdmin
+      ? await this.messageRepository.findOne({ where: { id: messageId } })
+      : await this.messageRepository.findOne({ where: { id: messageId, from: username } });
 
     if (message) {
-      // 🔥 NUEVO: Validar si el mensaje pertenece a una sala asignada por admin
-      if (message.roomCode) {
+      // 🔥 NUEVO: Validar si el mensaje pertenece a una sala asignada por admin (solo para usuarios normales)
+      if (!isAdmin && message.roomCode) {
         const room = await this.temporaryRoomRepository.findOne({
           where: { roomCode: message.roomCode },
         });
@@ -245,6 +248,12 @@ export class MessagesService {
 
       message.isDeleted = true;
       message.deletedAt = new Date();
+
+      // 🔥 Si es ADMIN, guardar quién eliminó el mensaje
+      if (isAdmin && deletedBy) {
+        message.deletedBy = deletedBy;
+      }
+
       await this.messageRepository.save(message);
       return true;
     }
@@ -255,7 +264,13 @@ export class MessagesService {
     messageId: number,
     username: string,
     newText: string,
+    mediaType?: string,
+    mediaData?: string,
+    fileName?: string,
+    fileSize?: number,
   ): Promise<Message | null> {
+    console.log(`✏️ Intentando editar mensaje ID ${messageId} por usuario "${username}"`);
+
     // 🔥 Primero intentar búsqueda exacta
     let message = await this.messageRepository.findOne({
       where: { id: messageId, from: username },
@@ -263,9 +278,19 @@ export class MessagesService {
 
     // 🔥 Si no se encuentra, intentar búsqueda case-insensitive
     if (!message) {
+      console.log(`⚠️ No se encontró con búsqueda exacta, intentando case-insensitive...`);
       const allMessages = await this.messageRepository.find({
         where: { id: messageId },
       });
+
+      if (allMessages.length === 0) {
+        console.log(`❌ No existe ningún mensaje con ID ${messageId}`);
+        return null;
+      }
+
+      console.log(`🔍 Mensaje encontrado en BD. Comparando usuarios:`);
+      console.log(`   - Usuario solicitante: "${username}" (normalizado: "${username?.toLowerCase().trim()}")`);
+      console.log(`   - Usuario del mensaje: "${allMessages[0].from}" (normalizado: "${allMessages[0].from?.toLowerCase().trim()}")`);
 
       // Buscar el mensaje con coincidencia case-insensitive
       message = allMessages.find(
@@ -274,14 +299,26 @@ export class MessagesService {
 
       if (message) {
         console.log(`✅ Mensaje encontrado con búsqueda case-insensitive: "${message.from}" vs "${username}"`);
+      } else {
+        console.log(`❌ El mensaje pertenece a otro usuario. No se puede editar.`);
+        return null;
       }
     }
 
     if (message) {
+      // Actualizar texto del mensaje
       message.message = newText;
+
+      // 🔥 Actualizar campos multimedia si se proporcionan
+      if (mediaType !== undefined) message.mediaType = mediaType;
+      if (mediaData !== undefined) message.mediaData = mediaData;
+      if (fileName !== undefined) message.fileName = fileName;
+      if (fileSize !== undefined) message.fileSize = fileSize;
+
       message.isEdited = true;
       message.editedAt = new Date();
       await this.messageRepository.save(message);
+      console.log(`✅ Mensaje ${messageId} editado exitosamente`);
       return message;
     }
 

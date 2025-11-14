@@ -71,6 +71,9 @@ export class Message {
   @Column({ type: 'datetime', nullable: true })
   deletedAt: Date;
 
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  deletedBy: string; // Nombre del usuario que eliminó el mensaje (para ADMIN)
+
   @Column({ type: 'boolean', default: false })
   isEdited: boolean;
 

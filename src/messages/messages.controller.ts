@@ -98,12 +98,21 @@ export class MessagesController {
     @Param('id') id: string,
     @Body('username') username: string,
     @Body('message') message: string,
+    @Body('mediaType') mediaType?: string,
+    @Body('mediaData') mediaData?: string,
+    @Body('fileName') fileName?: string,
+    @Body('fileSize') fileSize?: number,
   ) {
+    console.log(`Editando mensaje ${id} por usuario: ${username}`);
     // console.log(`âœï¸ Editando mensaje ${id} por ${username}`);
     const edited = await this.messagesService.editMessage(
       parseInt(id),
       username,
       message,
+      mediaType,
+      mediaData,
+      fileName,
+      fileSize,
     );
     return { success: !!edited, message: edited };
   }
@@ -112,11 +121,15 @@ export class MessagesController {
   async deleteMessage(
     @Param('id') id: string,
     @Body('username') username: string,
+    @Body('isAdmin') isAdmin?: boolean,
+    @Body('deletedBy') deletedBy?: string,
   ) {
-    // console.log(`ðŸ—‘ï¸ Eliminando mensaje ${id} por ${username}`);
+    console.log(`ðŸ—‘ï¸ Eliminando mensaje ${id} por ${username}${isAdmin ? ' (ADMIN)' : ''}`);
     const deleted = await this.messagesService.deleteMessage(
       parseInt(id),
       username,
+      isAdmin,
+      deletedBy,
     );
     return { success: deleted };
   }

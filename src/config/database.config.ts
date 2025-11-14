@@ -15,25 +15,33 @@ export const databaseConfig: TypeOrmModuleOptions = {
   extra: {
     createDatabaseIfNotExist: true,
     // Configuraciones para manejar mejor los errores de conexión
-    connectionLimit: 10,
-    acquireTimeout: 60000,
-    timeout: 60000,
-    reconnect: true,
+    connectionLimit: 20, // Aumentado de 10 a 20
+    acquireTimeout: 120000, // Aumentado a 2 minutos
+    timeout: 120000, // Aumentado a 2 minutos
+    connectTimeout: 60000, // 1 minuto para conectar
     // Configuraciones de MySQL para conexiones más estables
     charset: 'utf8mb4',
-    // Configuraciones de pool de conexiones
+    // Configuraciones de pool de conexiones mejoradas
     pool: {
-      min: 2,
-      max: 10,
-      acquireTimeoutMillis: 60000,
-      createTimeoutMillis: 30000,
-      destroyTimeoutMillis: 5000,
-      idleTimeoutMillis: 30000,
+      min: 5, // Aumentado de 2 a 5
+      max: 20, // Aumentado de 10 a 20
+      acquireTimeoutMillis: 120000, // 2 minutos
+      createTimeoutMillis: 60000, // 1 minuto
+      destroyTimeoutMillis: 10000, // 10 segundos
+      idleTimeoutMillis: 600000, // 10 minutos (aumentado de 30 segundos)
       reapIntervalMillis: 1000,
-      createRetryIntervalMillis: 200,
+      createRetryIntervalMillis: 500, // Aumentado de 200 a 500ms
     },
-    // Configuraciones de reconexión
-    retryAttempts: 3,
-    retryDelay: 3000,
+    // Configuraciones de reconexión mejoradas
+    retryAttempts: 5, // Aumentado de 3 a 5
+    retryDelay: 5000, // Aumentado de 3 a 5 segundos
+    // Configuraciones adicionales de MySQL
+    enableKeepAlive: true, // Mantener conexiones vivas
+    keepAliveInitialDelay: 10000, // 10 segundos
+    // Configuraciones para evitar timeouts
+    waitForConnections: true,
+    queueLimit: 0, // Sin límite de cola
+    // Configuraciones de paquetes grandes (para archivos multimedia)
+    maxAllowedPacket: 67108864, // 64MB (aumentado para archivos grandes)
   },
 };

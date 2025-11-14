@@ -60,13 +60,18 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       const rooms = await this.temporaryRoomsService.findAll();
       console.log(`📦 Cargando ${rooms.length} salas/grupos desde BD...`);
 
+      let totalMembers = 0;
       rooms.forEach(room => {
         const members = new Set(room.members || []);
         this.groups.set(room.name, members);
-        console.log(`✅ Grupo "${room.name}" cargado en memoria (${members.size} miembros)`);
+        totalMembers += members.size;
+        // 🔥 Solo mostrar log detallado en modo desarrollo
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`   ✓ "${room.name}" (${members.size} miembros)`);
+        }
       });
 
-      console.log(`✅ Socket Gateway inicializado con ${this.groups.size} grupos`);
+      console.log(`✅ Socket Gateway inicializado: ${this.groups.size} salas, ${totalMembers} miembros totales`);
     } catch (error) {
       console.error('❌ Error al cargar grupos en afterInit:', error);
     }
@@ -160,7 +165,10 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
         room.members && room.members.includes(username)
       );
 
-      console.log(`🏠 Restaurando ${userRooms.length} salas para ${username}`);
+      if (userRooms.length > 0) {
+        const roomNames = userRooms.map(r => r.name).join(', ');
+        console.log(`🏠 Restaurando ${userRooms.length} salas para ${username}: [${roomNames}]`);
+      }
 
       for (const room of userRooms) {
         // Agregar usuario a la sala en memoria
@@ -168,7 +176,10 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
           this.roomUsers.set(room.roomCode, new Set());
         }
         this.roomUsers.get(room.roomCode)!.add(username);
-        console.log(`✅ Usuario ${username} restaurado en sala ${room.roomCode}`);
+        // 🔥 Solo mostrar log detallado en modo desarrollo
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`   ✓ "${room.name}" (${room.roomCode})`);
+        }
       }
 
       // Si el usuario estaba en una sala, actualizar su currentRoom
@@ -579,23 +590,39 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
     let senderRole = senderUser?.userData?.role || null;
     let senderNumeroAgente = senderUser?.userData?.numeroAgente || null;
 
-    // 🔥 CRÍTICO: Si el usuario no está conectado, buscar en la BD
+    // 🔥 OPTIMIZACIÓN: Cachear información del usuario para evitar consultas repetidas a BD
     if (!senderRole || !senderNumeroAgente) {
-      try {
-        // Construir el nombre completo del usuario (nombre + apellido)
-        const dbUser = await this.userRepository.findOne({
-          where: { username: from },
-        });
+      // Primero verificar si ya tenemos el usuario en memoria (de una conexión anterior)
+      const cachedUser = this.users.get(from);
+      if (cachedUser?.userData?.role && cachedUser?.userData?.numeroAgente) {
+        senderRole = cachedUser.userData.role;
+        senderNumeroAgente = cachedUser.userData.numeroAgente;
+      } else {
+        // Solo consultar BD si no está en caché
+        try {
+          const dbUser = await this.userRepository.findOne({
+            where: { username: from },
+          });
 
-        if (dbUser) {
-          senderRole = dbUser.role || senderRole;
-          senderNumeroAgente = dbUser.numeroAgente || senderNumeroAgente;
-          console.log(`✅ Información del remitente obtenida de BD: role=${senderRole}, numeroAgente=${senderNumeroAgente}`);
-        } else {
-          console.warn(`⚠️ Usuario ${from} no encontrado en BD`);
+          if (dbUser) {
+            senderRole = dbUser.role || senderRole;
+            senderNumeroAgente = dbUser.numeroAgente || senderNumeroAgente;
+            console.log(`✅ Información del remitente obtenida de BD: role=${senderRole}, numeroAgente=${senderNumeroAgente}`);
+
+            // 🔥 Cachear en memoria para futuras consultas
+            if (cachedUser) {
+              cachedUser.userData = {
+                ...cachedUser.userData,
+                role: senderRole,
+                numeroAgente: senderNumeroAgente
+              };
+            }
+          } else {
+            console.warn(`⚠️ Usuario ${from} no encontrado en BD`);
+          }
+        } catch (error) {
+          console.error(`❌ Error al buscar usuario en BD:`, error);
         }
-      } catch (error) {
-        console.error(`❌ Error al buscar usuario en BD:`, error);
       }
     }
 
@@ -845,56 +872,116 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       messageId: number;
       username: string;
       newText: string;
+      mediaType?: string;
+      mediaData?: string;
+      fileName?: string;
+      fileSize?: number;
       to: string;
       isGroup: boolean;
       roomCode?: string;
     },
   ) {
-    console.log(`✏️ WS: editMessage - ID: ${data.messageId}, Usuario: ${data.username}`);
+    console.log(`✏️ WS: editMessage - ID: ${data.messageId}, Usuario: ${data.username} (solo broadcast)`);
 
     try {
-      // Editar mensaje en la base de datos
-      const editedMessage = await this.messagesService.editMessage(
-        data.messageId,
-        data.username,
-        data.newText,
-      );
+      // 🔥 OPTIMIZACIÓN: El mensaje ya fue editado en la BD por el endpoint HTTP
+      // Solo necesitamos hacer broadcast del evento a los demás usuarios
+      const editEvent: any = {
+        messageId: data.messageId,
+        newText: data.newText,
+        editedAt: new Date(),
+        isEdited: true,
+      };
 
-      if (editedMessage) {
-        // Emitir evento de mensaje editado
-        const editEvent = {
-          messageId: data.messageId,
-          newText: data.newText,
-          editedAt: editedMessage.editedAt,
-          isEdited: true,
-        };
+      // 🔥 Incluir campos multimedia si se proporcionan
+      if (data.mediaType !== undefined) editEvent.mediaType = data.mediaType;
+      if (data.mediaData !== undefined) editEvent.mediaData = data.mediaData;
+      if (data.fileName !== undefined) editEvent.fileName = data.fileName;
+      if (data.fileSize !== undefined) editEvent.fileSize = data.fileSize;
 
-        if (data.isGroup && data.roomCode) {
-          // Broadcast a todos los usuarios de la sala
-          const roomUsersSet = this.roomUsers.get(data.roomCode);
-          if (roomUsersSet) {
-            roomUsersSet.forEach((user) => {
-              const userConnection = this.users.get(user);
-              if (userConnection && userConnection.socket.connected) {
-                userConnection.socket.emit('messageEdited', editEvent);
-              }
-            });
-          }
-        } else {
-          // Enviar al destinatario individual
-          const recipient = this.users.get(data.to);
-          if (recipient && recipient.socket.connected) {
-            recipient.socket.emit('messageEdited', editEvent);
-          }
-          // También enviar al remitente para sincronizar
-          const sender = this.users.get(data.username);
-          if (sender && sender.socket.connected) {
-            sender.socket.emit('messageEdited', editEvent);
-          }
+      if (data.isGroup && data.roomCode) {
+        // Broadcast a todos los usuarios de la sala
+        const roomUsersSet = this.roomUsers.get(data.roomCode);
+        if (roomUsersSet) {
+          roomUsersSet.forEach((user) => {
+            const userConnection = this.users.get(user);
+            if (userConnection && userConnection.socket.connected) {
+              userConnection.socket.emit('messageEdited', editEvent);
+            }
+          });
+          console.log(`✅ Broadcast de edición enviado a ${roomUsersSet.size} usuarios en sala ${data.roomCode}`);
         }
+      } else {
+        // Enviar al destinatario individual
+        const recipient = this.users.get(data.to);
+        if (recipient && recipient.socket.connected) {
+          recipient.socket.emit('messageEdited', editEvent);
+        }
+        // También enviar al remitente para sincronizar
+        const sender = this.users.get(data.username);
+        if (sender && sender.socket.connected) {
+          sender.socket.emit('messageEdited', editEvent);
+        }
+        console.log(`✅ Notificación de edición enviada a ${data.to} y ${data.username}`);
       }
     } catch (error) {
-      console.error('❌ Error al editar mensaje:', error);
+      console.error('❌ Error al hacer broadcast de mensaje editado:', error);
+    }
+  }
+
+  @SubscribeMessage('deleteMessage')
+  async handleDeleteMessage(
+    @ConnectedSocket() _client: Socket,
+    @MessageBody()
+    data: {
+      messageId: number;
+      username: string;
+      to: string;
+      isGroup: boolean;
+      roomCode?: string;
+      isAdmin?: boolean;
+      deletedBy?: string;
+    },
+  ) {
+    console.log(`🗑️ WS: deleteMessage - ID: ${data.messageId}, Usuario: ${data.username}${data.isAdmin ? ' (ADMIN)' : ''}`);
+
+    try {
+      // 🔥 El mensaje ya fue eliminado en la BD por el endpoint HTTP
+      // Solo necesitamos hacer broadcast del evento a los demás usuarios
+      const deleteEvent: any = {
+        messageId: data.messageId,
+        isDeleted: true,
+        deletedAt: new Date(),
+        deletedBy: data.deletedBy || null,
+      };
+
+      if (data.isGroup && data.roomCode) {
+        // Broadcast a todos los usuarios de la sala
+        const roomUsersSet = this.roomUsers.get(data.roomCode);
+        if (roomUsersSet) {
+          roomUsersSet.forEach((user) => {
+            const userConnection = this.users.get(user);
+            if (userConnection && userConnection.socket.connected) {
+              userConnection.socket.emit('messageDeleted', deleteEvent);
+            }
+          });
+          console.log(`✅ Broadcast de eliminación enviado a ${roomUsersSet.size} usuarios en sala ${data.roomCode}`);
+        }
+      } else {
+        // Enviar al destinatario individual
+        const recipient = this.users.get(data.to);
+        if (recipient && recipient.socket.connected) {
+          recipient.socket.emit('messageDeleted', deleteEvent);
+        }
+        // También enviar al remitente para sincronizar
+        const sender = this.users.get(data.username);
+        if (sender && sender.socket.connected) {
+          sender.socket.emit('messageDeleted', deleteEvent);
+        }
+        console.log(`✅ Notificación de eliminación enviada a ${data.to} y ${data.username}`);
+      }
+    } catch (error) {
+      console.error('❌ Error al hacer broadcast de mensaje eliminado:', error);
     }
   }
 
@@ -1053,23 +1140,28 @@ export class SocketGateway implements OnGatewayConnection, OnGatewayDisconnect, 
   @SubscribeMessage('joinRoom')
   async handleJoinRoom(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { roomCode: string; roomName: string; from: string },
+    @MessageBody() data: { roomCode: string; roomName: string; from: string; isMonitoring?: boolean },
   ) {
-    console.log(`🏠 WS: joinRoom - Usuario: ${data.from}, Sala: ${data.roomCode}`);
+    console.log(`🏠 WS: joinRoom - Usuario: ${data.from}, Sala: ${data.roomCode}, Monitoreo: ${data.isMonitoring || false}`);
 
-    try {
-      // 🔥 Actualizar la base de datos usando el servicio
-      const joinDto = { roomCode: data.roomCode, username: data.from };
-      await this.temporaryRoomsService.joinRoom(joinDto, data.from);
-      console.log(`✅ Usuario ${data.from} unido a sala en BD`);
-    } catch (error) {
-      // 🔥 NUEVO: Notificar al cliente del error
-      console.error(`❌ Error al unir usuario ${data.from} a sala en BD:`, error);
-      client.emit('joinRoomError', {
-        roomCode: data.roomCode,
-        message: error.message || 'Error al unirse a la sala'
-      });
-      return; // No continuar si falla en BD
+    // 🔥 Si es monitoreo (ADMIN/JEFEPISO), NO actualizar BD, solo memoria
+    if (!data.isMonitoring) {
+      try {
+        // 🔥 Actualizar la base de datos usando el servicio
+        const joinDto = { roomCode: data.roomCode, username: data.from };
+        await this.temporaryRoomsService.joinRoom(joinDto, data.from);
+        console.log(`✅ Usuario ${data.from} unido a sala en BD`);
+      } catch (error) {
+        // 🔥 NUEVO: Notificar al cliente del error
+        console.error(`❌ Error al unir usuario ${data.from} a sala en BD:`, error);
+        client.emit('joinRoomError', {
+          roomCode: data.roomCode,
+          message: error.message || 'Error al unirse a la sala'
+        });
+        return; // No continuar si falla en BD
+      }
+    } else {
+      console.log(`👁️ Usuario ${data.from} uniéndose como MONITOR (solo en memoria)`);
     }
 
     // Agregar usuario a la sala en memoria
