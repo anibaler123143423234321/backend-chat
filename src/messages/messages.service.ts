@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like, IsNull } from 'typeorm';
+import { Repository, IsNull } from 'typeorm';
 import { Message } from './entities/message.entity';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { TemporaryRoom } from '../temporary-rooms/entities/temporary-room.entity';
@@ -75,28 +75,50 @@ export class MessagesService {
       skip: offset,
     });
 
-    // Calcular el threadCount real para cada mensaje
-    for (const message of messages) {
-      const threadCount = await this.messageRepository.count({
-        where: { threadId: message.id, isDeleted: false },
-      });
-      message.threadCount = threadCount;
+    // 🔥 OPTIMIZACIÓN: Obtener threadCounts en un solo query en lugar de uno por mensaje
+    const messageIds = messages.map(m => m.id);
+    const threadCountMap = {};
+    const lastReplyMap = {};
 
-      if (threadCount > 0) {
-        const lastThreadMessage = await this.messageRepository.findOne({
-          where: { threadId: message.id, isDeleted: false },
-          order: { sentAt: 'DESC' },
-        });
-        if (lastThreadMessage) {
-          message.lastReplyFrom = lastThreadMessage.from;
+    if (messageIds.length > 0) {
+      // Obtener conteo de threads para todos los mensajes
+      const threadCounts = await this.messageRepository
+        .createQueryBuilder('message')
+        .select('message.threadId', 'threadId')
+        .addSelect('COUNT(*)', 'count')
+        .where('message.threadId IN (:...messageIds)', { messageIds })
+        .andWhere('message.isDeleted = false')
+        .groupBy('message.threadId')
+        .getRawMany();
+
+      threadCounts.forEach(tc => {
+        threadCountMap[tc.threadId] = parseInt(tc.count);
+      });
+
+      // Obtener último mensaje de cada hilo
+      const lastReplies = await this.messageRepository
+        .createQueryBuilder('message')
+        .where('message.threadId IN (:...messageIds)', { messageIds })
+        .andWhere('message.isDeleted = false')
+        .orderBy('message.sentAt', 'DESC')
+        .getMany();
+
+      // Agrupar por threadId y tomar el primero (más reciente)
+      const seenThreadIds = new Set();
+      lastReplies.forEach(reply => {
+        if (!seenThreadIds.has(reply.threadId)) {
+          lastReplyMap[reply.threadId] = reply.from;
+          seenThreadIds.add(reply.threadId);
         }
-      }
+      });
     }
 
-    // Retornar con numeración por ID
+    // Retornar con numeración por ID y threadCount
     return messages.map((msg, index) => ({
       ...msg,
       numberInList: index + 1 + offset,
+      threadCount: threadCountMap[msg.id] || 0,
+      lastReplyFrom: lastReplyMap[msg.id] || null,
     }));
   }
 
@@ -139,6 +161,72 @@ export class MessagesService {
     }
 
     return messages;
+  }
+
+  // 🔥 NUEVO: Obtener mensajes entre usuarios ordenados por ID (para evitar problemas con sentAt corrupto)
+  async findByUserOrderedById(
+    from: string,
+    to: string,
+    limit: number = 20,
+    offset: number = 0,
+  ): Promise<any[]> {
+    // 🔥 Ordenar por ID (orden de inserción) en lugar de sentAt
+    const messages = await this.messageRepository
+      .createQueryBuilder('message')
+      .where('LOWER(message.from) = LOWER(:from) AND LOWER(message.to) = LOWER(:to) AND message.threadId IS NULL AND message.isGroup = false', { from, to })
+      .orWhere('LOWER(message.from) = LOWER(:to) AND LOWER(message.to) = LOWER(:from) AND message.threadId IS NULL AND message.isGroup = false', { from, to })
+      .orderBy('message.id', 'ASC')
+      .take(limit)
+      .skip(offset)
+      .getMany();
+
+    // 🔥 OPTIMIZACIÓN: Obtener threadCounts en un solo query en lugar de uno por mensaje
+    const messageIds = messages.map(m => m.id);
+    const threadCountMap = {};
+    const lastReplyMap = {};
+
+    if (messageIds.length > 0) {
+      // Obtener conteo de threads para todos los mensajes
+      const threadCounts = await this.messageRepository
+        .createQueryBuilder('message')
+        .select('message.threadId', 'threadId')
+        .addSelect('COUNT(*)', 'count')
+        .where('message.threadId IN (:...messageIds)', { messageIds })
+        .andWhere('message.isDeleted = false')
+        .groupBy('message.threadId')
+        .getRawMany();
+
+      threadCounts.forEach(tc => {
+        threadCountMap[tc.threadId] = parseInt(tc.count);
+      });
+
+      // Obtener último mensaje de cada hilo
+      const lastReplies = await this.messageRepository
+        .createQueryBuilder('message')
+        .where('message.threadId IN (:...messageIds)', { messageIds })
+        .andWhere('message.isDeleted = false')
+        .orderBy('message.sentAt', 'DESC')
+        .getMany();
+
+      // Agrupar por threadId y tomar el primero (más reciente)
+      const seenThreadIds = new Set();
+      lastReplies.forEach(reply => {
+        if (!seenThreadIds.has(reply.threadId)) {
+          lastReplyMap[reply.threadId] = reply.from;
+          seenThreadIds.add(reply.threadId);
+        }
+      });
+    }
+
+    // Agregar numeración secuencial y threadCount
+    const messagesWithNumber = messages.map((msg, index) => ({
+      ...msg,
+      numberInList: index + 1 + offset,
+      threadCount: threadCountMap[msg.id] || 0,
+      lastReplyFrom: lastReplyMap[msg.id] || null,
+    }));
+
+    return messagesWithNumber;
   }
 
   async findRecentMessages(limit: number = 20): Promise<Message[]> {

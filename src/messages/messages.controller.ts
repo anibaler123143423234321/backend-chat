@@ -67,6 +67,22 @@ export class MessagesController {
     );
   }
 
+  @Get('user/:from/:to/by-id')
+  async findByUserOrderedById(
+    @Param('from') from: string,
+    @Param('to') to: string,
+    @Query('limit') limit: string = '20',
+    @Query('offset') offset: string = '0',
+  ) {
+    return await this.messagesService.findByUserOrderedById(
+      from,
+      to,
+      parseInt(limit),
+      parseInt(offset),
+    );
+  }
+
+
   @Get('recent')
   async findRecent(@Query('limit') limit: string = '20') {
     // console.log(`ðŸ•’ Obteniendo mensajes recientes`);
