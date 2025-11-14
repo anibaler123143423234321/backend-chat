@@ -153,6 +153,19 @@ export class MessagesController {
     );
   }
 
+  @Get('search-by-user/:userId')
+  async searchMessagesByUserId(
+    @Param('userId') userId: string,
+    @Query('q') searchTerm: string,
+    @Query('limit') limit: string = '50',
+  ) {
+    return await this.messagesService.searchMessagesByUserId(
+      parseInt(userId),
+      searchTerm,
+      parseInt(limit),
+    );
+  }
+
   @Get('thread/:threadId')
   async findThreadMessages(
     @Param('threadId') threadId: string,

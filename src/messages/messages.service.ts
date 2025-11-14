@@ -349,22 +349,109 @@ export class MessagesService {
     searchTerm: string,
     limit: number = 50,
   ): Promise<any[]> {
+    console.log('🔍 searchMessages llamado con:', { username, searchTerm, limit });
+
     if (!searchTerm || searchTerm.trim().length === 0) {
       return [];
     }
 
-    // 🔥 Buscar TODOS los mensajes donde el usuario es el remitente
-    // Incluye: chats directos, grupos, archivos, etc.
-    // Excluir solo mensajes de hilos (threadId debe ser null) y mensajes eliminados
-    const messages = await this.messageRepository.find({
+    // 🔥 Buscar TODOS los mensajes del usuario
+    // El problema es que algunos mensajes tienen "from" como username (73583958)
+    // y otros como nombre completo (BAGNER ANIBAL CHUQUIMIA)
+    // Por eso buscamos TODOS los mensajes y luego filtramos
+    const allMessages = await this.messageRepository.find({
       where: {
-        from: username,
         isDeleted: false,
         threadId: IsNull(),
       },
       order: { sentAt: 'DESC' },
-      take: limit,
+      take: 1000, // Aumentar límite para buscar en más mensajes
     });
+
+    console.log('📊 Total de mensajes en BD:', allMessages.length);
+
+    // Filtrar mensajes del usuario (por username o que contengan el username en el campo from)
+    const userMessages = allMessages.filter(msg => {
+      // Buscar por username exacto o que el campo "from" contenga el username
+      return msg.from === username || msg.from?.includes(username);
+    });
+
+    console.log('📊 Mensajes del usuario encontrados:', userMessages.length);
+    if (userMessages.length > 0) {
+      console.log('📝 Primer mensaje del usuario:', {
+        from: userMessages[0].from,
+        message: userMessages[0].message,
+        to: userMessages[0].to,
+        isGroup: userMessages[0].isGroup
+      });
+    }
+
+    // Filtrar por búsqueda en mensaje o nombre de archivo
+    const filteredMessages = userMessages.filter(msg => {
+      const searchLower = searchTerm.toLowerCase();
+      const messageText = (msg.message || '').toLowerCase();
+      const fileName = (msg.fileName || '').toLowerCase();
+      return messageText.includes(searchLower) || fileName.includes(searchLower);
+    });
+
+    console.log('✅ Mensajes filtrados por búsqueda:', filteredMessages.length);
+
+    // Limitar resultados al límite especificado
+    const limitedResults = filteredMessages.slice(0, limit);
+
+    // Retornar los mensajes con información de la conversación
+    return limitedResults.map(msg => ({
+      id: msg.id,
+      message: msg.message,
+      from: msg.from,
+      to: msg.to,
+      sentAt: msg.sentAt,
+      isGroup: msg.isGroup,
+      roomCode: msg.roomCode,
+      mediaType: msg.mediaType,
+      mediaData: msg.mediaData,
+      fileName: msg.fileName,
+      fileSize: msg.fileSize,
+      // Información adicional para identificar la conversación
+      conversationType: msg.isGroup ? 'group' : 'direct',
+      conversationId: msg.isGroup ? msg.roomCode : msg.to,
+      conversationName: msg.isGroup ? msg.roomCode : msg.to,
+    }));
+  }
+
+  // Buscar mensajes por ID de usuario
+  async searchMessagesByUserId(
+    userId: number,
+    searchTerm: string,
+    limit: number = 50,
+  ): Promise<any[]> {
+    console.log('🔍 searchMessagesByUserId llamado con:', { userId, searchTerm, limit });
+
+    if (!searchTerm || searchTerm.trim().length === 0) {
+      return [];
+    }
+
+    // Buscar mensajes del usuario por fromId
+    const messages = await this.messageRepository.find({
+      where: {
+        fromId: userId,
+        isDeleted: false,
+        threadId: IsNull(),
+      },
+      order: { sentAt: 'DESC' },
+      take: 1000, // Buscar en más mensajes
+    });
+
+    console.log('📊 Mensajes del usuario encontrados:', messages.length);
+    if (messages.length > 0) {
+      console.log('📝 Primer mensaje del usuario:', {
+        from: messages[0].from,
+        fromId: messages[0].fromId,
+        message: messages[0].message,
+        to: messages[0].to,
+        isGroup: messages[0].isGroup
+      });
+    }
 
     // Filtrar por búsqueda en mensaje o nombre de archivo
     const filteredMessages = messages.filter(msg => {
@@ -374,8 +461,13 @@ export class MessagesService {
       return messageText.includes(searchLower) || fileName.includes(searchLower);
     });
 
+    console.log('✅ Mensajes filtrados por búsqueda:', filteredMessages.length);
+
+    // Limitar resultados al límite especificado
+    const limitedResults = filteredMessages.slice(0, limit);
+
     // Retornar los mensajes con información de la conversación
-    return filteredMessages.map(msg => ({
+    return limitedResults.map(msg => ({
       id: msg.id,
       message: msg.message,
       from: msg.from,
