@@ -200,7 +200,7 @@ export class MessagesController {
   @Get('thread/:threadId')
   async findThreadMessages(
     @Param('threadId') threadId: string,
-    @Query('limit') limit: string = '20',
+    @Query('limit') limit: string = '100',
     @Query('offset') offset: string = '0',
   ) {
     return await this.messagesService.findThreadMessages(

@@ -17,7 +17,7 @@ export class MessagesService {
 
   async create(createMessageDto: CreateMessageDto): Promise<Message> {
     // 🔥 NUEVO: Verificar duplicados antes de guardar
-    const { from, to, message: messageText, time, isGroup, roomCode } = createMessageDto;
+    const { from, to, message: messageText, time, isGroup, roomCode, threadId } = createMessageDto;
 
     // 🔥 Construir condiciones de búsqueda de duplicados
     const duplicateConditions: any = {
@@ -26,6 +26,15 @@ export class MessagesService {
       time,
       isDeleted: false,
     };
+
+    // 🔥 IMPORTANTE: Agregar threadId a las condiciones de duplicados
+    // Los mensajes de hilo deben considerarse únicos incluso si tienen el mismo texto
+    if (threadId !== undefined && threadId !== null) {
+      duplicateConditions.threadId = threadId;
+    } else {
+      // Solo para mensajes principales (no de hilo)
+      duplicateConditions.threadId = IsNull();
+    }
 
     // Agregar condiciones específicas según el tipo de mensaje
     if (isGroup && roomCode) {
@@ -48,6 +57,7 @@ export class MessagesService {
         to,
         roomCode,
         isGroup,
+        threadId,
         message: messageText?.substring(0, 30)
       });
       return recentDuplicate;
@@ -682,7 +692,7 @@ export class MessagesService {
   // Obtener mensajes de un hilo específico
   async findThreadMessages(
     threadId: number,
-    limit: number = 20,
+    limit: number = 100,
     offset: number = 0,
   ): Promise<Message[]> {
     // 🔥 CORREGIDO: Usar ID en lugar de sentAt para ordenamiento consistente
