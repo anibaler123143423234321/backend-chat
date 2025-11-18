@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { SocketGateway } from './socket.gateway';
 import { TemporaryRoomsModule } from '../temporary-rooms/temporary-rooms.module';
@@ -10,9 +10,10 @@ import { User } from '../users/entities/user.entity';
   imports: [
     TypeOrmModule.forFeature([User]),
     TemporaryRoomsModule,
-    MessagesModule,
+    forwardRef(() => MessagesModule),
     TemporaryConversationsModule
   ],
   providers: [SocketGateway],
+  exports: [SocketGateway],
 })
 export class SocketModule {}

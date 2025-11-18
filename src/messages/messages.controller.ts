@@ -51,7 +51,6 @@ export class MessagesController {
     );
   }
 
-
   @Get('user/:from/:to')
   async findByUser(
     @Param('from') from: string,
@@ -83,7 +82,6 @@ export class MessagesController {
     );
   }
 
-
   @Get('recent')
   async findRecent(@Query('limit') limit: string = '20') {
     // console.log(`ðŸ•’ Obteniendo mensajes recientes`);
@@ -95,14 +93,16 @@ export class MessagesController {
     @Param('id') id: string,
     @Body('username') username: string,
   ) {
-    const message = await this.messagesService.markAsRead(parseInt(id), username);
+    const message = await this.messagesService.markAsRead(
+      parseInt(id),
+      username,
+    );
     return { success: !!message, message };
   }
 
   // Marcar mÃºltiples mensajes como leÃ­dos
   @Patch('mark-read')
   async markMultipleAsRead(@Body() markReadDto: MarkReadDto) {
-
     if (markReadDto.messageIds && markReadDto.messageIds.length > 0) {
       const messages = await this.messagesService.markMultipleAsRead(
         markReadDto.messageIds,
@@ -120,7 +120,10 @@ export class MessagesController {
     @Body('from') from: string,
     @Body('to') to: string,
   ) {
-    const messages = await this.messagesService.markConversationAsRead(from, to);
+    const messages = await this.messagesService.markConversationAsRead(
+      from,
+      to,
+    );
     return { success: true, messagesUpdated: messages.length, messages };
   }
 
@@ -155,7 +158,9 @@ export class MessagesController {
     @Body('isAdmin') isAdmin?: boolean,
     @Body('deletedBy') deletedBy?: string,
   ) {
-    console.log(`ðŸ—‘ï¸ Eliminando mensaje ${id} por ${username}${isAdmin ? ' (ADMIN)' : ''}`);
+    console.log(
+      `ðŸ—‘ï¸ Eliminando mensaje ${id} por ${username}${isAdmin ? ' (ADMIN)' : ''}`,
+    );
     const deleted = await this.messagesService.deleteMessage(
       parseInt(id),
       username,
@@ -214,5 +219,52 @@ export class MessagesController {
   async incrementThreadCount(@Param('id') id: string) {
     await this.messagesService.incrementThreadCount(parseInt(id));
     return { success: true };
+  }
+
+  // 🔥 NUEVO: Obtener conteo de mensajes no leídos para un usuario en una sala
+  @Get('unread-count/:roomCode/:username')
+  async getUnreadCountForUserInRoom(
+    @Param('roomCode') roomCode: string,
+    @Param('username') username: string,
+  ) {
+    const unreadCount = await this.messagesService.getUnreadCountForUserInRoom(
+      roomCode,
+      username,
+    );
+    return { roomCode, username, unreadCount };
+  }
+
+  // 🔥 NUEVO: Obtener conteo de mensajes no leídos para múltiples salas
+  @Post('unread-counts')
+  async getUnreadCountsForUserInRooms(
+    @Body('roomCodes') roomCodes: string[],
+    @Body('username') username: string,
+  ) {
+    const unreadCounts =
+      await this.messagesService.getUnreadCountsForUserInRooms(
+        roomCodes,
+        username,
+      );
+    return { username, unreadCounts };
+  }
+
+  // 🔥 NUEVO: Obtener todos los conteos de mensajes no leídos para un usuario
+  @Get('unread-counts')
+  async getAllUnreadCountsForUser(@Query('username') username: string) {
+    console.log(`📊 GET /unread-counts llamado para usuario: ${username}`);
+
+    try {
+      if (!username) {
+        throw new Error('Username is required');
+      }
+
+      const unreadCounts =
+        await this.messagesService.getAllUnreadCountsForUser(username);
+      console.log(`📊 Devolviendo conteos:`, unreadCounts);
+      return unreadCounts;
+    } catch (error) {
+      console.error(`❌ Error en getAllUnreadCountsForUser:`, error);
+      throw error;
+    }
   }
 }

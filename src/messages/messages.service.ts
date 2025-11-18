@@ -1,10 +1,16 @@
-import { Injectable, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  Inject,
+  forwardRef,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull } from 'typeorm';
 import { Message } from './entities/message.entity';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { TemporaryRoom } from '../temporary-rooms/entities/temporary-room.entity';
-import { getPeruDate } from '../utils/date.utils';
+import { getPeruDate, formatPeruTime } from '../utils/date.utils';
+import { SocketGateway } from '../socket/socket.gateway';
 
 @Injectable()
 export class MessagesService {
@@ -13,11 +19,21 @@ export class MessagesService {
     private messageRepository: Repository<Message>,
     @InjectRepository(TemporaryRoom)
     private temporaryRoomRepository: Repository<TemporaryRoom>,
+    @Inject(forwardRef(() => SocketGateway))
+    private socketGateway: SocketGateway,
   ) {}
 
   async create(createMessageDto: CreateMessageDto): Promise<Message> {
     // 🔥 NUEVO: Verificar duplicados antes de guardar
-    const { from, to, message: messageText, time, isGroup, roomCode, threadId } = createMessageDto;
+    const {
+      from,
+      to,
+      message: messageText,
+      time,
+      isGroup,
+      roomCode,
+      threadId,
+    } = createMessageDto;
 
     // 🔥 Construir condiciones de búsqueda de duplicados
     const duplicateConditions: any = {
@@ -52,23 +68,33 @@ export class MessagesService {
     });
 
     if (recentDuplicate) {
-      console.log(`⚠️ Duplicado detectado - Retornando mensaje existente ID: ${recentDuplicate.id}`, {
-        from,
-        to,
-        roomCode,
-        isGroup,
-        threadId,
-        message: messageText?.substring(0, 30)
-      });
+      console.log(
+        `⚠️ Duplicado detectado - Retornando mensaje existente ID: ${recentDuplicate.id}`,
+        {
+          from,
+          to,
+          roomCode,
+          isGroup,
+          threadId,
+          message: messageText?.substring(0, 30),
+        },
+      );
       return recentDuplicate;
     }
 
+    const peruDate = createMessageDto.sentAt || getPeruDate();
     const message = this.messageRepository.create({
       ...createMessageDto,
-      sentAt: createMessageDto.sentAt || getPeruDate(),
+      sentAt: peruDate,
+      time: formatPeruTime(peruDate), // 🔥 Calcular time automáticamente
     });
 
-    return await this.messageRepository.save(message);
+    const savedMessage = await this.messageRepository.save(message);
+
+    // 🔥 NOTA: La actualización de contadores y último mensaje ahora se maneja
+    // directamente en socket.gateway.ts cuando se distribuyen los mensajes
+
+    return savedMessage;
   }
 
   async findByRoom(
@@ -123,7 +149,7 @@ export class MessagesService {
     });
 
     // 🔥 OPTIMIZACIÓN: Obtener threadCounts en un solo query en lugar de uno por mensaje
-    const messageIds = messages.map(m => m.id);
+    const messageIds = messages.map((m) => m.id);
     const threadCountMap = {};
     const lastReplyMap = {};
 
@@ -138,7 +164,7 @@ export class MessagesService {
         .groupBy('message.threadId')
         .getRawMany();
 
-      threadCounts.forEach(tc => {
+      threadCounts.forEach((tc) => {
         threadCountMap[tc.threadId] = parseInt(tc.count);
       });
 
@@ -152,7 +178,7 @@ export class MessagesService {
 
       // Agrupar por threadId y tomar el primero (más reciente)
       const seenThreadIds = new Set();
-      lastReplies.forEach(reply => {
+      lastReplies.forEach((reply) => {
         if (!seenThreadIds.has(reply.threadId)) {
           lastReplyMap[reply.threadId] = reply.from;
           seenThreadIds.add(reply.threadId);
@@ -172,7 +198,6 @@ export class MessagesService {
     }));
   }
 
-
   async findByUser(
     from: string,
     to: string,
@@ -184,8 +209,14 @@ export class MessagesService {
     // 🔥 INCLUIR mensajes eliminados para mostrarlos como "Mensaje eliminado por..."
     const messages = await this.messageRepository
       .createQueryBuilder('message')
-      .where('LOWER(message.from) = LOWER(:from) AND LOWER(message.to) = LOWER(:to) AND message.threadId IS NULL AND message.isGroup = false', { from, to })
-      .orWhere('LOWER(message.from) = LOWER(:to) AND LOWER(message.to) = LOWER(:from) AND message.threadId IS NULL AND message.isGroup = false', { from, to })
+      .where(
+        'LOWER(message.from) = LOWER(:from) AND LOWER(message.to) = LOWER(:to) AND message.threadId IS NULL AND message.isGroup = false',
+        { from, to },
+      )
+      .orWhere(
+        'LOWER(message.from) = LOWER(:to) AND LOWER(message.to) = LOWER(:from) AND message.threadId IS NULL AND message.isGroup = false',
+        { from, to },
+      )
       .orderBy('message.sentAt', 'ASC')
       .take(limit)
       .skip(offset)
@@ -223,15 +254,21 @@ export class MessagesService {
     // 🔥 Obtener mensajes más recientes primero (DESC), luego invertir para mostrar cronológicamente
     const messages = await this.messageRepository
       .createQueryBuilder('message')
-      .where('LOWER(message.from) = LOWER(:from) AND LOWER(message.to) = LOWER(:to) AND message.threadId IS NULL AND message.isGroup = false AND message.isDeleted = false', { from, to })
-      .orWhere('LOWER(message.from) = LOWER(:to) AND LOWER(message.to) = LOWER(:from) AND message.threadId IS NULL AND message.isGroup = false AND message.isDeleted = false', { from, to })
+      .where(
+        'LOWER(message.from) = LOWER(:from) AND LOWER(message.to) = LOWER(:to) AND message.threadId IS NULL AND message.isGroup = false AND message.isDeleted = false',
+        { from, to },
+      )
+      .orWhere(
+        'LOWER(message.from) = LOWER(:to) AND LOWER(message.to) = LOWER(:from) AND message.threadId IS NULL AND message.isGroup = false AND message.isDeleted = false',
+        { from, to },
+      )
       .orderBy('message.id', 'DESC')
       .take(limit)
       .skip(offset)
       .getMany();
 
     // 🔥 OPTIMIZACIÓN: Obtener threadCounts en un solo query en lugar de uno por mensaje
-    const messageIds = messages.map(m => m.id);
+    const messageIds = messages.map((m) => m.id);
     const threadCountMap = {};
     const lastReplyMap = {};
 
@@ -246,7 +283,7 @@ export class MessagesService {
         .groupBy('message.threadId')
         .getRawMany();
 
-      threadCounts.forEach(tc => {
+      threadCounts.forEach((tc) => {
         threadCountMap[tc.threadId] = parseInt(tc.count);
       });
 
@@ -260,7 +297,7 @@ export class MessagesService {
 
       // Agrupar por threadId y tomar el primero (más reciente)
       const seenThreadIds = new Set();
-      lastReplies.forEach(reply => {
+      lastReplies.forEach((reply) => {
         if (!seenThreadIds.has(reply.threadId)) {
           lastReplyMap[reply.threadId] = reply.from;
           seenThreadIds.add(reply.threadId);
@@ -291,7 +328,10 @@ export class MessagesService {
     });
   }
 
-  async markAsRead(messageId: number, username: string): Promise<Message | null> {
+  async markAsRead(
+    messageId: number,
+    username: string,
+  ): Promise<Message | null> {
     const message = await this.messageRepository.findOne({
       where: { id: messageId },
     });
@@ -313,7 +353,10 @@ export class MessagesService {
   }
 
   // Marcar múltiples mensajes como leídos
-  async markMultipleAsRead(messageIds: number[], username: string): Promise<Message[]> {
+  async markMultipleAsRead(
+    messageIds: number[],
+    username: string,
+  ): Promise<Message[]> {
     const updatedMessages: Message[] = [];
 
     for (const messageId of messageIds) {
@@ -388,13 +431,20 @@ export class MessagesService {
 
     if (existingReactionIndex !== -1) {
       // Si ya existe, quitarla
-      console.log(`🗑️ Quitando reacción existente de ${username} con emoji ${emoji}`);
+      console.log(
+        `🗑️ Quitando reacción existente de ${username} con emoji ${emoji}`,
+      );
       message.reactions.splice(existingReactionIndex, 1);
     } else {
       // Quitar cualquier otra reacción del usuario (solo una reacción por usuario)
-      const previousReactions = message.reactions.filter((r) => r.username === username);
+      const previousReactions = message.reactions.filter(
+        (r) => r.username === username,
+      );
       if (previousReactions.length > 0) {
-        console.log(`🔄 Usuario ${username} ya tenía reacciones, quitándolas:`, previousReactions);
+        console.log(
+          `🔄 Usuario ${username} ya tenía reacciones, quitándolas:`,
+          previousReactions,
+        );
       }
 
       message.reactions = message.reactions.filter(
@@ -402,11 +452,13 @@ export class MessagesService {
       );
 
       // Agregar la nueva reacción
-      console.log(`➕ Agregando nueva reacción de ${username} con emoji ${emoji}`);
+      console.log(
+        `➕ Agregando nueva reacción de ${username} con emoji ${emoji}`,
+      );
 
       // 🔥 Crear timestamp en hora de Perú (UTC-5)
       const now = new Date();
-      const peruTime = new Date(now.getTime() - (5 * 60 * 60 * 1000));
+      const peruTime = new Date(now.getTime() - 5 * 60 * 60 * 1000);
 
       message.reactions.push({
         emoji,
@@ -415,7 +467,10 @@ export class MessagesService {
       });
     }
 
-    console.log(`📝 Reacciones después del cambio:`, JSON.stringify(message.reactions));
+    console.log(
+      `📝 Reacciones después del cambio:`,
+      JSON.stringify(message.reactions),
+    );
     console.log(`💾 Guardando mensaje en BD...`);
 
     const savedMessage = await this.messageRepository.save(message);
@@ -424,11 +479,18 @@ export class MessagesService {
     return savedMessage;
   }
 
-  async deleteMessage(messageId: number, username: string, isAdmin: boolean = false, deletedBy?: string): Promise<boolean> {
+  async deleteMessage(
+    messageId: number,
+    username: string,
+    isAdmin: boolean = false,
+    deletedBy?: string,
+  ): Promise<boolean> {
     // 🔥 Si es ADMIN, puede eliminar cualquier mensaje
     const message = isAdmin
       ? await this.messageRepository.findOne({ where: { id: messageId } })
-      : await this.messageRepository.findOne({ where: { id: messageId, from: username } });
+      : await this.messageRepository.findOne({
+          where: { id: messageId, from: username },
+        });
 
     if (message) {
       // 🔥 NUEVO: Validar si el mensaje pertenece a una sala asignada por admin (solo para usuarios normales)
@@ -472,7 +534,9 @@ export class MessagesService {
     fileName?: string,
     fileSize?: number,
   ): Promise<Message | null> {
-    console.log(`✏️ Intentando editar mensaje ID ${messageId} por usuario "${username}"`);
+    console.log(
+      `✏️ Intentando editar mensaje ID ${messageId} por usuario "${username}"`,
+    );
 
     // 🔥 Primero intentar búsqueda exacta
     let message = await this.messageRepository.findOne({
@@ -481,7 +545,9 @@ export class MessagesService {
 
     // 🔥 Si no se encuentra, intentar búsqueda case-insensitive
     if (!message) {
-      console.log(`⚠️ No se encontró con búsqueda exacta, intentando case-insensitive...`);
+      console.log(
+        `⚠️ No se encontró con búsqueda exacta, intentando case-insensitive...`,
+      );
       const allMessages = await this.messageRepository.find({
         where: { id: messageId },
       });
@@ -492,18 +558,27 @@ export class MessagesService {
       }
 
       console.log(`🔍 Mensaje encontrado en BD. Comparando usuarios:`);
-      console.log(`   - Usuario solicitante: "${username}" (normalizado: "${username?.toLowerCase().trim()}")`);
-      console.log(`   - Usuario del mensaje: "${allMessages[0].from}" (normalizado: "${allMessages[0].from?.toLowerCase().trim()}")`);
+      console.log(
+        `   - Usuario solicitante: "${username}" (normalizado: "${username?.toLowerCase().trim()}")`,
+      );
+      console.log(
+        `   - Usuario del mensaje: "${allMessages[0].from}" (normalizado: "${allMessages[0].from?.toLowerCase().trim()}")`,
+      );
 
       // Buscar el mensaje con coincidencia case-insensitive
       message = allMessages.find(
-        msg => msg.from?.toLowerCase().trim() === username?.toLowerCase().trim()
+        (msg) =>
+          msg.from?.toLowerCase().trim() === username?.toLowerCase().trim(),
       );
 
       if (message) {
-        console.log(`✅ Mensaje encontrado con búsqueda case-insensitive: "${message.from}" vs "${username}"`);
+        console.log(
+          `✅ Mensaje encontrado con búsqueda case-insensitive: "${message.from}" vs "${username}"`,
+        );
       } else {
-        console.log(`❌ El mensaje pertenece a otro usuario. No se puede editar.`);
+        console.log(
+          `❌ El mensaje pertenece a otro usuario. No se puede editar.`,
+        );
         return null;
       }
     }
@@ -525,7 +600,9 @@ export class MessagesService {
       return message;
     }
 
-    console.log(`⚠️ No se encontró mensaje con ID ${messageId} del usuario "${username}"`);
+    console.log(
+      `⚠️ No se encontró mensaje con ID ${messageId} del usuario "${username}"`,
+    );
     return null;
   }
 
@@ -546,13 +623,175 @@ export class MessagesService {
     return { totalMessages, unreadMessages };
   }
 
+  // 🔥 NUEVO: Obtener conteo de mensajes no leídos por usuario en una sala específica
+  async getUnreadCountForUserInRoom(
+    roomCode: string,
+    username: string,
+  ): Promise<number> {
+    try {
+      console.log(
+        `📊 getUnreadCountForUserInRoom - Sala: ${roomCode}, Usuario: ${username}`,
+      );
+
+      const messages = await this.messageRepository.find({
+        where: {
+          roomCode,
+          isDeleted: false,
+          threadId: IsNull(), // Solo mensajes principales, no de hilos
+        },
+        select: ['id', 'from', 'readBy'],
+      });
+
+      console.log(
+        `📊 Mensajes encontrados en sala ${roomCode}: ${messages.length}`,
+      );
+
+      // 🔥 DEBUG: Mostrar algunos mensajes para entender el formato
+      if (messages.length > 0) {
+        console.log(`📊 DEBUG - Primeros 3 mensajes en sala ${roomCode}:`);
+        messages.slice(0, 3).forEach((msg, index) => {
+          console.log(
+            `  ${index + 1}. ID: ${msg.id}, From: "${msg.from}", ReadBy: ${JSON.stringify(msg.readBy)}`,
+          );
+        });
+      }
+
+      // Contar mensajes que NO han sido leídos por el usuario
+      const unreadCount = messages.filter((msg) => {
+        // No contar mensajes propios (comparación case-insensitive)
+        if (msg.from?.toLowerCase().trim() === username?.toLowerCase().trim()) {
+          return false;
+        }
+
+        // Si no tiene readBy o está vacío, no ha sido leído
+        if (!msg.readBy || msg.readBy.length === 0) {
+          console.log(
+            `📊 DEBUG - Mensaje ${msg.id} no leído (sin readBy): from="${msg.from}"`,
+          );
+          return true;
+        }
+
+        // Verificar si el usuario está en la lista de lectores (case-insensitive)
+        const isReadByUser = msg.readBy.some(
+          (reader) =>
+            reader?.toLowerCase().trim() === username?.toLowerCase().trim(),
+        );
+
+        if (!isReadByUser) {
+          console.log(
+            `📊 DEBUG - Mensaje ${msg.id} no leído por ${username}: from="${msg.from}", readBy=${JSON.stringify(msg.readBy)}`,
+          );
+        }
+
+        return !isReadByUser;
+      }).length;
+
+      console.log(
+        `📊 Mensajes no leídos para ${username} en sala ${roomCode}: ${unreadCount}`,
+      );
+      return unreadCount;
+    } catch (error) {
+      console.error(
+        `❌ Error en getUnreadCountForUserInRoom - Sala: ${roomCode}, Usuario: ${username}:`,
+        error,
+      );
+      return 0;
+    }
+  }
+
+  // 🔥 NUEVO: Obtener conteo de mensajes no leídos para múltiples salas
+  async getUnreadCountsForUserInRooms(
+    roomCodes: string[],
+    username: string,
+  ): Promise<{ [roomCode: string]: number }> {
+    const result: { [roomCode: string]: number } = {};
+
+    for (const roomCode of roomCodes) {
+      result[roomCode] = await this.getUnreadCountForUserInRoom(
+        roomCode,
+        username,
+      );
+    }
+
+    return result;
+  }
+
+  // 🔥 NUEVO: Obtener todos los conteos de mensajes no leídos para un usuario
+  async getAllUnreadCountsForUser(
+    username: string,
+  ): Promise<{ [roomCode: string]: number }> {
+    console.log(
+      `📊 getAllUnreadCountsForUser llamado para usuario: ${username}`,
+    );
+
+    try {
+      // Obtener todas las salas distintas donde hay mensajes de grupo
+      const roomCodes = await this.messageRepository
+        .createQueryBuilder('message')
+        .select('DISTINCT message.roomCode')
+        .where('message.isGroup = :isGroup', { isGroup: true })
+        .andWhere('message.roomCode IS NOT NULL')
+        .andWhere('message.isDeleted = :isDeleted', { isDeleted: false })
+        .andWhere('message.threadId IS NULL') // Solo mensajes principales, no de hilos
+        .getRawMany();
+
+      console.log(`📊 Salas encontradas:`, roomCodes);
+
+      const result: { [roomCode: string]: number } = {};
+
+      // Para cada sala, obtener el conteo de mensajes no leídos
+      for (const row of roomCodes) {
+        // 🔥 CORREGIDO: El campo se llama message_roomCode en el resultado de la query
+        const roomCode = row.message_roomCode || row.roomCode;
+        console.log(
+          `📊 DEBUG - Procesando sala:`,
+          row,
+          `roomCode extraído: ${roomCode}`,
+        );
+
+        if (roomCode) {
+          try {
+            const count = await this.getUnreadCountForUserInRoom(
+              roomCode,
+              username,
+            );
+            // 🔥 INCLUIR TODAS las salas, incluso con 0 mensajes no leídos
+            result[roomCode] = count;
+            console.log(`� Sala ${roomCode}: ${count} mensajes no leídos`);
+          } catch (error) {
+            console.error(
+              `❌ Error al obtener conteo para sala ${roomCode}:`,
+              error,
+            );
+            result[roomCode] = 0; // En caso de error, asignar 0
+          }
+        } else {
+          console.log(`⚠️ roomCode vacío para row:`, row);
+        }
+      }
+
+      console.log(`📊 Resultado final para ${username}:`, result);
+      return result;
+    } catch (error) {
+      console.error(
+        `❌ Error en getAllUnreadCountsForUser para ${username}:`,
+        error,
+      );
+      throw error;
+    }
+  }
+
   // Buscar mensajes por contenido para un usuario específico
   async searchMessages(
     username: string,
     searchTerm: string,
     limit: number = 20,
   ): Promise<any[]> {
-    console.log('🔍 searchMessages llamado con:', { username, searchTerm, limit });
+    console.log('🔍 searchMessages llamado con:', {
+      username,
+      searchTerm,
+      limit,
+    });
 
     if (!searchTerm || searchTerm.trim().length === 0) {
       return [];
@@ -574,7 +813,7 @@ export class MessagesService {
     console.log('📊 Total de mensajes en BD:', allMessages.length);
 
     // Filtrar mensajes del usuario (por username o que contengan el username en el campo from)
-    const userMessages = allMessages.filter(msg => {
+    const userMessages = allMessages.filter((msg) => {
       // Buscar por username exacto o que el campo "from" contenga el username
       return msg.from === username || msg.from?.includes(username);
     });
@@ -585,16 +824,18 @@ export class MessagesService {
         from: userMessages[0].from,
         message: userMessages[0].message,
         to: userMessages[0].to,
-        isGroup: userMessages[0].isGroup
+        isGroup: userMessages[0].isGroup,
       });
     }
 
     // Filtrar por búsqueda en mensaje o nombre de archivo
-    const filteredMessages = userMessages.filter(msg => {
+    const filteredMessages = userMessages.filter((msg) => {
       const searchLower = searchTerm.toLowerCase();
       const messageText = (msg.message || '').toLowerCase();
       const fileName = (msg.fileName || '').toLowerCase();
-      return messageText.includes(searchLower) || fileName.includes(searchLower);
+      return (
+        messageText.includes(searchLower) || fileName.includes(searchLower)
+      );
     });
 
     console.log('✅ Mensajes filtrados por búsqueda:', filteredMessages.length);
@@ -603,7 +844,7 @@ export class MessagesService {
     const limitedResults = filteredMessages.slice(0, limit);
 
     // Retornar los mensajes con información de la conversación
-    return limitedResults.map(msg => ({
+    return limitedResults.map((msg) => ({
       id: msg.id,
       message: msg.message,
       from: msg.from,
@@ -628,7 +869,11 @@ export class MessagesService {
     searchTerm: string,
     limit: number = 20,
   ): Promise<any[]> {
-    console.log('🔍 searchMessagesByUserId llamado con:', { userId, searchTerm, limit });
+    console.log('🔍 searchMessagesByUserId llamado con:', {
+      userId,
+      searchTerm,
+      limit,
+    });
 
     if (!searchTerm || searchTerm.trim().length === 0) {
       return [];
@@ -652,16 +897,18 @@ export class MessagesService {
         fromId: messages[0].fromId,
         message: messages[0].message,
         to: messages[0].to,
-        isGroup: messages[0].isGroup
+        isGroup: messages[0].isGroup,
       });
     }
 
     // Filtrar por búsqueda en mensaje o nombre de archivo
-    const filteredMessages = messages.filter(msg => {
+    const filteredMessages = messages.filter((msg) => {
       const searchLower = searchTerm.toLowerCase();
       const messageText = (msg.message || '').toLowerCase();
       const fileName = (msg.fileName || '').toLowerCase();
-      return messageText.includes(searchLower) || fileName.includes(searchLower);
+      return (
+        messageText.includes(searchLower) || fileName.includes(searchLower)
+      );
     });
 
     console.log('✅ Mensajes filtrados por búsqueda:', filteredMessages.length);
@@ -670,7 +917,7 @@ export class MessagesService {
     const limitedResults = filteredMessages.slice(0, limit);
 
     // Retornar los mensajes con información de la conversación
-    return limitedResults.map(msg => ({
+    return limitedResults.map((msg) => ({
       id: msg.id,
       message: msg.message,
       from: msg.from,
