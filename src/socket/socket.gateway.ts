@@ -62,7 +62,7 @@ export class SocketGateway
     try {
       // Cargar todas las salas temporales como grupos
       const rooms = await this.temporaryRoomsService.findAll();
-      console.log(`📦 Cargando ${rooms.length} salas/grupos desde BD...`);
+      // console.log(`📦 Cargando ${rooms.length} salas/grupos desde BD...`);
 
       let totalMembers = 0;
       rooms.forEach((room) => {
@@ -92,14 +92,14 @@ export class SocketGateway
         // Si el usuario estaba en una sala, solo removerlo de la memoria (NO de la BD)
         if (user.currentRoom) {
           const roomCode = user.currentRoom;
-          console.log(`🏠 Usuario ${username} estaba en sala ${roomCode}`);
+          // console.log(`🏠 Usuario ${username} estaba en sala ${roomCode}`);
 
           // NO remover de la base de datos - mantener en el historial
           // Solo remover de la memoria para marcarlo como desconectado
           const roomUsersSet = this.roomUsers.get(roomCode);
           if (roomUsersSet) {
             roomUsersSet.delete(username);
-            console.log(`✅ Usuario ${username} removido de sala en memoria`);
+            // console.log(`✅ Usuario ${username} removido de sala en memoria`);
 
             if (roomUsersSet.size === 0) {
               this.roomUsers.delete(roomCode);
@@ -115,7 +115,7 @@ export class SocketGateway
 
         // Remover usuario del mapa de usuarios conectados
         this.users.delete(username);
-        console.log(`✅ Usuario ${username} removido del mapa de usuarios`);
+        // console.log(`✅ Usuario ${username} removido del mapa de usuarios`);
 
         // 🔥 Obtener todas las conversaciones asignadas para actualizar correctamente la lista de usuarios
         try {
@@ -1450,7 +1450,7 @@ export class SocketGateway
         // 🔥 Actualizar la base de datos usando el servicio
         const joinDto = { roomCode: data.roomCode, username: data.from };
         await this.temporaryRoomsService.joinRoom(joinDto, data.from);
-        console.log(`✅ Usuario ${data.from} unido a sala en BD`);
+        // console.log(`✅ Usuario ${data.from} unido a sala en BD`);
       } catch (error) {
         // 🔥 NUEVO: Notificar al cliente del error
         console.error(
@@ -1474,13 +1474,13 @@ export class SocketGateway
       this.roomUsers.set(data.roomCode, new Set());
     }
     this.roomUsers.get(data.roomCode)!.add(data.from);
-    console.log(`✅ Usuario ${data.from} agregado a sala en memoria`);
+    // console.log(`✅ Usuario ${data.from} agregado a sala en memoria`);
 
     // Actualizar la sala actual del usuario
     const user = this.users.get(data.from);
     if (user) {
       user.currentRoom = data.roomCode;
-      console.log(`✅ Sala actual del usuario actualizada a ${data.roomCode}`);
+      // console.log(`✅ Sala actual del usuario actualizada a ${data.roomCode}`);
     }
 
     // Notificar a todos en la sala

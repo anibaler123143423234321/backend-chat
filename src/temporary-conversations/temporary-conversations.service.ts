@@ -657,7 +657,7 @@ export class TemporaryConversationsService {
             take: 1,
           });
 
-          console.log(`📊 Monitoreo - Conversación: ${conv.name}, Participantes: ${JSON.stringify(participants)}, Último mensaje ID: ${messages[0]?.id}, Texto: "${messages[0]?.message?.substring(0, 50)}"`);
+          // console.log(`📊 Monitoreo - Conversación: ${conv.name}, Participantes: ${JSON.stringify(participants)}, Último mensaje ID: ${messages[0]?.id}, Texto: "${messages[0]?.message?.substring(0, 50)}"`);
 
           if (messages.length > 0) {
             // Calcular el threadCount del último mensaje

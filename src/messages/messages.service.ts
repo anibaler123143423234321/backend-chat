@@ -629,9 +629,9 @@ export class MessagesService {
     username: string,
   ): Promise<number> {
     try {
-      console.log(
-        `📊 getUnreadCountForUserInRoom - Sala: ${roomCode}, Usuario: ${username}`,
-      );
+      // console.log(
+      //   `📊 getUnreadCountForUserInRoom - Sala: ${roomCode}, Usuario: ${username}`,
+      // );
 
       const messages = await this.messageRepository.find({
         where: {
@@ -642,18 +642,18 @@ export class MessagesService {
         select: ['id', 'from', 'readBy'],
       });
 
-      console.log(
-        `📊 Mensajes encontrados en sala ${roomCode}: ${messages.length}`,
-      );
+      // console.log(
+      //   `📊 Mensajes encontrados en sala ${roomCode}: ${messages.length}`,
+      // );
 
       // 🔥 DEBUG: Mostrar algunos mensajes para entender el formato
       if (messages.length > 0) {
-        console.log(`📊 DEBUG - Primeros 3 mensajes en sala ${roomCode}:`);
-        messages.slice(0, 3).forEach((msg, index) => {
-          console.log(
-            `  ${index + 1}. ID: ${msg.id}, From: "${msg.from}", ReadBy: ${JSON.stringify(msg.readBy)}`,
-          );
-        });
+        // console.log(`📊 DEBUG - Primeros 3 mensajes en sala ${roomCode}:`);
+        // messages.slice(0, 3).forEach((msg, index) => {
+        //   console.log(
+        //     `  ${index + 1}. ID: ${msg.id}, From: "${msg.from}", ReadBy: ${JSON.stringify(msg.readBy)}`,
+        //   );
+        // });
       }
 
       // Contar mensajes que NO han sido leídos por el usuario
@@ -678,17 +678,17 @@ export class MessagesService {
         );
 
         if (!isReadByUser) {
-          console.log(
-            `📊 DEBUG - Mensaje ${msg.id} no leído por ${username}: from="${msg.from}", readBy=${JSON.stringify(msg.readBy)}`,
-          );
+          // console.log(
+          //   `📊 DEBUG - Mensaje ${msg.id} no leído por ${username}: from="${msg.from}", readBy=${JSON.stringify(msg.readBy)}`,
+          // );
         }
 
         return !isReadByUser;
       }).length;
 
-      console.log(
-        `📊 Mensajes no leídos para ${username} en sala ${roomCode}: ${unreadCount}`,
-      );
+      // console.log(
+      //   `📊 Mensajes no leídos para ${username} en sala ${roomCode}: ${unreadCount}`,
+      // );
       return unreadCount;
     } catch (error) {
       console.error(
@@ -735,7 +735,7 @@ export class MessagesService {
         .andWhere('message.threadId IS NULL') // Solo mensajes principales, no de hilos
         .getRawMany();
 
-      console.log(`📊 Salas encontradas:`, roomCodes);
+      // console.log(`📊 Salas encontradas:`, roomCodes);
 
       const result: { [roomCode: string]: number } = {};
 
@@ -743,11 +743,11 @@ export class MessagesService {
       for (const row of roomCodes) {
         // 🔥 CORREGIDO: El campo se llama message_roomCode en el resultado de la query
         const roomCode = row.message_roomCode || row.roomCode;
-        console.log(
-          `📊 DEBUG - Procesando sala:`,
-          row,
-          `roomCode extraído: ${roomCode}`,
-        );
+        // console.log(
+        //   `📊 DEBUG - Procesando sala:`,
+        //   row,
+        //   `roomCode extraído: ${roomCode}`,
+        // );
 
         if (roomCode) {
           try {
@@ -810,7 +810,7 @@ export class MessagesService {
       take: 1000, // Aumentar límite para buscar en más mensajes
     });
 
-    console.log('📊 Total de mensajes en BD:', allMessages.length);
+    // console.log('📊 Total de mensajes en BD:', allMessages.length);
 
     // Filtrar mensajes del usuario (por username o que contengan el username en el campo from)
     const userMessages = allMessages.filter((msg) => {
@@ -818,7 +818,7 @@ export class MessagesService {
       return msg.from === username || msg.from?.includes(username);
     });
 
-    console.log('📊 Mensajes del usuario encontrados:', userMessages.length);
+    // console.log('📊 Mensajes del usuario encontrados:', userMessages.length);
     if (userMessages.length > 0) {
       console.log('📝 Primer mensaje del usuario:', {
         from: userMessages[0].from,
@@ -890,7 +890,7 @@ export class MessagesService {
       take: 1000, // Buscar en más mensajes
     });
 
-    console.log('📊 Mensajes del usuario encontrados:', messages.length);
+    // console.log('📊 Mensajes del usuario encontrados:', messages.length);
     if (messages.length > 0) {
       console.log('📝 Primer mensaje del usuario:', {
         from: messages[0].from,

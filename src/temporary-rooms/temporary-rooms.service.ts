@@ -168,7 +168,7 @@ export class TemporaryRoomsService {
     // 🔥 MODIFICADO: Verificar si el usuario ya estaba en la sala ANTES (en members)
     const wasAlreadyMember = room.members.includes(username);
 
-    console.log(`🔄 joinRoom - Usuario: ${username}, Sala: ${room.name}, Ya era miembro: ${wasAlreadyMember}, Capacidad: ${room.members.length}/${room.maxCapacity}`);
+    // console.log(`🔄 joinRoom - Usuario: ${username}, Sala: ${room.name}, Ya era miembro: ${wasAlreadyMember}, Capacidad: ${room.members.length}/${room.maxCapacity}`);
 
     // 🔥 IMPORTANTE: Verificar capacidad ANTES de agregar
     // Solo contar si el usuario NO era miembro antes
@@ -206,7 +206,7 @@ export class TemporaryRoomsService {
 
     // 🔥 MODIFICADO: currentMembers debe ser el total de usuarios AÑADIDOS (members), no solo conectados
     room.currentMembers = room.members.length;
-    console.log(`💾 Guardando sala - Members: ${room.members.length}, Connected: ${room.connectedMembers.length}`);
+    // console.log(`💾 Guardando sala - Members: ${room.members.length}, Connected: ${room.connectedMembers.length}`);
     // console.log('ðŸ‘¥ Usuarios conectados en la sala:', room.connectedMembers);
     // console.log('ðŸ“œ Historial de usuarios:', room.members);
     await this.temporaryRoomRepository.save(room);
@@ -217,7 +217,7 @@ export class TemporaryRoomsService {
       console.log(`📢 Notificación enviada para ${username}`);
     }
 
-    console.log(`✅ Usuario ${username} unido exitosamente a la sala ${room.name}`);
+    // console.log(`✅ Usuario ${username} unido exitosamente a la sala ${room.name}`);
 
     // console.log('âœ… Usuario unido exitosamente a la sala');
     return room;
