@@ -21,7 +21,7 @@ export class MessagesService {
     private temporaryRoomRepository: Repository<TemporaryRoom>,
     @Inject(forwardRef(() => SocketGateway))
     private socketGateway: SocketGateway,
-  ) {}
+  ) { }
 
   async create(createMessageDto: CreateMessageDto): Promise<Message> {
     // 🔥 NUEVO: Verificar duplicados antes de guardar
@@ -341,7 +341,13 @@ export class MessagesService {
       if (!message.readBy) {
         message.readBy = [];
       }
-      if (!message.readBy.includes(username)) {
+
+      // 🔥 Normalizar para verificar si ya leyó
+      const alreadyRead = message.readBy.some(
+        (u) => u.toLowerCase().trim() === username.toLowerCase().trim(),
+      );
+
+      if (!alreadyRead) {
         message.readBy.push(username);
         message.isRead = true;
         message.readAt = new Date();
@@ -350,6 +356,59 @@ export class MessagesService {
       }
     }
     return null;
+  }
+
+  // 🔥 NUEVO: Marcar todos los mensajes de una sala como leídos por un usuario
+  async markAllMessagesAsReadInRoom(
+    roomCode: string,
+    username: string,
+  ): Promise<number> {
+    try {
+      const messages = await this.messageRepository.find({
+        where: { roomCode, isDeleted: false },
+      });
+
+      let updatedCount = 0;
+      const updates = [];
+
+      for (const message of messages) {
+        // No marcar mensajes propios
+        if (
+          message.from?.toLowerCase().trim() === username?.toLowerCase().trim()
+        ) {
+          continue;
+        }
+
+        if (!message.readBy) {
+          message.readBy = [];
+        }
+
+        // Verificar si ya leyó (normalizado)
+        const alreadyRead = message.readBy.some(
+          (u) => u?.toLowerCase().trim() === username?.toLowerCase().trim(),
+        );
+
+        if (!alreadyRead) {
+          message.readBy.push(username);
+          message.isRead = true;
+          message.readAt = new Date();
+          updates.push(this.messageRepository.save(message));
+          updatedCount++;
+        }
+      }
+
+      if (updates.length > 0) {
+        await Promise.all(updates);
+      }
+
+      return updatedCount;
+    } catch (error) {
+      console.error(
+        `❌ Error en markAllMessagesAsReadInRoom - Sala: ${roomCode}, Usuario: ${username}:`,
+        error,
+      );
+      return 0;
+    }
   }
 
   // Marcar múltiples mensajes como leídos
@@ -489,8 +548,8 @@ export class MessagesService {
     const message = isAdmin
       ? await this.messageRepository.findOne({ where: { id: messageId } })
       : await this.messageRepository.findOne({
-          where: { id: messageId, from: username },
-        });
+        where: { id: messageId, from: username },
+      });
 
     if (message) {
       // 🔥 NUEVO: Validar si el mensaje pertenece a una sala asignada por admin (solo para usuarios normales)

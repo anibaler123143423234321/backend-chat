@@ -43,6 +43,20 @@ export class TemporaryRoomsController {
     return this.temporaryRoomsService.findAll();
   }
 
+  @Get('user/list')
+  findUserRooms(
+    @Query('username') username: string,
+    @Query('page') page: string = '1',
+    @Query('limit') limit: string = '10',
+  ) {
+    if (!username) {
+      throw new Error('Username es requerido');
+    }
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.max(1, Math.min(50, parseInt(limit) || 10)); // Máximo 50 por página
+    return this.temporaryRoomsService.findUserRooms(username, pageNum, limitNum);
+  }
+
   // Rutas especÃ­ficas ANTES de rutas con parÃ¡metros
   @Get('admin/rooms')
   getAdminRooms(
@@ -50,10 +64,11 @@ export class TemporaryRoomsController {
     @Query('page') page?: number,
     @Query('limit') limit?: number,
     @Query('search') search?: string,
+    @Query('username') username?: string,
   ) {
     // console.log('ðŸ” GET /api/temporary-rooms/admin/rooms called');
     const userId = req.user?.id || 1; // Usar ID por defecto para pruebas
-    return this.temporaryRoomsService.getAdminRooms(userId, page, limit, search);
+    return this.temporaryRoomsService.getAdminRooms(userId, page, limit, search, username);
   }
 
   @Get('user/current-room')

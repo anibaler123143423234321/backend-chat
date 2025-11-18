@@ -28,8 +28,7 @@ import { getPeruDate, formatPeruTime } from '../utils/date.utils';
 })
 @Injectable()
 export class SocketGateway
-  implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit
-{
+  implements OnGatewayConnection, OnGatewayDisconnect, OnGatewayInit {
   @WebSocketServer() server: Server;
 
   // Mapas para el chat
@@ -2148,7 +2147,45 @@ export class SocketGateway
     }
   }
 
-  // ==================== MENSAJES DE HILO ====================
+  @SubscribeMessage('markRoomMessagesAsRead')
+  async handleMarkRoomMessagesAsRead(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomCode: string; username: string },
+  ) {
+    console.log(
+      `✅ WS: markRoomMessagesAsRead - Sala ${data.roomCode} leída por ${data.username}`,
+    );
+
+    try {
+      // Marcar todos los mensajes de la sala como leídos en la base de datos
+      const updatedCount = await this.messagesService.markAllMessagesAsReadInRoom(
+        data.roomCode,
+        data.username,
+      );
+
+      console.log(
+        `✅ ${updatedCount} mensajes marcados como leídos en sala ${data.roomCode}`,
+      );
+
+      // Confirmar al usuario que la acción fue exitosa
+      client.emit('roomMessagesReadConfirmed', {
+        roomCode: data.roomCode,
+        updatedCount,
+      });
+
+      // 🔥 Emitir reset de contador para asegurar que el frontend se actualice
+      this.emitUnreadCountReset(data.roomCode, data.username);
+
+      // 🔥 También emitir actualización de contador a 0 explícitamente
+      this.emitUnreadCountUpdateForUser(data.roomCode, data.username, 0);
+
+    } catch (error) {
+      console.error('Error al marcar mensajes de sala como leídos:', error);
+      client.emit('error', {
+        message: 'Error al marcar mensajes de sala como leídos',
+      });
+    }
+  }
 
   @SubscribeMessage('threadMessage')
   async handleThreadMessage(
@@ -2546,6 +2583,7 @@ export class SocketGateway
     // Reenviar lista general de usuarios
     this.broadcastUserList();
   }
+
 
   /**
    * 🔥 NUEVO: Emitir evento de monitoreo a todos los ADMIN/JEFEPISO

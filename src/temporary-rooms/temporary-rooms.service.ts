@@ -13,6 +13,7 @@ import { JoinRoomDto } from './dto/join-room.dto';
 import { User } from '../users/entities/user.entity';
 import { Message } from '../messages/entities/message.entity';
 import { randomBytes } from 'crypto';
+import { RoomFavoritesService } from '../room-favorites/room-favorites.service';
 
 export interface TemporaryRoomWithUrl {
   id: number;
@@ -36,6 +37,7 @@ export class TemporaryRoomsService {
     private userRepository: Repository<User>,
     @InjectRepository(Message)
     private messageRepository: Repository<Message>,
+    private roomFavoritesService: RoomFavoritesService,
   ) {}
 
   // MÃ©todo para inyectar el gateway de WebSocket (evita dependencia circular)
@@ -59,7 +61,7 @@ export class TemporaryRoomsService {
 
     if (existingRoom) {
       throw new BadRequestException(
-        `Ya existe una sala activa con el nombre "${createDto.name}". Por favor, elige otro nombre.`
+        `Ya existe una sala activa con el nombre "${createDto.name}". Por favor, elige otro nombre.`,
       );
     }
 
@@ -120,6 +122,123 @@ export class TemporaryRoomsService {
     });
   }
 
+  // 🔥 NUEVO: Método con paginación para salas del usuario
+  async findUserRooms(
+    username: string,
+    page: number = 1,
+    limit: number = 10,
+  ): Promise<{
+    rooms: any[];
+    total: number;
+    page: number;
+    totalPages: number;
+    hasMore: boolean;
+  }> {
+    console.log(
+      `🔍 findUserRooms - Usuario: "${username}", Página: ${page}, Límite: ${limit}`,
+    );
+
+    // Buscar el usuario para obtener su displayName
+    const user = await this.userRepository.findOne({ where: { username } });
+    if (!user) {
+      return {
+        rooms: [],
+        total: 0,
+        page,
+        totalPages: 0,
+        hasMore: false,
+      };
+    }
+
+    // Construir el displayName (nombre completo) igual que en el frontend
+    const displayName =
+      user.nombre && user.apellido
+        ? `${user.nombre} ${user.apellido}`
+        : user.username;
+
+    // Obtener todas las salas activas
+    const allRooms = await this.temporaryRoomRepository.find({
+      where: { isActive: true },
+      order: { createdAt: 'DESC' },
+    });
+
+    // Filtrar salas donde el usuario es miembro
+    const userRooms = allRooms.filter((room) => {
+      const members = room.members || [];
+      return members.includes(displayName);
+    });
+
+    // Aplicar paginación
+    const total = userRooms.length;
+    const offset = (page - 1) * limit;
+    const paginatedRooms = userRooms.slice(offset, offset + limit);
+    const totalPages = Math.ceil(total / limit);
+    const hasMore = page < totalPages;
+
+    console.log(
+      `  Total salas del usuario: ${total}, Página actual: ${page}/${totalPages}, Mostrando: ${paginatedRooms.length}`,
+    );
+
+    // Enriquecer cada sala con información adicional (último mensaje, etc.)
+    const enrichedRooms = await Promise.all(
+      paginatedRooms.map(async (room) => {
+        let lastMessage = null;
+
+        try {
+          // Obtener el último mensaje de la sala
+          const messages = await this.messageRepository.find({
+            where: { roomCode: room.roomCode, isDeleted: false },
+            order: { sentAt: 'DESC' },
+            take: 1,
+          });
+
+          if (messages.length > 0) {
+            const msg = messages[0];
+
+            // Si es un archivo multimedia sin texto, mostrar el tipo de archivo
+            let messageText = msg.message;
+            if (!messageText && msg.mediaType) {
+              const mediaTypeMap = {
+                image: '📷 Imagen',
+                video: '🎥 Video',
+                audio: '🎵 Audio',
+                document: '📄 Documento',
+              };
+              messageText = mediaTypeMap[msg.mediaType] || '📎 Archivo';
+            }
+
+            lastMessage = {
+              text: messageText || msg.fileName || 'Archivo',
+              from: msg.from,
+              sentAt: msg.sentAt,
+              mediaType: msg.mediaType,
+              fileName: msg.fileName,
+            };
+          }
+        } catch (error) {
+          console.error(
+            `Error al obtener último mensaje de sala ${room.roomCode}:`,
+            error,
+          );
+        }
+
+        return {
+          ...room,
+          lastMessage,
+          lastActivity: lastMessage?.sentAt || room.createdAt,
+        };
+      }),
+    );
+
+    return {
+      rooms: enrichedRooms,
+      total,
+      page,
+      totalPages,
+      hasMore,
+    };
+  }
+
   async findOne(id: number): Promise<TemporaryRoom> {
     const room = await this.temporaryRoomRepository.findOne({
       where: { id, isActive: true },
@@ -173,16 +292,20 @@ export class TemporaryRoomsService {
     // 🔥 IMPORTANTE: Verificar capacidad ANTES de agregar
     // Solo contar si el usuario NO era miembro antes
     if (!wasAlreadyMember && room.members.length >= room.maxCapacity) {
-      console.error(`❌ Sala llena: ${room.members.length}/${room.maxCapacity} - No se puede agregar a ${username}`);
+      console.error(
+        `❌ Sala llena: ${room.members.length}/${room.maxCapacity} - No se puede agregar a ${username}`,
+      );
       throw new BadRequestException(
-        `La sala ha alcanzado su capacidad máxima (${room.maxCapacity} usuarios)`
+        `La sala ha alcanzado su capacidad máxima (${room.maxCapacity} usuarios)`,
       );
     }
 
     // Agregar al historial si no estÃ¡
     if (!wasAlreadyMember) {
       room.members.push(username);
-      console.log(`➕ Usuario ${username} agregado a members. Total: ${room.members.length}/${room.maxCapacity}`);
+      console.log(
+        `➕ Usuario ${username} agregado a members. Total: ${room.members.length}/${room.maxCapacity}`,
+      );
     }
 
     // Verificar si el usuario ya estaba conectado
@@ -213,7 +336,11 @@ export class TemporaryRoomsService {
 
     // 🔥 MODIFICADO: Solo notificar si el usuario fue REALMENTE AGREGADO (no estaba en members antes)
     if (!wasAlreadyMember && this.socketGateway) {
-      this.socketGateway.notifyUserAddedToRoom(username, room.roomCode, room.name);
+      this.socketGateway.notifyUserAddedToRoom(
+        username,
+        room.roomCode,
+        room.name,
+      );
       console.log(`📢 Notificación enviada para ${username}`);
     }
 
@@ -229,9 +356,13 @@ export class TemporaryRoomsService {
     const room = await this.findByRoomCode(roomCode);
 
     // ðŸ”¥ NUEVO: Validar si el usuario estÃ¡ asignado por un admin
-    if (room.isAssignedByAdmin && room.assignedMembers && room.assignedMembers.includes(username)) {
+    if (
+      room.isAssignedByAdmin &&
+      room.assignedMembers &&
+      room.assignedMembers.includes(username)
+    ) {
       throw new BadRequestException(
-        'No puedes salir de esta sala porque fuiste asignado por un administrador'
+        'No puedes salir de esta sala porque fuiste asignado por un administrador',
       );
     }
 
@@ -270,7 +401,6 @@ export class TemporaryRoomsService {
   }
 
   async removeUserFromRoom(roomCode: string, username: string): Promise<any> {
-
     const room = await this.findByRoomCode(roomCode);
 
     if (!room) {
@@ -279,19 +409,21 @@ export class TemporaryRoomsService {
 
     // Remover el usuario de connectedMembers
     if (room.connectedMembers && room.connectedMembers.includes(username)) {
-      room.connectedMembers = room.connectedMembers.filter(u => u !== username);
+      room.connectedMembers = room.connectedMembers.filter(
+        (u) => u !== username,
+      );
       // 🔥 MODIFICADO: currentMembers debe ser el total de usuarios AÑADIDOS (members), no solo conectados
       room.currentMembers = room.members.length;
     }
 
     // Remover el usuario de members (historial)
     if (room.members && room.members.includes(username)) {
-      room.members = room.members.filter(u => u !== username);
+      room.members = room.members.filter((u) => u !== username);
     }
 
     // Remover el usuario de assignedMembers si estÃ¡ asignado
     if (room.assignedMembers && room.assignedMembers.includes(username)) {
-      room.assignedMembers = room.assignedMembers.filter(u => u !== username);
+      room.assignedMembers = room.assignedMembers.filter((u) => u !== username);
     }
 
     await this.temporaryRoomRepository.save(room);
@@ -312,11 +444,10 @@ export class TemporaryRoomsService {
       this.socketGateway.handleUserRemovedFromRoom(roomCode, username);
     }
 
-
     return {
       message: `Usuario ${username} eliminado de la sala ${room.name}`,
       roomCode: room.roomCode,
-      username: username
+      username: username,
     };
   }
 
@@ -367,11 +498,26 @@ export class TemporaryRoomsService {
     page: number = 1,
     limit: number = 10,
     search?: string,
+    username?: string,
   ): Promise<any> {
     // 🔥 MODIFICADO: Retornar salas con paginación y búsqueda
     // console.log('ðŸ” Obteniendo salas del admin:', userId, 'page:', page, 'limit:', limit, 'search:', search);
 
-    const skip = (page - 1) * limit;
+    // Usar el displayName del query parameter si está disponible
+    const displayName = username;
+    
+    console.log('👤 Usuario para favoritos:', { userId, displayName });
+
+    // Obtener códigos de salas favoritas del usuario
+    let favoriteRoomCodes: string[] = [];
+    if (displayName) {
+      try {
+        favoriteRoomCodes = await this.roomFavoritesService.getUserFavoriteRoomCodes(displayName);
+        console.log('⭐ Salas favoritas del usuario:', favoriteRoomCodes);
+      } catch (error) {
+        console.error('Error al obtener favoritos:', error);
+      }
+    }
 
     // Construir condiciones de búsqueda
     let whereConditions: any = { isActive: true };
@@ -380,50 +526,67 @@ export class TemporaryRoomsService {
       // Buscar por nombre O código de sala
       whereConditions = [
         { isActive: true, name: Like(`%${search}%`) },
-        { isActive: true, roomCode: Like(`%${search}%`) }
+        { isActive: true, roomCode: Like(`%${search}%`) },
       ];
     }
 
-    // Obtener total de registros
-    const [rooms, total] = await this.temporaryRoomRepository.findAndCount({
+    // 🔥 NUEVA LÓGICA: Obtener todas las salas que coincidan con la búsqueda
+    const allRooms = await this.temporaryRoomRepository.find({
       where: whereConditions,
       order: { createdAt: 'DESC' },
-      skip: skip,
-      take: limit,
     });
+
+    // Separar salas favoritas y no favoritas
+    const favoriteRooms = allRooms.filter(room => favoriteRoomCodes.includes(room.roomCode));
+    const nonFavoriteRooms = allRooms.filter(room => !favoriteRoomCodes.includes(room.roomCode));
+
+    // Combinar: favoritas primero, luego no favoritas
+    const sortedRooms = [...favoriteRooms, ...nonFavoriteRooms];
+
+    // Aplicar paginación a la lista ordenada
+    const skip = (page - 1) * limit;
+    const paginatedRooms = sortedRooms.slice(skip, skip + limit);
+
+    console.log(`📋 Total salas: ${allRooms.length}, Favoritas: ${favoriteRooms.length}, Mostrando: ${paginatedRooms.length}`);
 
     // console.log('ðŸ“‹ Salas encontradas:', rooms.length, 'Total:', total);
 
     // 🔥 NUEVO: Agregar el último mensaje de cada sala
     const roomsWithLastMessage = await Promise.all(
-      rooms.map(async (room) => {
+      paginatedRooms.map(async (room) => {
         // Obtener el último mensaje de la sala
         const lastMessage = await this.messageRepository.findOne({
-          where: { roomCode: room.roomCode, isDeleted: false, threadId: IsNull() },
+          where: {
+            roomCode: room.roomCode,
+            isDeleted: false,
+            threadId: IsNull(),
+          },
           order: { id: 'DESC' },
         });
 
         return {
           ...room,
-          lastMessage: lastMessage ? {
-            id: lastMessage.id,
-            text: lastMessage.message,
-            from: lastMessage.from,
-            sentAt: lastMessage.sentAt,
-            time: lastMessage.time,
-            mediaType: lastMessage.mediaType,
-            fileName: lastMessage.fileName,
-          } : null,
+          lastMessage: lastMessage
+            ? {
+                id: lastMessage.id,
+                text: lastMessage.message,
+                from: lastMessage.from,
+                sentAt: lastMessage.sentAt,
+                time: lastMessage.time,
+                mediaType: lastMessage.mediaType,
+                fileName: lastMessage.fileName,
+              }
+            : null,
         };
-      })
+      }),
     );
 
     return {
       data: roomsWithLastMessage,
-      total: total,
+      total: allRooms.length,
       page: page,
       limit: limit,
-      totalPages: Math.ceil(total / limit),
+      totalPages: Math.ceil(allRooms.length / limit),
     };
   }
 
@@ -469,13 +632,14 @@ export class TemporaryRoomsService {
     userId: number,
     updateData: { maxCapacity?: number },
   ): Promise<TemporaryRoom> {
-
     const room = await this.temporaryRoomRepository.findOne({
       where: { id, createdBy: userId },
     });
 
     if (!room) {
-      throw new NotFoundException('Sala no encontrada o no tienes permisos para editarla');
+      throw new NotFoundException(
+        'Sala no encontrada o no tienes permisos para editarla',
+      );
     }
 
     // Actualizar capacidad mÃ¡xima
@@ -492,7 +656,6 @@ export class TemporaryRoomsService {
   }
 
   async getCurrentUserRoom(userId: number): Promise<any> {
-
     try {
       // Primero obtener el usuario completo
       const user = await this.userRepository.findOne({ where: { id: userId } });
@@ -502,19 +665,18 @@ export class TemporaryRoomsService {
       }
 
       // Construir el displayName (nombre completo) igual que en el frontend
-      const displayName = user.nombre && user.apellido
-        ? `${user.nombre} ${user.apellido}`
-        : user.username;
-
+      const displayName =
+        user.nombre && user.apellido
+          ? `${user.nombre} ${user.apellido}`
+          : user.username;
 
       // Buscar todas las salas activas
       const allRooms = await this.temporaryRoomRepository.find({
         where: { isActive: true },
       });
 
-
       // Filtrar salas donde el usuario es miembro (buscar por displayName)
-      const userRooms = allRooms.filter(room => {
+      const userRooms = allRooms.filter((room) => {
         const members = room.members || [];
         const isMember = members.includes(displayName);
         if (isMember) {
@@ -553,16 +715,14 @@ export class TemporaryRoomsService {
   }
 
   async getCurrentUserRoomByUsername(username: string): Promise<any> {
-
     try {
       // Buscar todas las salas activas
       const allRooms = await this.temporaryRoomRepository.find({
         where: { isActive: true },
       });
 
-
       // Filtrar salas donde el usuario es miembro
-      const userRooms = allRooms.filter(room => {
+      const userRooms = allRooms.filter((room) => {
         const members = room.members || [];
         const isMember = members.includes(username);
         if (isMember) {
@@ -593,7 +753,6 @@ export class TemporaryRoomsService {
       return { inRoom: false, room: null };
     }
   }
-
 
   async getRoomUsers(roomCode: string): Promise<any> {
     // console.log('ðŸ‘¥ Obteniendo usuarios de la sala:', roomCode);
@@ -645,7 +804,10 @@ export class TemporaryRoomsService {
   }
 
   // 🔥 NUEVO: Actualizar miembros de sala (para sincronizar cambios de grupos)
-  async updateRoomMembers(id: number, updateData: Partial<TemporaryRoom>): Promise<TemporaryRoom> {
+  async updateRoomMembers(
+    id: number,
+    updateData: Partial<TemporaryRoom>,
+  ): Promise<TemporaryRoom> {
     try {
       const room = await this.temporaryRoomRepository.findOne({
         where: { id },
