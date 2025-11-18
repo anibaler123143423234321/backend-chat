@@ -848,7 +848,7 @@ export class SocketGateway
               if (member !== from) {
                 // Verificar si el usuario está viendo esta sala actualmente
                 const isViewingThisRoom = memberUser.currentRoom === roomCode;
-                console.log(`📊 DEBUG - Usuario ${member}: currentRoom="${memberUser.currentRoom}", roomCode="${roomCode}", isViewingThisRoom=${isViewingThisRoom}`);
+                // console.log(`📊 DEBUG - Usuario ${member}: currentRoom="${memberUser.currentRoom}", roomCode="${roomCode}", isViewingThisRoom=${isViewingThisRoom}`);
 
                 const lastMessageData = {
                   text: message,
@@ -2576,10 +2576,10 @@ export class SocketGateway
       sentAt: string;
     },
   ) {
-    console.log(
-      `📊 Emitiendo actualización de contador no leído - Sala: ${roomCode}, Usuario: ${username}, Conteo: ${count}`,
-    );
-    console.log(`📊 DEBUG - lastMessage:`, lastMessage);
+    // console.log(
+    //   `📊 Emitiendo actualización de contador no leído - Sala: ${roomCode}, Usuario: ${username}, Conteo: ${count}`,
+    // );
+    // console.log(`📊 DEBUG - lastMessage:`, lastMessage);
 
     const userConnection = this.users.get(username);
     if (userConnection && userConnection.socket.connected) {
@@ -2588,13 +2588,13 @@ export class SocketGateway
         count,
         lastMessage,
       };
-      console.log(`📊 DEBUG - Payload completo:`, payload);
-      console.log(`📊 DEBUG - Socket conectado: ${userConnection.socket.connected}`);
-      console.log(`📊 DEBUG - Socket ID: ${userConnection.socket.id}`);
+      // console.log(`📊 DEBUG - Payload completo:`, payload);
+      // console.log(`📊 DEBUG - Socket conectado: ${userConnection.socket.connected}`);
+      // console.log(`📊 DEBUG - Socket ID: ${userConnection.socket.id}`);
       userConnection.socket.emit('unreadCountUpdate', payload);
-      console.log(`📊 DEBUG - Evento emitido exitosamente`);
+      // console.log(`📊 DEBUG - Evento emitido exitosamente`);
     } else {
-      console.log(`❌ DEBUG - No se pudo emitir: userConnection=${!!userConnection}, connected=${userConnection?.socket?.connected}`);
+      // console.log(`❌ DEBUG - No se pudo emitir: userConnection=${!!userConnection}, connected=${userConnection?.socket?.connected}`);
     }
   }
 

@@ -770,7 +770,7 @@ export class MessagesService {
         }
       }
 
-      console.log(`📊 Resultado final para ${username}:`, result);
+      // console.log(`📊 Resultado final para ${username}:`, result);
       return result;
     } catch (error) {
       console.error(

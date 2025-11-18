@@ -251,7 +251,7 @@ export class MessagesController {
   // 🔥 NUEVO: Obtener todos los conteos de mensajes no leídos para un usuario
   @Get('unread-counts')
   async getAllUnreadCountsForUser(@Query('username') username: string) {
-    console.log(`📊 GET /unread-counts llamado para usuario: ${username}`);
+    // console.log(`📊 GET /unread-counts llamado para usuario: ${username}`);
 
     try {
       if (!username) {
@@ -260,7 +260,7 @@ export class MessagesController {
 
       const unreadCounts =
         await this.messagesService.getAllUnreadCountsForUser(username);
-      console.log(`📊 Devolviendo conteos:`, unreadCounts);
+      // console.log(`📊 Devolviendo conteos:`, unreadCounts);
       return unreadCounts;
     } catch (error) {
       console.error(`❌ Error en getAllUnreadCountsForUser:`, error);
