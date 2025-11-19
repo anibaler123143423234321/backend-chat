@@ -141,6 +141,7 @@ export class TemporaryRoomsService {
     // Buscar el usuario para obtener su displayName
     const user = await this.userRepository.findOne({ where: { username } });
     if (!user) {
+      console.log(`❌ Usuario no encontrado en la base de datos: "${username}"`);
       return {
         rooms: [],
         total: 0,
@@ -156,17 +157,42 @@ export class TemporaryRoomsService {
         ? `${user.nombre} ${user.apellido}`
         : user.username;
 
+    console.log(`✅ Usuario encontrado:`, {
+      username: user.username,
+      nombre: user.nombre,
+      apellido: user.apellido,
+      displayName,
+    });
+
     // Obtener todas las salas activas
     const allRooms = await this.temporaryRoomRepository.find({
       where: { isActive: true },
       order: { createdAt: 'DESC' },
     });
 
+    console.log(`📊 Total de salas activas: ${allRooms.length}`);
+    console.log(`🔍 Buscando salas donde "${displayName}" es miembro...`);
+
     // Filtrar salas donde el usuario es miembro
     const userRooms = allRooms.filter((room) => {
       const members = room.members || [];
-      return members.includes(displayName);
+      const isMember = members.includes(displayName);
+
+      if (isMember) {
+        console.log(`  ✅ Usuario ES miembro de sala: ${room.name} (${room.roomCode})`);
+      }
+
+      return isMember;
     });
+
+    // 🔥 DEBUG: Mostrar las primeras 3 salas y sus miembros
+    if (allRooms.length > 0) {
+      console.log(`🔍 Primeras 3 salas y sus miembros:`);
+      allRooms.slice(0, 3).forEach((room, index) => {
+        console.log(`  Sala ${index + 1}: ${room.name} (${room.roomCode})`);
+        console.log(`    Miembros:`, room.members);
+      });
+    }
 
     // Aplicar paginación
     const total = userRooms.length;
