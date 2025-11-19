@@ -82,10 +82,12 @@ export class MessagesService {
       return recentDuplicate;
     }
 
-    const peruDate = createMessageDto.sentAt || getPeruDate();
+    // 🔥 CRÍTICO: SIEMPRE generar sentAt en el servidor con zona horaria de Perú
+    // NO aceptar sentAt del frontend para evitar problemas de zona horaria y duplicados
+    const peruDate = getPeruDate();
     const message = this.messageRepository.create({
       ...createMessageDto,
-      sentAt: peruDate,
+      sentAt: peruDate, // 🔥 SIEMPRE usar getPeruDate() del servidor
       time: formatPeruTime(peruDate), // 🔥 Calcular time automáticamente
     });
 
