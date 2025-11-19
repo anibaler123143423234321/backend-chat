@@ -996,6 +996,27 @@ export class SocketGateway
         }
       }
 
+      // 🔥 Preparar el objeto del mensaje para enviar
+      const messageToSend = {
+        id: savedMessage?.id, // 🔥 Incluir ID del mensaje guardado en BD
+        from: from || 'Usuario Desconocido',
+        senderRole, // 🔥 Incluir role del remitente
+        senderNumeroAgente, // 🔥 Incluir numeroAgente del remitente
+        to: recipientUsername,
+        message,
+        isGroup: false,
+        time: time || formatPeruTime(),
+        sentAt: savedMessage?.sentAt, // 🔥 Incluir sentAt para extraer hora correcta en frontend
+        mediaType,
+        mediaData,
+        fileName,
+        fileSize,
+        replyToMessageId,
+        replyToSender,
+        replyToText,
+      };
+
+      // 🔥 Enviar mensaje al destinatario
       if (recipient && recipient.socket.connected) {
         console.log(
           `✅ Enviando mensaje a ${recipientUsername} (socket conectado)`,
@@ -1008,46 +1029,8 @@ export class SocketGateway
           isGroup: false,
         });
 
-        recipient.socket.emit('message', {
-          id: savedMessage?.id, // 🔥 Incluir ID del mensaje guardado en BD
-          from: from || 'Usuario Desconocido',
-          senderRole, // 🔥 Incluir role del remitente
-          senderNumeroAgente, // 🔥 Incluir numeroAgente del remitente
-          to: recipientUsername,
-          message,
-          isGroup: false,
-          time: time || formatPeruTime(),
-          sentAt: savedMessage?.sentAt, // 🔥 Incluir sentAt para extraer hora correcta en frontend
-          mediaType,
-          mediaData,
-          fileName,
-          fileSize,
-          replyToMessageId,
-          replyToSender,
-          replyToText,
-        });
-
+        recipient.socket.emit('message', messageToSend);
         console.log(`✅ Mensaje emitido exitosamente a ${recipientUsername}`);
-
-        // 🔥 NUEVO: Emitir evento de monitoreo a todos los ADMIN/JEFEPISO
-        this.broadcastMonitoringMessage({
-          id: savedMessage?.id,
-          from: from || 'Usuario Desconocido',
-          to: recipientUsername,
-          message,
-          isGroup: false,
-          time: time || formatPeruTime(),
-          sentAt: savedMessage?.sentAt, // 🔥 Incluir sentAt para extraer hora correcta en frontend
-          mediaType,
-          mediaData,
-          fileName,
-          fileSize,
-          senderRole,
-          senderNumeroAgente,
-          replyToMessageId,
-          replyToSender,
-          replyToText,
-        });
       } else {
         console.log(
           `❌ No se pudo enviar mensaje a ${recipientUsername} (usuario no conectado o no encontrado)`,
@@ -1058,6 +1041,35 @@ export class SocketGateway
           console.log(`   Destinatario no encontrado en el Map de usuarios`);
         }
       }
+
+      // 🔥 NUEVO: Enviar mensaje de vuelta al remitente para que vea su propio mensaje
+      const sender = this.users.get(from);
+      if (sender && sender.socket.connected) {
+        console.log(
+          `✅ Enviando confirmación de mensaje al remitente: ${from}`,
+        );
+        sender.socket.emit('message', messageToSend);
+      }
+
+      // 🔥 Emitir evento de monitoreo a todos los ADMIN/JEFEPISO
+      this.broadcastMonitoringMessage({
+        id: savedMessage?.id,
+        from: from || 'Usuario Desconocido',
+        to: recipientUsername,
+        message,
+        isGroup: false,
+        time: time || formatPeruTime(),
+        sentAt: savedMessage?.sentAt, // 🔥 Incluir sentAt para extraer hora correcta en frontend
+        mediaType,
+        mediaData,
+        fileName,
+        fileSize,
+        senderRole,
+        senderNumeroAgente,
+        replyToMessageId,
+        replyToSender,
+        replyToText,
+      });
     }
   }
 
