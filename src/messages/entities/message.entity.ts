@@ -93,6 +93,9 @@ export class Message {
   @Column({ type: 'text', nullable: true })
   replyToText: string; // Texto del mensaje original (preview)
 
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  replyToSenderNumeroAgente: string; // Número de agente del remitente original
+
   // Campos para hilos de conversación
   @Column({ type: 'int', nullable: true })
   threadId: number; // ID del mensaje principal del hilo (null si es mensaje principal)
