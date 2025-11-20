@@ -224,7 +224,8 @@ export class SocketGateway
       message: `Registrado como ${username}`,
     });
 
-    // 🔥 Obtener todas las conversaciones asignadas para actualizar correctamente la lista de usuarios
+    // 🔥 CORREGIDO: Enviar userList actualizado a TODOS los usuarios conectados
+    // para que vean al nuevo usuario conectado en tiempo real
     try {
       const allAssignedConversations =
         await this.temporaryConversationsService.findAll();
@@ -1724,11 +1725,19 @@ export class SocketGateway
 
     // console.log('📋 Enviando lista de usuarios con datos completos:', userListWithData);
 
+    console.log(
+      `🔄 broadcastUserList - Total usuarios conectados: ${this.users.size}`,
+    );
+
     // Procesar cada usuario conectado
     for (const [
       _username,
       { socket, userData, currentRoom },
     ] of this.users.entries()) {
+      console.log(
+        `  👤 Procesando usuario: ${userData?.username || 'Unknown'}, socket conectado: ${socket.connected}`,
+      );
+
       if (socket.connected) {
         // 🔥 COMENTADO: Ahora enviamos la lista incluso si el usuario está en una sala
         // para que reciban actualizaciones de estado online/offline en tiempo real
@@ -1744,21 +1753,93 @@ export class SocketGateway
           userData?.role &&
           userData.role.toString().toUpperCase().trim() === 'ADMIN';
 
+        console.log(
+          `    ℹ️ Usuario ${userData?.username} es admin: ${isAdmin}`,
+        );
+
         if (isAdmin) {
-          // console.log(
-          //   `👑 Enviando lista paginada a admin: ${userData.username || 'Usuario'}`,
-          // );
-          // Enviar solo los primeros 10 usuarios (página 0)
-          const pageSize = 10;
-          const firstPage = userListWithData.slice(0, pageSize);
+          // 🔥 ADMIN: Enviar usuarios conectados + usuarios de conversaciones (offline)
+          // Esto asegura que vean cambios de estado en tiempo real
+          const adminUsersToSend = [...userListWithData]; // Usuarios conectados
+
+          // Agregar usuarios offline de conversaciones
+          if (assignedConversations && assignedConversations.length > 0) {
+            const allParticipants = new Set<string>();
+            assignedConversations.forEach((conv) => {
+              conv.participants?.forEach((p) => allParticipants.add(p));
+            });
+
+            // Para cada participante, verificar si ya está en la lista
+            for (const participantName of allParticipants) {
+              if (
+                !adminUsersToSend.some((u) => u.username === participantName)
+              ) {
+                // Buscar en BD para obtener datos completos
+                try {
+                  const dbUser = await this.userRepository
+                    .createQueryBuilder('user')
+                    .where(
+                      'CONCAT(user.nombre, " ", user.apellido) = :fullName',
+                      { fullName: participantName },
+                    )
+                    .orWhere('user.username = :username', {
+                      username: participantName,
+                    })
+                    .getOne();
+
+                  if (dbUser) {
+                    const fullName =
+                      dbUser.nombre && dbUser.apellido
+                        ? `${dbUser.nombre} ${dbUser.apellido}`
+                        : dbUser.username;
+
+                    const isUserConnected =
+                      this.users.has(fullName) ||
+                      this.users.has(dbUser.username);
+
+                    adminUsersToSend.push({
+                      id: dbUser.id || null,
+                      username: fullName,
+                      nombre: dbUser.nombre || null,
+                      apellido: dbUser.apellido || null,
+                      email: dbUser.email || null,
+                      role: dbUser.role || 'USER',
+                      picture: null,
+                      sede: null,
+                      sede_id: null,
+                      numeroAgente: dbUser.numeroAgente || null,
+                      isOnline: isUserConnected, // offline
+                    });
+                  }
+                } catch (error) {
+                  console.error(
+                    `❌ Error al buscar usuario ${participantName} en BD:`,
+                    error,
+                  );
+                }
+              }
+            }
+          }
+
+          console.log(
+            `    👑 ADMIN: Enviando ${adminUsersToSend.length} usuarios (${userListWithData.length} online + ${adminUsersToSend.length - userListWithData.length} offline)`,
+          );
+
+          // Enviar todos los usuarios (paginado)
+          const pageSize = 50; // Aumentar tamaño de página para admins
+          const firstPage = adminUsersToSend.slice(0, pageSize);
           socket.emit('userList', {
             users: firstPage,
             page: 0,
             pageSize: pageSize,
-            totalUsers: userListWithData.length,
-            hasMore: userListWithData.length > pageSize,
+            totalUsers: adminUsersToSend.length,
+            hasMore: adminUsersToSend.length > pageSize,
           });
         } else {
+          console.log(
+            `    👤 Procesando usuario NO ADMIN: ${userData?.username}`,
+          );
+
           // Para usuarios no admin, incluir su propia información + usuarios de conversaciones asignadas
           const usersToSend = [];
 
@@ -1768,9 +1849,30 @@ export class SocketGateway
             usersToSend.push(ownUserData);
           }
 
-          // 🔥 Obtener conversaciones del usuario actual desde la BD
-          let userConversations = assignedConversations;
-          if (!userConversations) {
+          console.log(
+            `    📝 Usuario actual agregado: ${ownUserData?.username || 'none'}`,
+          );
+
+          // 🔥 CORREGIDO: Obtener conversaciones del usuario actual
+          // IMPORTANTE: Las conversaciones guardan participantes con NOMBRE COMPLETO, no username
+          let userConversations = [];
+          if (assignedConversations && assignedConversations.length > 0) {
+            // Calcular nombre completo del usuario actual
+            const currentUserFullName =
+              userData?.nombre && userData?.apellido
+                ? `${userData.nombre} ${userData.apellido}`
+                : userData?.username;
+
+            // Filtrar conversaciones donde este usuario es participante (por nombre completo)
+            userConversations = assignedConversations.filter((conv) =>
+              conv.participants?.includes(currentUserFullName),
+            );
+
+            console.log(
+              `📋 Usuario ${currentUserFullName} tiene ${userConversations.length} conversaciones asignadas`,
+            );
+          } else {
+            // Buscar en BD si no se pasaron conversaciones
             try {
               userConversations =
                 await this.temporaryConversationsService.findAll(
@@ -1787,11 +1889,17 @@ export class SocketGateway
 
           // Si tiene conversaciones asignadas, agregar información de los otros usuarios
           if (userConversations && userConversations.length > 0) {
+            // Calcular nombre completo del usuario actual (de nuevo, para usarlo en comparaciones)
+            const currentUserFullName =
+              userData?.nombre && userData?.apellido
+                ? `${userData.nombre} ${userData.apellido}`
+                : userData?.username;
+
             for (const conv of userConversations) {
               if (conv.participants && Array.isArray(conv.participants)) {
                 for (const participantName of conv.participants) {
-                  // No agregar al usuario actual
-                  if (participantName !== userData?.username) {
+                  // No agregar al usuario actual (comparar por nombre completo)
+                  if (participantName !== currentUserFullName) {
                     // Verificar si ya está en la lista
                     if (
                       usersToSend.some((u) => u.username === participantName)
@@ -2469,7 +2577,7 @@ export class SocketGateway
         }
       }
 
-      console.log(`✅ Mensaje de hilo enviado correctamente`);
+      // console.log(`✅ Mensaje de hilo enviado correctamente`);
     } catch (error) {
       console.error('❌ Error al enviar mensaje de hilo:', error);
       client.emit('error', { message: 'Error al enviar mensaje de hilo' });
@@ -2481,9 +2589,9 @@ export class SocketGateway
     @ConnectedSocket() client: Socket,
     @MessageBody() data: any,
   ) {
-    console.log(
-      `🔢 WS: threadCountUpdated - MessageID: ${data.messageId}, LastReply: ${data.lastReplyFrom}, From: ${data.from}, To: ${data.to}`,
-    );
+    // console.log(
+    //   `🔢 WS: threadCountUpdated - MessageID: ${data.messageId}, LastReply: ${data.lastReplyFrom}, From: ${data.from}, To: ${data.to}`,
+    // );
 
     try {
       const { messageId, lastReplyFrom, isGroup, roomCode, to, from } = data;
@@ -2527,7 +2635,7 @@ export class SocketGateway
         }
 
         if (recipientUser && recipientUser.socket.connected) {
-          console.log(`✅ Enviando threadCountUpdated al destinatario: ${to}`);
+          // console.log(`✅ Enviando threadCountUpdated al destinatario: ${to}`);
           recipientUser.socket.emit('threadCountUpdated', updatePayload);
         } else {
           console.log(`⚠️ Destinatario no encontrado o no conectado: ${to}`);
@@ -2549,18 +2657,18 @@ export class SocketGateway
         }
 
         if (senderUser && senderUser.socket.connected && from !== to) {
-          console.log(`✅ Enviando threadCountUpdated al remitente: ${from}`);
+          // console.log(`✅ Enviando threadCountUpdated al remitente: ${from}`);
           senderUser.socket.emit('threadCountUpdated', updatePayload);
         } else if (from === to) {
-          console.log(
-            `ℹ️ Remitente y destinatario son el mismo usuario, no se envía duplicado`,
-          );
+          // console.log(
+          //   `ℹ️ Remitente y destinatario son el mismo usuario, no se envía duplicado`,
+          // );
         } else {
           console.log(`⚠️ Remitente no encontrado o no conectado: ${from}`);
         }
       }
 
-      console.log(`✅ Contador de hilo actualizado correctamente`);
+      // console.log(`✅ Contador de hilo actualizado correctamente`);
     } catch (error) {
       console.error('❌ Error al actualizar contador de hilo:', error);
       client.emit('error', { message: 'Error al actualizar contador de hilo' });

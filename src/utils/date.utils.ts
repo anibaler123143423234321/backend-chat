@@ -46,4 +46,3 @@ export function utcToPeruDate(utcDate: Date): Date {
   const peruOffset = -5 * 60 * 60 * 1000; // -5 horas en milisegundos
   return new Date(utcDate.getTime() + peruOffset);
 }
-
