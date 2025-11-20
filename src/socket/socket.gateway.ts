@@ -840,6 +840,11 @@ export class SocketGateway
                 replyToSender,
                 replyToText,
                 hasMention: isMentioned, // 🔥 NUEVO: Indicar si el usuario fue mencionado
+                // 🔥 NUEVO: Campos de videollamada
+                type: data.type,
+                videoCallUrl: data.videoCallUrl,
+                videoRoomID: data.videoRoomID,
+                metadata: data.metadata,
               });
 
               // 🔥 NUEVO: Actualizar último mensaje para todos los usuarios (excepto el remitente)
@@ -956,6 +961,11 @@ export class SocketGateway
                 replyToSender,
                 replyToText,
                 hasMention: isMentioned, // 🔥 NUEVO: Indicar si el usuario fue mencionado
+                // 🔥 NUEVO: Campos de videollamada
+                type: data.type,
+                videoCallUrl: data.videoCallUrl,
+                videoRoomID: data.videoRoomID,
+                metadata: data.metadata,
               });
             }
           });
@@ -1014,6 +1024,11 @@ export class SocketGateway
         replyToMessageId,
         replyToSender,
         replyToText,
+        // 🔥 NUEVO: Campos de videollamada
+        type: data.type,
+        videoCallUrl: data.videoCallUrl,
+        videoRoomID: data.videoRoomID,
+        metadata: data.metadata,
       };
 
       // 🔥 Enviar mensaje al destinatario
@@ -1091,6 +1106,11 @@ export class SocketGateway
       replyToText,
       isAssignedConversation,
       actualRecipient,
+      // 🔥 NUEVO: Campos de videollamada
+      type,
+      videoCallUrl,
+      videoRoomID,
+      metadata,
     } = data;
 
     try {
@@ -1127,6 +1147,11 @@ export class SocketGateway
         replyToMessageId,
         replyToSender,
         replyToText,
+        // 🔥 NUEVO: Campos de videollamada
+        type,
+        videoCallUrl,
+        videoRoomID,
+        metadata,
       };
 
       console.log(`💾 Guardando mensaje en BD:`, messageData);
@@ -2011,6 +2036,187 @@ export class SocketGateway
     if (targetUser && targetUser.socket.connected) {
       targetUser.socket.emit('callEnded');
     }
+  }
+
+  // ==================== VIDEOLLAMADAS (ZEGOCLOUD) ====================
+
+  @SubscribeMessage('joinVideoRoom')
+  handleJoinVideoRoom(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomID: string; username: string },
+  ) {
+    console.log(
+      `📹 WS: joinVideoRoom - Usuario: ${data.username} uniéndose a sala de video: ${data.roomID}`,
+    );
+
+    // Unir el socket a la sala de video
+    client.join(data.roomID);
+
+    console.log(
+      `✅ Usuario ${data.username} unido a sala de video ${data.roomID}`,
+    );
+  }
+
+  @SubscribeMessage('startVideoCall')
+  handleStartVideoCall(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: {
+      roomID: string;
+      callType: string;
+      chatId: string;
+      initiator: string;
+      callUrl: string;
+      participants: string[];
+    },
+  ) {
+    console.log(
+      `📹 WS: startVideoCall - Iniciador: ${data.initiator}, Tipo: ${data.callType}, Sala: ${data.roomID}`,
+    );
+
+    // Notificar a todos los participantes
+    if (data.callType === 'group' && data.participants) {
+      // Videollamada grupal
+      data.participants.forEach((participant) => {
+        const targetUser = this.users.get(participant);
+        if (targetUser && targetUser.socket.connected) {
+          targetUser.socket.emit('incomingVideoCall', {
+            roomID: data.roomID,
+            initiator: data.initiator,
+            callUrl: data.callUrl,
+            callType: 'group',
+          });
+        }
+      });
+    } else if (data.callType === 'individual' && data.participants[0]) {
+      // Videollamada individual
+      const targetUser = this.users.get(data.participants[0]);
+      if (targetUser && targetUser.socket.connected) {
+        targetUser.socket.emit('incomingVideoCall', {
+          roomID: data.roomID,
+          initiator: data.initiator,
+          callUrl: data.callUrl,
+          callType: 'individual',
+        });
+      }
+    }
+  }
+
+  @SubscribeMessage('endVideoCall')
+  async handleEndVideoCall(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: {
+      roomID: string;
+      roomCode?: string;
+      participants?: string[];
+      closedBy: string;
+      isGroup?: boolean;
+    },
+  ) {
+    console.log(
+      `📴 WS: endVideoCall - Sala: ${data.roomID}, RoomCode: ${data.roomCode}, Cerrada por: ${data.closedBy}`,
+    );
+
+    // 🔥 NUEVO: Marcar la videollamada como inactiva en la BD
+    try {
+      // Buscar el mensaje de videollamada por videoRoomID usando el servicio
+      const videoCallMessage = await this.messagesService.findByVideoRoomID(
+        data.roomID,
+      );
+
+      if (videoCallMessage) {
+        // Actualizar metadata para marcar como inactiva
+        const metadata = videoCallMessage.metadata || {};
+        metadata.isActive = false;
+        metadata.closedBy = data.closedBy;
+        metadata.closedAt = new Date().toISOString();
+
+        await this.messagesService.update(videoCallMessage.id, {
+          metadata,
+        });
+
+        console.log(
+          `✅ Videollamada marcada como inactiva en BD: ${videoCallMessage.id}`,
+        );
+      }
+    } catch (error) {
+      console.error('❌ Error al marcar videollamada como inactiva:', error);
+    }
+
+    // 🔥 NUEVO: Obtener miembros del grupo desde roomUsers o groups
+    let groupMembers: string[] = [];
+
+    if (data.roomCode) {
+      // Intentar obtener desde roomUsers (usuarios actualmente conectados a la sala)
+      const roomUsersSet = this.roomUsers.get(data.roomCode);
+      if (roomUsersSet && roomUsersSet.size > 0) {
+        groupMembers = Array.from(roomUsersSet);
+        console.log(
+          `👥 Miembros activos en sala ${data.roomCode}:`,
+          groupMembers,
+        );
+      }
+
+      // Si no hay usuarios activos, buscar en groups (todos los miembros del grupo)
+      if (groupMembers.length === 0) {
+        // Buscar el nombre del grupo por roomCode
+        const room = await this.temporaryRoomsService.findByRoomCode(
+          data.roomCode,
+        );
+        if (room) {
+          const groupMembersSet = this.groups.get(room.name);
+          if (groupMembersSet && groupMembersSet.size > 0) {
+            groupMembers = Array.from(groupMembersSet);
+            console.log(
+              `👥 Todos los miembros del grupo ${room.name}:`,
+              groupMembers,
+            );
+          }
+        }
+      }
+    }
+
+    // Notificar a todos los miembros del grupo
+    if (groupMembers.length > 0) {
+      console.log(
+        `📢 Notificando cierre de videollamada a ${groupMembers.length} miembros`,
+      );
+      groupMembers.forEach((member) => {
+        const targetUser = this.users.get(member);
+        if (targetUser && targetUser.socket.connected) {
+          console.log(`   ✅ Notificando a: ${member}`);
+          targetUser.socket.emit('videoCallEnded', {
+            roomID: data.roomID,
+            roomCode: data.roomCode,
+            closedBy: data.closedBy,
+            message: `La videollamada fue cerrada por ${data.closedBy}`,
+          });
+        } else {
+          console.log(`   ❌ Usuario no conectado: ${member}`);
+        }
+      });
+    }
+
+    // 🔥 NUEVO: Si es grupo, emitir a toda la sala por roomCode (por si acaso)
+    if (data.isGroup && data.roomCode) {
+      console.log(`📡 Emitiendo a sala ${data.roomCode} via broadcast`);
+      this.server.to(data.roomCode).emit('videoCallEnded', {
+        roomID: data.roomID,
+        roomCode: data.roomCode,
+        closedBy: data.closedBy,
+        message: `La videollamada fue cerrada por ${data.closedBy}`,
+      });
+    }
+
+    // También emitir a toda la sala de video por si acaso
+    console.log(`📡 Emitiendo a sala de video ${data.roomID} via broadcast`);
+    this.server.to(data.roomID).emit('videoCallEnded', {
+      roomID: data.roomID,
+      roomCode: data.roomCode,
+      closedBy: data.closedBy,
+      message: `La videollamada fue cerrada por ${data.closedBy}`,
+    });
   }
 
   // ==================== MENSAJES LEÍDOS ====================

@@ -110,6 +110,19 @@ export class Message {
   @Column({ type: 'json', nullable: true })
   reactions: { emoji: string; username: string; timestamp: Date }[]; // Array de reacciones
 
+  // 🔥 NUEVO: Campos para videollamadas
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  type: string; // 'text', 'video_call', 'audio_call', etc.
+
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  videoCallUrl: string; // URL de la videollamada
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  videoRoomID: string; // ID de la sala de videollamada
+
+  @Column({ type: 'json', nullable: true })
+  metadata: any; // Metadata adicional (JSON flexible)
+
   // Relación con la sala temporal (opcional)
   @ManyToOne(() => TemporaryRoom, { nullable: true })
   @JoinColumn({ name: 'roomId' })

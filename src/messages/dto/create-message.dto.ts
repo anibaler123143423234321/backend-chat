@@ -93,4 +93,20 @@ export class CreateMessageDto {
   @IsNumber()
   @IsOptional()
   threadCount?: number;
+
+  // 🔥 NUEVO: Campos para videollamadas
+  @IsString()
+  @IsOptional()
+  type?: string;
+
+  @IsString()
+  @IsOptional()
+  videoCallUrl?: string;
+
+  @IsString()
+  @IsOptional()
+  videoRoomID?: string;
+
+  @IsOptional()
+  metadata?: any;
 }

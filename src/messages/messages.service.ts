@@ -1024,4 +1024,17 @@ export class MessagesService {
       await this.messageRepository.save(message);
     }
   }
+
+  // 🔥 NUEVO: Buscar mensaje de videollamada por videoRoomID
+  async findByVideoRoomID(videoRoomID: string): Promise<Message | null> {
+    return await this.messageRepository.findOne({
+      where: { videoRoomID },
+      order: { id: 'DESC' }, // Obtener el más reciente
+    });
+  }
+
+  // 🔥 NUEVO: Actualizar mensaje
+  async update(messageId: number, updateData: Partial<Message>): Promise<void> {
+    await this.messageRepository.update(messageId, updateData);
+  }
 }
