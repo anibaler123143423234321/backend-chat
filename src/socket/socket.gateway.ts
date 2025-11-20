@@ -2222,16 +2222,29 @@ export class SocketGateway
       isGroup?: boolean;
     },
   ) {
-    console.log(
-      `📴 WS: endVideoCall - Sala: ${data.roomID}, RoomCode: ${data.roomCode}, Cerrada por: ${data.closedBy}`,
-    );
+    // console.log(
+    //   `📴 WS: endVideoCall - Sala: ${data.roomID}, RoomCode: ${data.roomCode}, Cerrada por: ${data.closedBy}`,
+    // );
 
     // 🔥 NUEVO: Marcar la videollamada como inactiva en la BD
     try {
       // Buscar el mensaje de videollamada por videoRoomID usando el servicio
-      const videoCallMessage = await this.messagesService.findByVideoRoomID(
+      let videoCallMessage = await this.messagesService.findByVideoRoomID(
         data.roomID,
       );
+
+      // 🔥 FALLBACK: Mensajes antiguos sin videoRoomID (solo tienen URL y roomCode)
+      if (!videoCallMessage && data.roomCode) {
+        videoCallMessage =
+          await this.messagesService.findLatestVideoCallByRoomCode(
+            data.roomCode,
+          );
+        // if (videoCallMessage) {
+        //   console.log(
+        //     `⚠️ Videollamada encontrada por roomCode (sin videoRoomID): ${videoCallMessage.id}`,
+        //   );
+        // }
+      }
 
       if (videoCallMessage) {
         // Actualizar metadata para marcar como inactiva
@@ -2240,47 +2253,65 @@ export class SocketGateway
         metadata.closedBy = data.closedBy;
         metadata.closedAt = new Date().toISOString();
 
-        await this.messagesService.update(videoCallMessage.id, {
+        const updatePayload: any = {
           metadata,
-        });
+        };
 
-        console.log(
-          `✅ Videollamada marcada como inactiva en BD: ${videoCallMessage.id}`,
-        );
+        // 🔥 Si el mensaje no tenía videoRoomID, guardarlo ahora para futuras búsquedas
+        if (!videoCallMessage.videoRoomID && data.roomID) {
+          updatePayload.videoRoomID = data.roomID;
+        }
+
+        await this.messagesService.update(videoCallMessage.id, updatePayload);
+
+        // console.log(
+        //   `✅ Videollamada marcada como inactiva en BD: ${videoCallMessage.id}`,
+        // );
+      } else {
+        // console.warn(
+        //   `⚠️ No se encontró mensaje de videollamada para roomID=${data.roomID} / roomCode=${data.roomCode}`,
+        // );
       }
     } catch (error) {
       console.error('❌ Error al marcar videollamada como inactiva:', error);
     }
 
-    // 🔥 NUEVO: Obtener miembros del grupo desde roomUsers o groups
+    // 🔥 CRÍTICO: Obtener TODOS los miembros del grupo desde la BD
     let groupMembers: string[] = [];
 
     if (data.roomCode) {
-      // Intentar obtener desde roomUsers (usuarios actualmente conectados a la sala)
-      const roomUsersSet = this.roomUsers.get(data.roomCode);
-      if (roomUsersSet && roomUsersSet.size > 0) {
-        groupMembers = Array.from(roomUsersSet);
-        console.log(
-          `👥 Miembros activos en sala ${data.roomCode}:`,
-          groupMembers,
-        );
-      }
-
-      // Si no hay usuarios activos, buscar en groups (todos los miembros del grupo)
-      if (groupMembers.length === 0) {
-        // Buscar el nombre del grupo por roomCode
+      try {
+        // 🔥 PRIMERO: Buscar en la base de datos para obtener TODOS los miembros
         const room = await this.temporaryRoomsService.findByRoomCode(
           data.roomCode,
         );
-        if (room) {
-          const groupMembersSet = this.groups.get(room.name);
-          if (groupMembersSet && groupMembersSet.size > 0) {
-            groupMembers = Array.from(groupMembersSet);
-            console.log(
-              `👥 Todos los miembros del grupo ${room.name}:`,
-              groupMembers,
-            );
-          }
+        if (room && room.members && room.members.length > 0) {
+          groupMembers = room.members;
+          console.log(
+            `👥 Miembros de la sala ${data.roomCode} desde BD:`,
+            groupMembers,
+          );
+        } else {
+          console.warn(
+            `⚠️ No se encontraron miembros en BD para sala ${data.roomCode}`,
+          );
+        }
+      } catch (error) {
+        console.error(
+          `❌ Error al obtener sala ${data.roomCode} desde BD:`,
+          error,
+        );
+      }
+
+      // 🔥 FALLBACK: Si no se encontraron miembros en BD, intentar desde memoria
+      if (groupMembers.length === 0) {
+        const roomUsersSet = this.roomUsers.get(data.roomCode);
+        if (roomUsersSet && roomUsersSet.size > 0) {
+          groupMembers = Array.from(roomUsersSet);
+          console.log(
+            `👥 Miembros activos en sala ${data.roomCode} desde memoria:`,
+            groupMembers,
+          );
         }
       }
     }

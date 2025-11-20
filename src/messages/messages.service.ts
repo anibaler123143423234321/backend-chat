@@ -1033,6 +1033,15 @@ export class MessagesService {
     });
   }
 
+  // 🔥 NUEVO: Fallback para mensajes antiguos sin videoRoomID
+  // Buscar la última videollamada por roomCode
+  async findLatestVideoCallByRoomCode(roomCode: string): Promise<Message | null> {
+    return await this.messageRepository.findOne({
+      where: { roomCode, type: 'video_call' },
+      order: { id: 'DESC' },
+    });
+  }
+
   // 🔥 NUEVO: Actualizar mensaje
   async update(messageId: number, updateData: Partial<Message>): Promise<void> {
     await this.messageRepository.update(messageId, updateData);
