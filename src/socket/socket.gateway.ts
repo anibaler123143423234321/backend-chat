@@ -855,6 +855,7 @@ export class SocketGateway
                 senderRole, // 🔥 Incluir role del remitente
                 senderNumeroAgente, // 🔥 Incluir numeroAgente del remitente
                 group: to,
+                groupName: to, // 🔥 NUEVO: Incluir groupName explícitamente para el frontend
                 roomCode: finalRoomCode, // 🔥 CRÍTICO: Incluir roomCode para validación en frontend
                 message,
                 isGroup: true,
@@ -976,6 +977,7 @@ export class SocketGateway
                 senderRole, // 🔥 Incluir role del remitente
                 senderNumeroAgente, // 🔥 Incluir numeroAgente del remitente
                 group: to,
+                groupName: to, // 🔥 NUEVO: Incluir groupName explícitamente para el frontend
                 roomCode: groupRoomCode, // 🔥 CRÍTICO: Incluir roomCode para validación en frontend
                 message,
                 isGroup: true,
@@ -1171,7 +1173,7 @@ export class SocketGateway
         mediaData,
         fileName,
         fileSize,
-        sentAt: peruDate,
+        sentAt: peruDate, 
         time: calculatedTime, // 🔥 SIEMPRE calcular desde sentAt, no usar el time del cliente
         replyToMessageId,
         replyToSender,
