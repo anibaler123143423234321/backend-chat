@@ -40,6 +40,8 @@ export class SocketGateway
   private temporaryLinks = new Map<string, any>();
   private publicRooms = new Map<string, any>();
   private roomUsers = new Map<string, Set<string>>(); // roomCode -> Set<usernames>
+  // 🔥 NUEVO: Caché de mensajes recientes para detección de duplicados
+  private recentMessages = new Map<string, number>(); // messageHash -> timestamp
 
   constructor(
     private temporaryRoomsService: TemporaryRoomsService,
@@ -50,6 +52,9 @@ export class SocketGateway
   ) {
     // Limpiar enlaces expirados cada 5 minutos
     setInterval(() => this.cleanExpiredLinks(), 5 * 60 * 1000);
+
+    // 🔥 NUEVO: Limpiar caché de mensajes cada 10 segundos
+    setInterval(() => this.cleanRecentMessagesCache(), 10 * 1000);
 
     // Inyectar referencia del gateway en el servicio para notificaciones
     this.temporaryRoomsService.setSocketGateway(this);
@@ -655,6 +660,13 @@ export class SocketGateway
     console.log(
       `📨 WS: message - De: ${data.from}, Para: ${data.to}, Grupo: ${data.isGroup}`,
     );
+
+    // 🔥 NUEVO: Verificar si es un mensaje duplicado
+    if (this.isDuplicateMessage(data)) {
+      console.log('⚠️ Mensaje duplicado ignorado por el backend');
+      return; // Ignorar el mensaje duplicado
+    }
+
     console.log(`📦 Datos completos del mensaje:`, {
       from: data.from,
       to: data.to,
@@ -723,11 +735,18 @@ export class SocketGateway
       }
     }
 
+    // 🔥 CRÍTICO: Determinar el roomCode ANTES de guardar en BD
+    const user = this.users.get(from);
+    const finalRoomCode = messageRoomCode || user?.currentRoom;
+
+    console.log(`🔥 DEBUG - finalRoomCode calculado: "${finalRoomCode}" (messageRoomCode: "${messageRoomCode}", currentRoom: "${user?.currentRoom}")`);
+
     // 🔥 GUARDAR MENSAJE EN BD PRIMERO para obtener el ID
     let savedMessage = null;
     try {
       savedMessage = await this.saveMessageToDatabase({
         ...data,
+        roomCode: finalRoomCode, // 🔥 Usar roomCode correcto
         senderRole, // 🔥 Incluir role del remitente
         senderNumeroAgente, // 🔥 Incluir numeroAgente del remitente
       });
@@ -738,34 +757,29 @@ export class SocketGateway
 
     if (isGroup) {
       console.log(`🔵 Procesando mensaje de GRUPO`);
-      // Verificar si es una sala temporal
-      const user = this.users.get(from);
-
-      // 🔥 CRÍTICO: Usar roomCode del mensaje si está disponible, sino usar currentRoom del usuario
-      const roomCode = messageRoomCode || user?.currentRoom;
 
       console.log(`👤 Usuario remitente:`, {
         username: from,
-        messageRoomCode,
+        messageRoomCode, // Ya está disponible del destructuring
         currentRoom: user?.currentRoom,
-        finalRoomCode: roomCode,
+        finalRoomCode,
         hasUser: !!user,
       });
 
-      if (roomCode) {
+      if (finalRoomCode) {
         // Es una sala temporal
-        let roomUsers = this.roomUsers.get(roomCode);
+        let roomUsers = this.roomUsers.get(finalRoomCode);
         console.log(
-          `🏠 Enviando a sala temporal: ${roomCode}, Miembros en memoria: ${roomUsers?.size || 0}`,
+          `🏠 Enviando a sala temporal: ${finalRoomCode}, Miembros en memoria: ${roomUsers?.size || 0}`,
         );
 
         // 🔥 SIEMPRE sincronizar con la base de datos para asegurar que todos reciban el mensaje
         try {
           const room =
-            await this.temporaryRoomsService.findByRoomCode(roomCode);
+            await this.temporaryRoomsService.findByRoomCode(finalRoomCode);
           if (room && room.connectedMembers) {
             console.log(
-              `🔄 Sincronizando usuarios de BD para sala ${roomCode}:`,
+              `🔄 Sincronizando usuarios de BD para sala ${finalRoomCode}:`,
               room.connectedMembers,
             );
 
@@ -782,14 +796,14 @@ export class SocketGateway
           }
         } catch (error) {
           console.error(
-            `❌ Error al sincronizar usuarios de sala ${roomCode}:`,
+            `❌ Error al sincronizar usuarios de sala ${finalRoomCode}:`,
             error,
           );
         }
 
         if (roomUsers && roomUsers.size > 0) {
           console.log(
-            `📋 Lista completa de usuarios en sala ${roomCode}:`,
+            `📋 Lista completa de usuarios en sala ${finalRoomCode}:`,
             Array.from(roomUsers),
           );
 
@@ -820,7 +834,7 @@ export class SocketGateway
               );
 
               console.log(
-                `✅ Enviando mensaje a ${member} en sala ${roomCode}${isMentioned ? ' (MENCIONADO)' : ''} - Socket ID: ${memberUser.socket.id}`,
+                `✅ Enviando mensaje a ${member} en sala ${finalRoomCode}${isMentioned ? ' (MENCIONADO)' : ''} - Socket ID: ${memberUser.socket.id}`,
               );
               memberUser.socket.emit('message', {
                 id: savedMessage?.id, // 🔥 Incluir ID del mensaje
@@ -828,7 +842,7 @@ export class SocketGateway
                 senderRole, // 🔥 Incluir role del remitente
                 senderNumeroAgente, // 🔥 Incluir numeroAgente del remitente
                 group: to,
-                roomCode: roomCode, // 🔥 CRÍTICO: Incluir roomCode para validación en frontend
+                roomCode: finalRoomCode, // 🔥 CRÍTICO: Incluir roomCode para validación en frontend
                 message,
                 isGroup: true,
                 time: time || formatPeruTime(),
@@ -852,8 +866,8 @@ export class SocketGateway
               // Esto asegura que el último mensaje se actualice en tiempo real en la lista de salas
               if (member !== from) {
                 // Verificar si el usuario está viendo esta sala actualmente
-                const isViewingThisRoom = memberUser.currentRoom === roomCode;
-                // console.log(`📊 DEBUG - Usuario ${member}: currentRoom="${memberUser.currentRoom}", roomCode="${roomCode}", isViewingThisRoom=${isViewingThisRoom}`);
+                const isViewingThisRoom = memberUser.currentRoom === finalRoomCode;
+                // console.log(`📊 DEBUG - Usuario ${member}: currentRoom="${memberUser.currentRoom}", roomCode="${finalRoomCode}", isViewingThisRoom=${isViewingThisRoom}`);
 
                 const lastMessageData = {
                   text: message,
@@ -874,10 +888,10 @@ export class SocketGateway
                 if (!isViewingThisRoom) {
                   // Usuario NO está viendo esta sala, enviar actualización con contador
                   console.log(
-                    `📊 Usuario ${member} NO está viendo sala ${roomCode}, enviando con contador`,
+                    `📊 Usuario ${member} NO está viendo sala ${finalRoomCode}, enviando con contador`,
                   );
                   this.emitUnreadCountUpdateForUser(
-                    roomCode,
+                    finalRoomCode,
                     member,
                     1, // Incrementar contador
                     lastMessageData,
@@ -885,10 +899,10 @@ export class SocketGateway
                 } else {
                   // Usuario SÍ está viendo esta sala, solo actualizar último mensaje sin incrementar contador
                   console.log(
-                    `📊 Usuario ${member} SÍ está viendo sala ${roomCode}, enviando sin contador`,
+                    `📊 Usuario ${member} SÍ está viendo sala ${finalRoomCode}, enviando sin contador`,
                   );
                   this.emitUnreadCountUpdateForUser(
-                    roomCode,
+                    finalRoomCode,
                     member,
                     0, // No incrementar contador
                     lastMessageData,
@@ -904,7 +918,7 @@ export class SocketGateway
           });
         } else {
           // 🔥 NUEVO: Log cuando no hay usuarios en la sala
-          console.warn(`⚠️ No hay usuarios en la sala ${roomCode}`);
+          console.warn(`⚠️ No hay usuarios en la sala ${finalRoomCode}`);
         }
       } else {
         // Es un grupo normal
@@ -3022,5 +3036,46 @@ export class SocketGateway
         socket.emit('monitoringMessage', messageData);
       }
     });
+  }
+
+  // 🔥 NUEVO: Generar hash de mensaje para detección de duplicados
+  private createMessageHash(data: any): string {
+    const hashContent = `${data.from}-${data.to}-${data.message || ''}-${data.isGroup}`;
+    return crypto.createHash('sha256').update(hashContent).digest('hex');
+  }
+
+  // 🔥 NUEVO: Limpiar caché de mensajes antiguos (más de 5 segundos)
+  private cleanRecentMessagesCache() {
+    const now = Date.now();
+    const CACHE_EXPIRY = 5000; // 5 segundos
+
+    for (const [hash, timestamp] of this.recentMessages.entries()) {
+      if (now - timestamp > CACHE_EXPIRY) {
+        this.recentMessages.delete(hash);
+      }
+    }
+  }
+
+  // 🔥 NUEVO: Verificar si un mensaje es duplicado
+  private isDuplicateMessage(data: any): boolean {
+    const messageHash = this.createMessageHash(data);
+    const now = Date.now();
+    const lastSent = this.recentMessages.get(messageHash);
+    const DUPLICATE_WINDOW = 2000; // 2 segundos
+
+    // Si el mismo mensaje se envió en los últimos 2 segundos, es duplicado
+    if (lastSent && (now - lastSent) < DUPLICATE_WINDOW) {
+      console.log('⚠️ Mensaje duplicado detectado en backend:', {
+        hash: messageHash.substring(0, 8) + '...',
+        timeSinceLastSend: now - lastSent,
+        from: data.from,
+        to: data.to,
+      });
+      return true;
+    }
+
+    // Registrar este mensaje
+    this.recentMessages.set(messageHash, now);
+    return false;
   }
 }

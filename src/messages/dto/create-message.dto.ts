@@ -8,6 +8,10 @@ import {
 
 export class CreateMessageDto {
   @IsString()
+  @IsOptional()
+  id?: string; // 🔥 NUEVO: ID del mensaje para detección de duplicados
+
+  @IsString()
   from: string;
 
   @IsNumber()

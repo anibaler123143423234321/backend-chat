@@ -46,3 +46,47 @@ export function utcToPeruDate(utcDate: Date): Date {
   const peruOffset = -5 * 60 * 60 * 1000; // -5 horas en milisegundos
   return new Date(utcDate.getTime() + peruOffset);
 }
+
+/**
+ * Formatea una fecha para mostrar "Hoy", "Ayer" o la fecha completa
+ * @param sentAt Fecha del mensaje
+ * @returns String con "Hoy", "Ayer" o fecha formateada
+ */
+export function formatDisplayDate(sentAt: Date): string {
+  if (!sentAt) return "Hoy";
+
+  // Obtener fecha actual en Perú
+  const nowInPeru = getPeruDate();
+  const todayInPeru = nowInPeru.toISOString().split('T')[0]; // YYYY-MM-DD
+
+  // Calcular ayer en Perú
+  const yesterdayInPeru = new Date(nowInPeru);
+  yesterdayInPeru.setUTCDate(yesterdayInPeru.getUTCDate() - 1);
+  const yesterdayDateStr = yesterdayInPeru.toISOString().split('T')[0]; // YYYY-MM-DD
+
+  // Extraer fecha del mensaje
+  const messageDate = sentAt.toISOString().split('T')[0]; // YYYY-MM-DD
+
+  console.log("🔍 DEBUG formatDisplayDate:", {
+    sentAt: sentAt.toISOString(),
+    messageDate,
+    todayInPeru,
+    yesterdayDateStr,
+    isToday: messageDate === todayInPeru,
+    isYesterday: messageDate === yesterdayDateStr,
+  });
+
+  if (messageDate === todayInPeru) {
+    return "Hoy";
+  } else if (messageDate === yesterdayDateStr) {
+    return "Ayer";
+  } else {
+    // Para otras fechas, formatear usando zona horaria de Perú
+    return sentAt.toLocaleDateString("es-PE", {
+      timeZone: "America/Lima",
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+    });
+  }
+}

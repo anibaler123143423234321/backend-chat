@@ -9,7 +9,7 @@ import { Repository, IsNull } from 'typeorm';
 import { Message } from './entities/message.entity';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { TemporaryRoom } from '../temporary-rooms/entities/temporary-room.entity';
-import { getPeruDate, formatPeruTime } from '../utils/date.utils';
+import { getPeruDate, formatPeruTime, formatDisplayDate } from '../utils/date.utils';
 import { SocketGateway } from '../socket/socket.gateway';
 
 @Injectable()
@@ -26,6 +26,7 @@ export class MessagesService {
   async create(createMessageDto: CreateMessageDto): Promise<Message> {
     // 🔥 NUEVO: Verificar duplicados antes de guardar
     const {
+      id, // Excluir id del DTO - la BD auto-genera
       from,
       to,
       message: messageText,
@@ -33,6 +34,7 @@ export class MessagesService {
       isGroup,
       roomCode,
       threadId,
+      ...restDto
     } = createMessageDto;
 
     // 🔥 Construir condiciones de búsqueda de duplicados
@@ -85,8 +87,16 @@ export class MessagesService {
     // 🔥 CRÍTICO: SIEMPRE generar sentAt en el servidor con zona horaria de Perú
     // NO aceptar sentAt del frontend para evitar problemas de zona horaria y duplicados
     const peruDate = getPeruDate();
+
+    // 🔥 NO incluir 'id' - dejar que la BD auto-genere
     const message = this.messageRepository.create({
-      ...createMessageDto,
+      from,
+      to,
+      message: messageText,
+      isGroup,
+      roomCode,
+      threadId,
+      ...restDto,
       sentAt: peruDate, // 🔥 SIEMPRE usar getPeruDate() del servidor
       time: formatPeruTime(peruDate), // 🔥 Calcular time automáticamente
     });
@@ -131,6 +141,9 @@ export class MessagesService {
           message.lastReplyFrom = lastThreadMessage.from;
         }
       }
+
+      // 🔥 NUEVO: Agregar displayDate calculado en el backend
+      (message as any).displayDate = formatDisplayDate(message.sentAt);
     }
 
     // Los mensajes ya están en orden cronológico por ID
@@ -197,6 +210,7 @@ export class MessagesService {
       numberInList: index + 1 + offset,
       threadCount: threadCountMap[msg.id] || 0,
       lastReplyFrom: lastReplyMap[msg.id] || null,
+      displayDate: formatDisplayDate(msg.sentAt), // 🔥 NUEVO: Agregar displayDate
     }));
   }
 
@@ -241,6 +255,9 @@ export class MessagesService {
           message.lastReplyFrom = lastThreadMessage.from;
         }
       }
+
+      // 🔥 NUEVO: Agregar displayDate calculado en el backend
+      (message as any).displayDate = formatDisplayDate(message.sentAt);
     }
 
     return messages;
@@ -316,6 +333,7 @@ export class MessagesService {
       numberInList: index + 1 + offset,
       threadCount: threadCountMap[msg.id] || 0,
       lastReplyFrom: lastReplyMap[msg.id] || null,
+      displayDate: formatDisplayDate(msg.sentAt), // 🔥 NUEVO: Agregar displayDate
     }));
 
     return messagesWithNumber;
