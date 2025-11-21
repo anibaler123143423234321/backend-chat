@@ -43,6 +43,11 @@ export class SocketGateway
   // 🔥 NUEVO: Caché de mensajes recientes para detección de duplicados
   private recentMessages = new Map<string, number>(); // messageHash -> timestamp
 
+  // 🔥 NUEVO: Método público para verificar si un usuario está conectado
+  public isUserOnline(username: string): boolean {
+    return this.users.has(username);
+  }
+
   constructor(
     private temporaryRoomsService: TemporaryRoomsService,
     private messagesService: MessagesService,
@@ -697,6 +702,14 @@ export class SocketGateway
     let senderRole = senderUser?.userData?.role || null;
     let senderNumeroAgente = senderUser?.userData?.numeroAgente || null;
 
+    console.log(`🔍 DEBUG - Usuario en memoria:`, {
+      from,
+      hasSenderUser: !!senderUser,
+      userData: senderUser?.userData,
+      senderRole,
+      senderNumeroAgente,
+    });
+
     // 🔥 OPTIMIZACIÓN: Cachear información del usuario para evitar consultas repetidas a BD
     if (!senderRole || !senderNumeroAgente) {
       // Primero verificar si ya tenemos el usuario en memoria (de una conexión anterior)
@@ -1112,6 +1125,7 @@ export class SocketGateway
       fromId,
       senderRole, // 🔥 Extraer role del remitente
       senderNumeroAgente, // 🔥 Extraer numeroAgente del remitente
+      roomCode, // 🔥 CRÍTICO: Extraer roomCode del data
       mediaType,
       mediaData,
       fileName,
@@ -1152,7 +1166,7 @@ export class SocketGateway
         message,
         isGroup,
         groupName: isGroup ? to : null,
-        roomCode: isGroup ? this.getRoomCodeFromUser(from) : null,
+        roomCode: isGroup ? (roomCode || this.getRoomCodeFromUser(from)) : null, // 🔥 USAR roomCode del data primero
         mediaType,
         mediaData,
         fileName,
@@ -1170,6 +1184,12 @@ export class SocketGateway
       };
 
       console.log(`💾 Guardando mensaje en BD:`, messageData);
+      console.log(`🔍 DEBUG - senderNumeroAgente antes de guardar:`, {
+        senderNumeroAgente,
+        senderRole,
+        fromId,
+        from,
+      });
       const savedMessage = await this.messagesService.create(messageData);
       console.log(
         `✅ Mensaje guardado exitosamente en BD con ID: ${savedMessage.id}`,

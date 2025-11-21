@@ -88,6 +88,13 @@ export class MessagesService {
     // NO aceptar sentAt del frontend para evitar problemas de zona horaria y duplicados
     const peruDate = getPeruDate();
 
+    // 🔥 DEBUG: Verificar que senderNumeroAgente esté en restDto
+    console.log('🔍 DEBUG create message - restDto:', {
+      senderRole: restDto.senderRole,
+      senderNumeroAgente: restDto.senderNumeroAgente,
+      fromId: restDto.fromId,
+    });
+
     // 🔥 NO incluir 'id' - dejar que la BD auto-genere
     const message = this.messageRepository.create({
       from,
@@ -102,6 +109,15 @@ export class MessagesService {
     });
 
     const savedMessage = await this.messageRepository.save(message);
+
+    // 🔥 DEBUG: Verificar que se guardó correctamente
+    console.log('✅ DEBUG mensaje guardado:', {
+      id: savedMessage.id,
+      from: savedMessage.from,
+      fromId: savedMessage.fromId,
+      senderRole: savedMessage.senderRole,
+      senderNumeroAgente: savedMessage.senderNumeroAgente,
+    });
 
     // 🔥 NOTA: La actualización de contadores y último mensaje ahora se maneja
     // directamente en socket.gateway.ts cuando se distribuyen los mensajes

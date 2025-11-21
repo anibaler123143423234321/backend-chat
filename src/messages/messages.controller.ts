@@ -9,22 +9,50 @@
   Query,
   Patch,
 } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { MessagesService } from './messages.service';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { MarkReadDto } from './dto/mark-read.dto';
+import { User } from '../users/entities/user.entity';
+
 @Controller('messages')
 export class MessagesController {
-  constructor(private readonly messagesService: MessagesService) {}
+  constructor(
+    private readonly messagesService: MessagesService,
+    @InjectRepository(User)
+    private userRepository: Repository<User>,
+  ) {}
 
   @Post()
   async create(@Body() createMessageDto: CreateMessageDto) {
-    // console.log('ðŸ’¬ Creando mensaje:', createMessageDto);
+    // Obtener senderRole y senderNumeroAgente de la BD si no vienen en el DTO
+    if (createMessageDto.from && (!createMessageDto.senderRole || !createMessageDto.senderNumeroAgente)) {
+      try {
+        const dbUser = await this.userRepository.findOne({
+          where: { username: createMessageDto.from },
+        });
+
+        if (dbUser) {
+          if (!createMessageDto.senderRole) {
+            createMessageDto.senderRole = dbUser.role;
+          }
+          if (!createMessageDto.senderNumeroAgente) {
+            createMessageDto.senderNumeroAgente = dbUser.numeroAgente;
+          }
+          console.log(
+            `Controller - Info del remitente de BD: role=${createMessageDto.senderRole}, numeroAgente=${createMessageDto.senderNumeroAgente}`,
+          );
+        }
+      } catch (error) {
+        console.error(`Controller - Error al buscar usuario en BD:`, error);
+      }
+    }
+
     const savedMessage = await this.messagesService.create(createMessageDto);
 
     return savedMessage;
   }
-
-  @Get('room/:roomCode')
   async findByRoom(
     @Param('roomCode') roomCode: string,
     @Query('limit') limit: string = '20',

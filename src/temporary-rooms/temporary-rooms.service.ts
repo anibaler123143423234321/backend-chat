@@ -6,7 +6,7 @@
   forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like, IsNull } from 'typeorm';
+import { Repository, Like, IsNull, In } from 'typeorm';
 import { TemporaryRoom } from './entities/temporary-room.entity';
 import { CreateTemporaryRoomDto } from './dto/create-temporary-room.dto';
 import { JoinRoomDto } from './dto/join-room.dto';
@@ -38,7 +38,7 @@ export class TemporaryRoomsService {
     @InjectRepository(Message)
     private messageRepository: Repository<Message>,
     private roomFavoritesService: RoomFavoritesService,
-  ) {}
+  ) { }
 
   // MÃ©todo para inyectar el gateway de WebSocket (evita dependencia circular)
   setSocketGateway(gateway: any) {
@@ -531,7 +531,7 @@ export class TemporaryRoomsService {
 
     // Usar el displayName del query parameter si está disponible
     const displayName = username;
-    
+
     console.log('👤 Usuario para favoritos:', { userId, displayName });
 
     // Obtener códigos de salas favoritas del usuario
@@ -594,14 +594,14 @@ export class TemporaryRoomsService {
           ...room,
           lastMessage: lastMessage
             ? {
-                id: lastMessage.id,
-                text: lastMessage.message,
-                from: lastMessage.from,
-                sentAt: lastMessage.sentAt,
-                time: lastMessage.time,
-                mediaType: lastMessage.mediaType,
-                fileName: lastMessage.fileName,
-              }
+              id: lastMessage.id,
+              text: lastMessage.message,
+              from: lastMessage.from,
+              sentAt: lastMessage.sentAt,
+              time: lastMessage.time,
+              mediaType: lastMessage.mediaType,
+              fileName: lastMessage.fileName,
+            }
             : null,
         };
       }),
@@ -781,7 +781,7 @@ export class TemporaryRoomsService {
   }
 
   async getRoomUsers(roomCode: string): Promise<any> {
-    // console.log('ðŸ‘¥ Obteniendo usuarios de la sala:', roomCode);
+    // console.log('👥 Obteniendo usuarios de la sala:', roomCode);
 
     const room = await this.temporaryRoomRepository.findOne({
       where: { roomCode, isActive: true },
@@ -792,20 +792,67 @@ export class TemporaryRoomsService {
     }
 
     // 🔥 MODIFICADO: Usar TODOS los usuarios añadidos a la sala (members)
-    const allUsers = room.members || [];
-
-    // Crear lista con TODOS los usuarios añadidos a la sala
+    const allUsernames = room.members || [];
     let userList = [];
-    if (allUsers.length > 0) {
-      userList = allUsers.map((username, index) => ({
-        id: index + 1,
-        username: username,
-        displayName: username === 'Usuario' ? `Usuario ${index + 1}` : username,
-        isOnline: true,
-      }));
+
+    if (allUsernames.length > 0) {
+      try {
+        // 1. Obtener datos completos de la base de datos
+        const dbUsers = await this.userRepository.find({
+          where: { username: In(allUsernames) },
+        });
+
+        // 2. Mapear usuarios combinando datos de BD y estado online
+        userList = allUsernames.map((username, index) => {
+          // Buscar datos en la respuesta de BD
+          const dbUser = dbUsers.find((u) => u.username === username);
+
+          // Verificar estado online en tiempo real
+          const isOnline = this.socketGateway
+            ? this.socketGateway.isUserOnline(username)
+            : false;
+
+          if (dbUser) {
+            return {
+              id: dbUser.id,
+              username: dbUser.username,
+              displayName: dbUser.nombre && dbUser.apellido
+                ? `${dbUser.nombre} ${dbUser.apellido}`
+                : dbUser.username,
+              isOnline: isOnline,
+              // 🔥 CAMPOS ENRIQUECIDOS
+              role: dbUser.role,
+              numeroAgente: dbUser.numeroAgente,
+              picture: null, // No tenemos picture en la entidad User por ahora
+              nombre: dbUser.nombre,
+              apellido: dbUser.apellido,
+              email: dbUser.email
+            };
+          } else {
+            // Fallback para usuarios que no están en la BD (ej. usuarios temporales antiguos)
+            return {
+              id: index + 1, // ID temporal
+              username: username,
+              displayName: username === 'Usuario' ? `Usuario ${index + 1}` : username,
+              isOnline: isOnline,
+              role: 'GUEST',
+              numeroAgente: null
+            };
+          }
+        });
+      } catch (error) {
+        console.error('❌ Error al enriquecer usuarios de sala:', error);
+        // Fallback en caso de error de BD
+        userList = allUsernames.map((username, index) => ({
+          id: index + 1,
+          username: username,
+          displayName: username === 'Usuario' ? `Usuario ${index + 1}` : username,
+          isOnline: true, // Asumir online por defecto en error
+        }));
+      }
     }
 
-    // console.log('✅ Usuarios en la sala (añadidos):', userList);
+    // console.log('✅ Usuarios en la sala (enriquecidos):', userList.length);
 
     return {
       roomCode: room.roomCode,

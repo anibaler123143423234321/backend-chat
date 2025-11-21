@@ -4,11 +4,12 @@ import { MessagesService } from './messages.service';
 import { MessagesController } from './messages.controller';
 import { Message } from './entities/message.entity';
 import { TemporaryRoom } from '../temporary-rooms/entities/temporary-room.entity';
+import { User } from '../users/entities/user.entity';
 import { SocketModule } from '../socket/socket.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Message, TemporaryRoom]),
+    TypeOrmModule.forFeature([Message, TemporaryRoom, User]),
     forwardRef(() => SocketModule),
   ],
   controllers: [MessagesController],
