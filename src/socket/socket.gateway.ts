@@ -581,6 +581,38 @@ export class SocketGateway
     }
   }
 
+  @SubscribeMessage('conversationRemoved')
+  handleConversationRemoved(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: {
+      conversationId: number;
+      conversationName: string;
+      participants: string[];
+    },
+  ) {
+    console.log(
+      `🗑️ WS: conversationRemoved - ID: ${data.conversationId}, Name: ${data.conversationName}, Participants: ${data.participants?.length || 0}`,
+    );
+
+    // Notificar a todos los participantes
+    const participants = data.participants || [];
+    participants.forEach((participantName) => {
+      const participantConnection = this.users.get(participantName);
+      if (participantConnection && participantConnection.socket.connected) {
+        participantConnection.socket.emit('conversationRemoved', {
+          conversationId: data.conversationId,
+          conversationName: data.conversationName,
+        });
+        console.log(
+          `✅ Notificando remoción a ${participantName} - Conversación: ${data.conversationName}`,
+        );
+      } else {
+        console.log(`⚠️ Usuario no encontrado o no conectado: ${participantName}`);
+      }
+    });
+  }
+
   @SubscribeMessage('conversationUpdated')
   handleConversationUpdated(
     @ConnectedSocket() client: Socket,
