@@ -16,6 +16,7 @@ import * as crypto from 'crypto';
 import { TemporaryRoomsService } from '../temporary-rooms/temporary-rooms.service';
 import { MessagesService } from '../messages/messages.service';
 import { TemporaryConversationsService } from '../temporary-conversations/temporary-conversations.service';
+import { PollsService } from '../polls/polls.service';
 import { User } from '../users/entities/user.entity';
 import { getPeruDate, formatPeruTime } from '../utils/date.utils';
 
@@ -52,6 +53,7 @@ export class SocketGateway
     private temporaryRoomsService: TemporaryRoomsService,
     private messagesService: MessagesService,
     private temporaryConversationsService: TemporaryConversationsService,
+    private pollsService: PollsService,
     @InjectRepository(User)
     private userRepository: Repository<User>,
   ) {
@@ -764,6 +766,23 @@ export class SocketGateway
         senderNumeroAgente, // 🔥 Incluir numeroAgente del remitente
       });
       console.log(`✅ Mensaje guardado en BD con ID: ${savedMessage?.id}`);
+
+      // 🔥 NUEVO: Si el mensaje es una encuesta, crear la entidad Poll
+      if (savedMessage && data.isPoll && data.poll) {
+        try {
+          const poll = await this.pollsService.createPoll(
+            {
+              question: data.poll.question,
+              options: data.poll.options,
+            },
+            savedMessage.id,
+            from,
+          );
+          console.log(`✅ Encuesta creada con ID: ${poll.id} para mensaje ${savedMessage.id}`);
+        } catch (pollError) {
+          console.error('❌ Error al crear encuesta:', pollError);
+        }
+      }
     } catch (error) {
       console.error(`❌ Error al guardar mensaje en BD:`, error);
     }
@@ -1173,7 +1192,7 @@ export class SocketGateway
         mediaData,
         fileName,
         fileSize,
-        sentAt: peruDate, 
+        sentAt: peruDate,
         time: calculatedTime, // 🔥 SIEMPRE calcular desde sentAt, no usar el time del cliente
         replyToMessageId,
         replyToSender,
@@ -3099,5 +3118,97 @@ export class SocketGateway
     // Registrar este mensaje
     this.recentMessages.set(messageHash, now);
     return false;
+  }
+
+  // ===== EVENTOS DE ENCUESTAS =====
+
+  @SubscribeMessage('pollVote')
+  async handlePollVote(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: {
+      messageId: number;
+      optionIndex: number;
+      username: string;
+      roomCode?: string;
+      to?: string;
+    },
+  ) {
+    console.log(
+      `📊 WS: pollVote - Usuario: ${data.username}, MessageID: ${data.messageId}, Opción: ${data.optionIndex}`,
+    );
+
+    try {
+      // Obtener la encuesta asociada al mensaje
+      const poll = await this.pollsService.getPollByMessageId(data.messageId);
+
+      if (!poll) {
+        console.error(`❌ Encuesta no encontrada para mensaje ${data.messageId}`);
+        client.emit('error', { message: 'Encuesta no encontrada' });
+        return;
+      }
+
+      // Validar que el índice de opción sea válido
+      if (data.optionIndex < 0 || data.optionIndex >= poll.options.length) {
+        console.error(`❌ Índice de opción inválido: ${data.optionIndex}`);
+        client.emit('error', { message: 'Opción inválida' });
+        return;
+      }
+
+      // Registrar o actualizar el voto
+      await this.pollsService.vote(poll.id, data.username, data.optionIndex);
+      console.log(`✅ Voto registrado: ${data.username} votó por opción ${data.optionIndex}`);
+
+      // Obtener la encuesta actualizada con todos los votos
+      const updatedPoll = await this.pollsService.getPollWithVotes(poll.id);
+
+      // Preparar datos de la encuesta para el frontend
+      const pollData = {
+        question: updatedPoll.question,
+        options: updatedPoll.options,
+        votes: updatedPoll.votes.map(v => ({
+          username: v.username,
+          optionIndex: v.optionIndex,
+        })),
+      };
+
+      // Emitir actualización en tiempo real
+      if (data.roomCode) {
+        // Es una sala de grupo
+        const roomUsers = this.roomUsers.get(data.roomCode);
+        if (roomUsers) {
+          roomUsers.forEach((member) => {
+            const memberUser = this.users.get(member);
+            if (memberUser && memberUser.socket.connected) {
+              memberUser.socket.emit('pollUpdated', {
+                messageId: data.messageId,
+                poll: pollData,
+              });
+            }
+          });
+        }
+      } else if (data.to) {
+        // Es un chat privado
+        const recipientConnection = this.users.get(data.to);
+        if (recipientConnection && recipientConnection.socket.connected) {
+          recipientConnection.socket.emit('pollUpdated', {
+            messageId: data.messageId,
+            poll: pollData,
+          });
+        }
+
+        // También emitir al remitente
+        const senderConnection = this.users.get(data.username);
+        if (senderConnection && senderConnection.socket.connected) {
+          senderConnection.socket.emit('pollUpdated', {
+            messageId: data.messageId,
+            poll: pollData,
+          });
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error al procesar voto de encuesta:', error);
+      client.emit('error', { message: 'Error al procesar voto' });
+    }
   }
 }

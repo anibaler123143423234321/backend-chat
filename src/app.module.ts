@@ -14,6 +14,7 @@ import { SystemConfigModule } from './system-config/system-config.module';
 import { MessagesModule } from './messages/messages.module';
 import { RoomFavoritesModule } from './room-favorites/room-favorites.module';
 import { ConversationFavoritesModule } from './conversation-favorites/conversation-favorites.module';
+import { PollsModule } from './polls/polls.module';
 import { databaseConfig } from './config/database.config';
 import { DatabaseErrorInterceptor } from './common/interceptors/database-error.interceptor';
 
@@ -31,6 +32,7 @@ import { DatabaseErrorInterceptor } from './common/interceptors/database-error.i
     MessagesModule,
     RoomFavoritesModule,
     ConversationFavoritesModule,
+    PollsModule,
   ],
   controllers: [AppController],
   providers: [
@@ -41,4 +43,4 @@ import { DatabaseErrorInterceptor } from './common/interceptors/database-error.i
     },
   ],
 })
-export class AppModule {}
+export class AppModule { }
