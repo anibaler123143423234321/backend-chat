@@ -656,7 +656,7 @@ export class TemporaryRoomsService {
   async updateRoom(
     id: number,
     userId: number,
-    updateData: { maxCapacity?: number },
+    updateData: { maxCapacity?: number; picture?: string; description?: string },
   ): Promise<TemporaryRoom> {
     const room = await this.temporaryRoomRepository.findOne({
       where: { id, createdBy: userId },
@@ -668,7 +668,7 @@ export class TemporaryRoomsService {
       );
     }
 
-    // Actualizar capacidad mÃ¡xima
+    // Actualizar capacidad máxima
     if (updateData.maxCapacity !== undefined) {
       if (updateData.maxCapacity < 1 || updateData.maxCapacity > 500) {
         throw new BadRequestException('La capacidad debe estar entre 1 y 500');
@@ -676,10 +676,17 @@ export class TemporaryRoomsService {
       room.maxCapacity = updateData.maxCapacity;
     }
 
+    // Actualizar descripción (usada para almacenar URL de imagen)
+    if (updateData.description !== undefined) {
+      room.description = updateData.description;
+    }
+
     const updatedRoom = await this.temporaryRoomRepository.save(room);
 
     return updatedRoom;
   }
+
+
 
   async getCurrentUserRoom(userId: number): Promise<any> {
     try {

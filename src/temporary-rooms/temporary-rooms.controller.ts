@@ -132,7 +132,7 @@ export class TemporaryRoomsController {
   @Patch(':id/update')
   updateRoom(
     @Param('id') id: string,
-    @Body() updateData: { maxCapacity?: number },
+    @Body() updateData: { maxCapacity?: number; picture?: string; description?: string },
     @Request() req
   ) {
     const userId = req.user?.id || 1; // Usar ID por defecto para pruebas
