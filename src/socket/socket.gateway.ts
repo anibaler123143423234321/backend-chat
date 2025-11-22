@@ -44,6 +44,16 @@ export class SocketGateway
   // 🔥 NUEVO: Caché de mensajes recientes para detección de duplicados
   private recentMessages = new Map<string, number>(); // messageHash -> timestamp
 
+  // 🔥 NUEVO: Tracking de participantes en videollamadas
+  private videoRoomParticipants = new Map<
+    string,
+    Set<{
+      username: string;
+      nombre?: string;
+      apellido?: string;
+      picture?: string;
+    }>
+  >(); // roomID -> Set<participant info>
   // 🔥 NUEVO: Método público para verificar si un usuario está conectado
   public isUserOnline(username: string): boolean {
     return this.users.has(username);
@@ -3242,5 +3252,138 @@ export class SocketGateway
       console.error('❌ Error al procesar voto de encuesta:', error);
       client.emit('error', { message: 'Error al procesar voto' });
     }
+  }
+
+  // ==================== TRACKING DE PARTICIPANTES EN VIDEOLLAMADAS ====================
+
+  /**
+   * 🔥 NUEVO: Modificar joinVideoRoom para trackear participantes
+   * Este método se llamará cuando un usuario se una una videollamada
+   */
+  @SubscribeMessage('joinVideoRoomList')
+  handleJoinVideoRoomList(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomID: string; username: string },
+  ) {
+    console.log(
+      `📹 WS: joinVideoRoom - Usuario: ${data.username} uniéndose a sala de video: ${data.roomID}`,
+    );
+
+    // Unir el socket a la sala de video
+    client.join(data.roomID);
+
+    // 🔥 NUEVO: Agregar participante al tracking
+    if (!this.videoRoomParticipants.has(data.roomID)) {
+      this.videoRoomParticipants.set(data.roomID, new Set());
+    }
+
+    // Obtener información completa del usuario
+    const userInfo = this.users.get(data.username);
+    const participantInfo = {
+      username: data.username,
+      nombre: userInfo?.userData?.nombre || null,
+      apellido: userInfo?.userData?.apellido || null,
+      picture: userInfo?.userData?.picture || null,
+    };
+
+    // Agregar al Set (si ya existe, Set lo ignora)
+    const participants = this.videoRoomParticipants.get(data.roomID);
+    // Remover participante existente con mismo username primero (para actualizar info)
+    const existingParticipant = Array.from(participants).find(
+      (p) => p.username === data.username,
+    );
+    if (existingParticipant) {
+      participants.delete(existingParticipant);
+    }
+    participants.add(participantInfo);
+
+    console.log(
+      `✅ Usuario ${data.username} unido a sala de video ${data.roomID} - Total: ${participants.size}`,
+    );
+
+    // 🔥 Emitir lista actualizada de participantes
+    this.broadcastVideoRoomParticipants(data.roomID);
+  }
+
+  /**
+   * 🔥 NUEVO: Handler para cuando un usuario sale de la videollamada
+   */
+  @SubscribeMessage('leaveVideoRoomList')
+  handleLeaveListVideoRoom(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { roomID: string; username: string },
+  ) {
+    console.log(
+      `📹 WS: leaveVideoRoom - Usuario: ${data.username} saliendo de sala de video: ${data.roomID}`,
+    );
+
+    // Remover del socket room
+    client.leave(data.roomID);
+
+    // 🔥 Remover del tracking
+    const participants = this.videoRoomParticipants.get(data.roomID);
+    if (participants) {
+      const participantToRemove = Array.from(participants).find(
+        (p) => p.username === data.username,
+      );
+      if (participantToRemove) {
+        participants.delete(participantToRemove);
+        console.log(
+          `✅ Usuario ${data.username} removido de sala ${data.roomID} - Quedan: ${participants.size}`,
+        );
+
+        // Si no quedan participantes, limpiar el Set
+        if (participants.size === 0) {
+          this.videoRoomParticipants.delete(data.roomID);
+          console.log(`🧹 Sala ${data.roomID} eliminada (sin participantes)`);
+        }
+      }
+    }
+
+    // 🔥 Emitir lista actualizada de participantes
+    this.broadcastVideoRoomParticipants(data.roomID);
+  }
+
+  /**
+   * 🔥 NUEVO: Método helper para broadcast de participantes
+   */
+  private broadcastVideoRoomParticipants(roomID: string) {
+    const participants = this.videoRoomParticipants.get(roomID) || new Set();
+    const participantsList = Array.from(participants);
+
+    // Extraer roomCode del roomID si es grupal (formato: "group_ROOMCODE")
+    let roomCode: string | null = null;
+    if (roomID.startsWith('group_')) {
+      roomCode = roomID.replace('group_', '');
+    }
+
+    // Emitir a todos los usuarios de la sala de video
+    this.server.to(roomID).emit('videoRoomParticipantsUpdated', {
+      roomID,
+      roomCode,
+      participants: participantsList,
+    });
+
+    // Si es un grupo, también emitir a todos los miembros del grupo
+    // (incluso si no están en la videollamada, para que vean el banner actualizado)
+    if (roomCode) {
+      const roomUsers = this.roomUsers.get(roomCode);
+      if (roomUsers) {
+        roomUsers.forEach((username) => {
+          const user = this.users.get(username);
+          if (user && user.socket.connected) {
+            user.socket.emit('videoRoomParticipantsUpdated', {
+              roomID,
+              roomCode,
+              participants: participantsList,
+            });
+          }
+        });
+      }
+    }
+
+    console.log(
+      `📢 Broadcast participantes de ${roomID}: ${participantsList.length} usuarios`,
+    );
   }
 }
