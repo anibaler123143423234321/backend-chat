@@ -1624,13 +1624,21 @@ export class SocketGateway
     const connectedUsernamesList = Array.from(
       this.roomUsers.get(data.roomCode) || [],
     );
+
     let allUsernames: string[] = [];
+    // 🔥 NUEVO: Variable para guardar el ID del mensaje fijado
+    let currentPinnedMessageId: number | null = null;
+
     try {
       const room = await this.temporaryRoomsService.findByRoomCode(
         data.roomCode,
       );
       // 🔥 MODIFICADO: Usar TODOS los usuarios añadidos (members)
       allUsernames = room.members || [];
+
+      // 🔥 NUEVO: Capturar el mensaje fijado de la base de datos
+      currentPinnedMessageId = room.pinnedMessageId;
+
     } catch (error) {
       console.error(`❌ Error al obtener sala ${data.roomCode}:`, error);
       allUsernames = connectedUsernamesList;
@@ -1658,8 +1666,11 @@ export class SocketGateway
       roomCode: data.roomCode,
       roomName: data.roomName,
       users: roomUsersList,
+      // 🔥 NUEVO: Enviar el ID del mensaje fijado al frontend
+      pinnedMessageId: currentPinnedMessageId
     });
-    console.log(`✅ Confirmación de unión enviada a ${data.from}`);
+
+    console.log(`✅ Confirmación enviada a ${data.from}. PinnedMsg: ${currentPinnedMessageId}`);
 
     // 🔥 NUEVO: Resetear contador de mensajes no leídos para este usuario en esta sala
     if (!data.isMonitoring) {
