@@ -1080,4 +1080,12 @@ export class MessagesService {
   async update(messageId: number, updateData: Partial<Message>): Promise<void> {
     await this.messageRepository.update(messageId, updateData);
   }
+
+  async findOne(id: number): Promise<Message | null> {
+    return await this.messageRepository.findOne({
+      where: { id },
+      relations: ['room'] // Opcional: si necesitas datos de la sala
+    })
+
+  }
 }

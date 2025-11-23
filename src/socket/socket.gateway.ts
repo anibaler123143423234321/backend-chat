@@ -3386,4 +3386,69 @@ export class SocketGateway
       `📢 Broadcast participantes de ${roomID}: ${participantsList.length} usuarios`,
     );
   }
+
+  /**
+   * 🔥 NUEVO: Handler para fijar/desfijar mensajes en salas grupales
+   */
+  @SubscribeMessage('pinMessage')
+  async handlePinMessage(
+    @ConnectedSocket() client: Socket,
+    @MessageBody()
+    data: {
+      roomCode: string;
+      to?: string;
+      messageId: number | null;
+      isGroup: boolean;
+      pinnedBy: string;
+    },
+  ) {
+    console.log(
+      `📌 WS: pinMessage - RoomCode: ${data.roomCode}, MessageId: ${data.messageId}, PinnedBy: ${data.pinnedBy}`,
+    );
+
+    const { roomCode, messageId, pinnedBy, isGroup } = data;
+
+    if (!isGroup) {
+      console.warn('⚠️ Pin message solo está disponible para grupos');
+      return;
+    }
+
+    if (!roomCode) {
+      console.warn('⚠️ roomCode es requerido para fijar mensajes');
+      return;
+    }
+
+    try {
+      // 1. Actualizar mensaje fijado en la base de datos
+      await this.temporaryRoomsService.updatePinnedMessage(roomCode, messageId);
+
+      // 2. Emitir a todos los usuarios de la sala que el mensaje fue fijado/desfijado
+      const roomUsers = this.roomUsers.get(roomCode);
+      if (roomUsers) {
+        roomUsers.forEach((memberUsername) => {
+          const memberUser = this.users.get(memberUsername);
+          if (memberUser && memberUser.socket.connected) {
+            memberUser.socket.emit('messagePinned', {
+              roomCode,
+              messageId,
+              pinnedBy,
+            });
+          }
+        });
+      }
+
+      console.log(
+        `✅ Mensaje ${messageId ? 'fijado' : 'desfijado'} en sala ${roomCode} por ${pinnedBy}`,
+      );
+    } catch (error) {
+      console.error('❌ Error al fijar mensaje:', error);
+      // Notificar al cliente que hubo un error
+      const userConnection = this.users.get(pinnedBy);
+      if (userConnection && userConnection.socket.connected) {
+        userConnection.socket.emit('pinMessageError', {
+          message: 'Error al fijar el mensaje',
+        });
+      }
+    }
+  }
 }

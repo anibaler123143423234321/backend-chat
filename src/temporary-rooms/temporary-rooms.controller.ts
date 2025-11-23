@@ -138,4 +138,19 @@ export class TemporaryRoomsController {
     const userId = req.user?.id || 1; // Usar ID por defecto para pruebas
     return this.temporaryRoomsService.updateRoom(parseInt(id), userId, updateData);
   }
+
+  @Get(':roomCode/pinned-message')
+  async getPinnedMessage(@Param('roomCode') roomCode: string) {
+    const pinnedId = await this.temporaryRoomsService.getPinnedMessage(roomCode);
+    return { pinnedMessageId: pinnedId };
+  }
+
+  @Patch(':roomCode/pin-message')
+  async pinMessage(
+    @Param('roomCode') roomCode: string,
+    @Body() body: { messageId: number | null }
+  ) {
+    return this.temporaryRoomsService.updatePinnedMessage(roomCode, body.messageId);
+  }
+
 }

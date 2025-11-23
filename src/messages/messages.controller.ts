@@ -22,7 +22,7 @@ export class MessagesController {
     private readonly messagesService: MessagesService,
     @InjectRepository(User)
     private userRepository: Repository<User>,
-  ) {}
+  ) { }
 
   @Post()
   async create(@Body() createMessageDto: CreateMessageDto) {
@@ -295,4 +295,14 @@ export class MessagesController {
       throw error;
     }
   }
+
+  @Get(':id')
+  async findOne(@Param('id') id: string) {
+    // Validar que sea un número (para no interceptar rutas como 'recent' si estuvieran mal ordenadas)
+    if (isNaN(+id)) {
+      return null;
+    }
+    return this.messagesService.findOne(+id);
+  }
+
 }

@@ -918,4 +918,30 @@ export class TemporaryRoomsService {
   private generateRoomCode(): string {
     return randomBytes(4).toString('hex').toUpperCase();
   }
+
+  // 🔥 NUEVO: Métodos para mensajes fijados
+  async updatePinnedMessage(
+    roomCode: string,
+    pinnedMessageId: number | null,
+  ): Promise<TemporaryRoom> {
+    const room = await this.temporaryRoomRepository.findOne({
+      where: { roomCode },
+    });
+
+    if (!room) {
+      throw new NotFoundException(`Sala con código ${roomCode} no encontrada`);
+    }
+
+    room.pinnedMessageId = pinnedMessageId;
+    return await this.temporaryRoomRepository.save(room);
+  }
+
+  async getPinnedMessage(roomCode: string): Promise<number | null> {
+    const room = await this.temporaryRoomRepository.findOne({
+      where: { roomCode },
+      select: ['pinnedMessageId'],
+    });
+
+    return room?.pinnedMessageId || null;
+  }
 }

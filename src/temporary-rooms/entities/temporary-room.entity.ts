@@ -44,6 +44,9 @@ export class TemporaryRoom {
   @Column({ type: 'json', nullable: true })
   settings: any;
 
+  @Column({ type: 'int', nullable: true })
+  pinnedMessageId: number; // ID del mensaje fijado actualmente (null si no hay mensaje fijado)
+
   @Column()
   createdBy: number;
 
