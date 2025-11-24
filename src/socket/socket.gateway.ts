@@ -140,9 +140,15 @@ export class SocketGateway
 
         // 🔥 Obtener todas las conversaciones asignadas para actualizar correctamente la lista de usuarios
         try {
-          // 🔥 CORREGIDO: Pasar username para filtrar correctamente
+          // 🔥 CORREGIDO: Construir displayName usando userData antes de que se pierda
+          const userData = user.userData;
+          const displayName =
+            userData?.nombre && userData?.apellido
+              ? `${userData.nombre} ${userData.apellido}`
+              : username;
+
           const allAssignedConversations =
-            await this.temporaryConversationsService.findAll(username);
+            await this.temporaryConversationsService.findAll(displayName);
           await this.broadcastUserList(allAssignedConversations);
         } catch (error) {
           console.error(
@@ -250,9 +256,14 @@ export class SocketGateway
     // 🔥 CORREGIDO: Enviar userList actualizado a TODOS los usuarios conectados
     // para que vean al nuevo usuario conectado en tiempo real
     try {
-      // 🔥 CORREGIDO: Pasar username para filtrar correctamente
+      // 🔥 CORREGIDO: Construir displayName para filtrar correctamente por nombre completo
+      const displayName =
+        userData?.nombre && userData?.apellido
+          ? `${userData.nombre} ${userData.apellido}`
+          : username;
+
       const allAssignedConversations =
-        await this.temporaryConversationsService.findAll(username);
+        await this.temporaryConversationsService.findAll(displayName);
       await this.broadcastUserList(allAssignedConversations);
     } catch (error) {
       console.error(
@@ -1117,6 +1128,7 @@ export class SocketGateway
         replyToMessageId,
         replyToSender,
         replyToText,
+        conversationId: savedMessage?.conversationId, // 🔥 Incluir conversationId para chats asignados
         // 🔥 NUEVO: Campos de videollamada
         type: data.type,
         videoCallUrl: data.videoCallUrl,
