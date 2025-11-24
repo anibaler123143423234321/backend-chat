@@ -8,6 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull } from 'typeorm';
 import { Message } from './entities/message.entity';
 import { CreateMessageDto } from './dto/create-message.dto';
+import { TemporaryConversation } from '../temporary-conversations/entities/temporary-conversation.entity';
 import { TemporaryRoom } from '../temporary-rooms/entities/temporary-room.entity';
 import { getPeruDate, formatPeruTime, formatDisplayDate } from '../utils/date.utils';
 import { SocketGateway } from '../socket/socket.gateway';
@@ -19,14 +20,25 @@ export class MessagesService {
     private messageRepository: Repository<Message>,
     @InjectRepository(TemporaryRoom)
     private temporaryRoomRepository: Repository<TemporaryRoom>,
+    @InjectRepository(TemporaryConversation)
+    private temporaryConversationRepository: Repository<TemporaryConversation>,
     @Inject(forwardRef(() => SocketGateway))
     private socketGateway: SocketGateway,
   ) { }
 
   async create(createMessageDto: CreateMessageDto): Promise<Message> {
+    // 🔥 DEBUG: Verificar si conversationId está llegando
+    console.log('🔍 DEBUG - createMessageDto received:', {
+      conversationId: createMessageDto.conversationId,
+      isAssignedConversation: createMessageDto['isAssignedConversation'],
+      from: createMessageDto.from,
+      to: createMessageDto.to,
+    });
+
     // 🔥 NUEVO: Verificar duplicados antes de guardar
     const {
       id, // Excluir id del DTO - la BD auto-genera
+      conversationId, // 🔥 CRÍTICO: Extraer explícitamente para guardarlo
       from,
       to,
       message: messageText,
@@ -103,6 +115,7 @@ export class MessagesService {
       isGroup,
       roomCode,
       threadId,
+      conversationId, // 🔥 CRÍTICO: Incluir conversationId explícitamente
       ...restDto,
       sentAt: peruDate, // 🔥 SIEMPRE usar getPeruDate() del servidor
       time: formatPeruTime(peruDate), // 🔥 Calcular time automáticamente
@@ -115,6 +128,7 @@ export class MessagesService {
       id: savedMessage.id,
       from: savedMessage.from,
       fromId: savedMessage.fromId,
+      conversationId: savedMessage.conversationId, // 🔥 Verificar conversationId
       senderRole: savedMessage.senderRole,
       senderNumeroAgente: savedMessage.senderNumeroAgente,
     });
@@ -123,6 +137,99 @@ export class MessagesService {
     // directamente en socket.gateway.ts cuando se distribuyen los mensajes
 
     return savedMessage;
+  }
+
+  // 🔥 NUEVO: Obtener todos los conteos de mensajes no leídos para un usuario
+  async getAllUnreadCountsForUser(
+    username: string,
+  ): Promise<{ [key: string]: number }> {
+    // console.log(
+    //   `📊 getAllUnreadCountsForUser llamado para usuario: ${username}`,
+    // );
+
+    try {
+      const result: { [key: string]: number } = {};
+      const usernameNormalized = this.normalizeUsername(username);
+
+      // 1. Obtener conteos para SALAS (Grupos)
+      const roomCodes = await this.messageRepository
+        .createQueryBuilder('message')
+        .select('DISTINCT message.roomCode')
+        .where('message.isGroup = :isGroup', { isGroup: true })
+        .andWhere('message.roomCode IS NOT NULL')
+        .andWhere('message.isDeleted = :isDeleted', { isDeleted: false })
+        .andWhere('message.threadId IS NULL') // Solo mensajes principales, no de hilos
+        .getRawMany();
+
+      for (const { roomCode } of roomCodes) {
+        const count = await this.getUnreadCountForUserInRoom(
+          roomCode,
+          username,
+        );
+        if (count > 0) {
+          result[roomCode] = count;
+        }
+      }
+
+      // 2. Obtener conteos para CONVERSACIONES ASIGNADAS
+      // 🔥 NUEVO ENFOQUE: Usar conversationId para evitar ambigüedad
+      // Buscar todas las conversaciones activas donde el usuario es participante
+      const allConversations = await this.temporaryConversationRepository.find({
+        where: { isActive: true },
+      });
+
+      const userConversations = allConversations.filter((conv) => {
+        const participants = conv.participants || [];
+        return participants.some(
+          (p) => this.normalizeUsername(p) === usernameNormalized,
+        );
+      });
+
+      // console.log(
+      //   `📊 Conversaciones asignadas encontradas para ${username}: ${userConversations.length}`,
+      // );
+
+      for (const conv of userConversations) {
+        // 🔥 CRÍTICO: Filtrar mensajes por conversationId en lugar de from/to
+        // Esto previene que mensajes de un agente incrementen contadores en otros chats
+        const messages = await this.messageRepository.find({
+          where: {
+            conversationId: conv.id,
+            isDeleted: false,
+            threadId: IsNull(),
+            isGroup: false,
+          },
+          select: ['id', 'readBy', 'from', 'to'],
+        });
+
+        // Filtrar solo mensajes dirigidos al usuario actual (no enviados por él)
+        const unreadCount = messages.filter((msg) => {
+          // Mensaje debe ser dirigido al usuario (no enviado por él)
+          if (this.normalizeUsername(msg.from) === usernameNormalized) {
+            return false; // El usuario lo envió, no cuenta como no leído
+          }
+
+          // Verificar si el usuario ya lo leyó
+          if (!msg.readBy || msg.readBy.length === 0) {
+            return true; // No ha sido leído por nadie
+          }
+
+          const isReadByUser = msg.readBy.some(
+            (reader) => this.normalizeUsername(reader) === usernameNormalized,
+          );
+          return !isReadByUser;
+        }).length;
+
+        if (unreadCount > 0) {
+          result[conv.id.toString()] = unreadCount;
+        }
+      }
+
+      return result;
+    } catch (error) {
+      console.error(`❌ Error en getAllUnreadCountsForUser:`, error);
+      throw error;
+    }
   }
 
   async findByRoom(
@@ -811,71 +918,6 @@ export class MessagesService {
     return result;
   }
 
-  // 🔥 NUEVO: Obtener todos los conteos de mensajes no leídos para un usuario
-  async getAllUnreadCountsForUser(
-    username: string,
-  ): Promise<{ [roomCode: string]: number }> {
-    console.log(
-      `📊 getAllUnreadCountsForUser llamado para usuario: ${username}`,
-    );
-
-    try {
-      // Obtener todas las salas distintas donde hay mensajes de grupo
-      const roomCodes = await this.messageRepository
-        .createQueryBuilder('message')
-        .select('DISTINCT message.roomCode')
-        .where('message.isGroup = :isGroup', { isGroup: true })
-        .andWhere('message.roomCode IS NOT NULL')
-        .andWhere('message.isDeleted = :isDeleted', { isDeleted: false })
-        .andWhere('message.threadId IS NULL') // Solo mensajes principales, no de hilos
-        .getRawMany();
-
-      // console.log(`📊 Salas encontradas:`, roomCodes);
-
-      const result: { [roomCode: string]: number } = {};
-
-      // Para cada sala, obtener el conteo de mensajes no leídos
-      for (const row of roomCodes) {
-        // 🔥 CORREGIDO: El campo se llama message_roomCode en el resultado de la query
-        const roomCode = row.message_roomCode || row.roomCode;
-        // console.log(
-        //   `📊 DEBUG - Procesando sala:`,
-        //   row,
-        //   `roomCode extraído: ${roomCode}`,
-        // );
-
-        if (roomCode) {
-          try {
-            const count = await this.getUnreadCountForUserInRoom(
-              roomCode,
-              username,
-            );
-            // 🔥 INCLUIR TODAS las salas, incluso con 0 mensajes no leídos
-            result[roomCode] = count;
-            console.log(`� Sala ${roomCode}: ${count} mensajes no leídos`);
-          } catch (error) {
-            console.error(
-              `❌ Error al obtener conteo para sala ${roomCode}:`,
-              error,
-            );
-            result[roomCode] = 0; // En caso de error, asignar 0
-          }
-        } else {
-          console.log(`⚠️ roomCode vacío para row:`, row);
-        }
-      }
-
-      // console.log(`📊 Resultado final para ${username}:`, result);
-      return result;
-    } catch (error) {
-      console.error(
-        `❌ Error en getAllUnreadCountsForUser para ${username}:`,
-        error,
-      );
-      throw error;
-    }
-  }
-
   // Buscar mensajes por contenido para un usuario específico
   async searchMessages(
     username: string,
@@ -1086,6 +1128,15 @@ export class MessagesService {
       where: { id },
       relations: ['room'] // Opcional: si necesitas datos de la sala
     })
+  }
 
+  private normalizeUsername(username: string): string {
+    return (
+      username
+        ?.toLowerCase()
+        .trim()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '') || ''
+    );
   }
 }

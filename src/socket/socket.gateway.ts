@@ -140,8 +140,9 @@ export class SocketGateway
 
         // 🔥 Obtener todas las conversaciones asignadas para actualizar correctamente la lista de usuarios
         try {
+          // 🔥 CORREGIDO: Pasar username para filtrar correctamente
           const allAssignedConversations =
-            await this.temporaryConversationsService.findAll();
+            await this.temporaryConversationsService.findAll(username);
           await this.broadcastUserList(allAssignedConversations);
         } catch (error) {
           console.error(
@@ -249,8 +250,9 @@ export class SocketGateway
     // 🔥 CORREGIDO: Enviar userList actualizado a TODOS los usuarios conectados
     // para que vean al nuevo usuario conectado en tiempo real
     try {
+      // 🔥 CORREGIDO: Pasar username para filtrar correctamente
       const allAssignedConversations =
-        await this.temporaryConversationsService.findAll();
+        await this.temporaryConversationsService.findAll(username);
       await this.broadcastUserList(allAssignedConversations);
     } catch (error) {
       console.error(

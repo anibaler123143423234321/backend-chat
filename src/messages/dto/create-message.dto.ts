@@ -11,6 +11,10 @@ export class CreateMessageDto {
   @IsOptional()
   id?: string; // 🔥 NUEVO: ID del mensaje para detección de duplicados
 
+  @IsNumber()
+  @IsOptional()
+  conversationId?: number; // 🔥 NUEVO: ID de la conversación asignada
+
   @IsString()
   from: string;
 

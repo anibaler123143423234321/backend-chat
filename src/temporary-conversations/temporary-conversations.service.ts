@@ -21,7 +21,7 @@ export class TemporaryConversationsService {
     private messageRepository: Repository<Message>,
     @InjectRepository(User) // ðŸ”¥ Inyectar repositorio de User
     private userRepository: Repository<User>,
-  ) {}
+  ) { }
 
   async create(
     createDto: CreateTemporaryConversationDto,
@@ -78,7 +78,7 @@ export class TemporaryConversationsService {
       );
     }
 
-    // Enriquecer cada conversaciÃ³n con el Ãºltimo mensaje y contador de no leÃ­dos
+    // Enriquecer cada conversación con el último mensaje y contador de no leídos
     const enrichedConversations = await Promise.all(
       conversationsToEnrich.map(async (conv) => {
         const participants = conv.participants || [];
@@ -87,44 +87,28 @@ export class TemporaryConversationsService {
         let unreadCount = 0;
 
         if (participants.length >= 2) {
-          // Construir condiciones para buscar mensajes entre los participantes
-          const messageConditions = [];
+          // 🔥 NUEVO ENFOQUE: Buscar mensajes por conversationId para evitar solapamiento
+          // Esto previene que mensajes de un chat asignado aparezcan en otros
 
-          for (let i = 0; i < participants.length; i++) {
-            for (let j = i + 1; j < participants.length; j++) {
-              messageConditions.push(
-                {
-                  from: participants[i],
-                  to: participants[j],
-                  isDeleted: false,
-                  threadId: IsNull(),
-                  isGroup: false,
-                },
-                {
-                  from: participants[j],
-                  to: participants[i],
-                  isDeleted: false,
-                  threadId: IsNull(),
-                  isGroup: false,
-                },
-              );
-            }
-          }
-
-          // Obtener el Ãºltimo mensaje
+          // Obtener el último mensaje usando conversationId
           const messages = await this.messageRepository.find({
-            where: messageConditions,
+            where: {
+              conversationId: conv.id,
+              isDeleted: false,
+              threadId: IsNull(),
+              isGroup: false,
+            },
             order: { sentAt: 'DESC' },
             take: 1,
           });
 
           if (messages.length > 0) {
-            // Calcular el threadCount del Ãºltimo mensaje
+            // Calcular el threadCount del último mensaje
             const threadCount = await this.messageRepository.count({
               where: { threadId: messages[0].id, isDeleted: false },
             });
 
-            // Obtener el Ãºltimo mensaje del hilo (si existe)
+            // Obtener el último mensaje del hilo (si existe)
             let lastReplyFrom = null;
             if (threadCount > 0) {
               const lastThreadMessage = await this.messageRepository.findOne({
@@ -136,17 +120,17 @@ export class TemporaryConversationsService {
               }
             }
 
-            // ðŸ”¥ Si es un archivo multimedia sin texto, mostrar el tipo de archivo
+            // 🔥 Si es un archivo multimedia sin texto, mostrar el tipo de archivo
             let messageText = messages[0].message;
             if (!messageText && messages[0].mediaType) {
               const mediaTypeMap = {
-                image: 'ðŸ“· Imagen',
-                video: 'ðŸŽ¥ Video',
-                audio: 'ðŸŽµ Audio',
-                document: 'ðŸ“„ Documento',
+                image: '📷 Imagen',
+                video: '🎥 Video',
+                audio: '🎵 Audio',
+                document: '📄 Documento',
               };
               messageText =
-                mediaTypeMap[messages[0].mediaType] || 'ðŸ“Ž Archivo';
+                mediaTypeMap[messages[0].mediaType] || '📎 Archivo';
             }
 
             lastMessage = {
@@ -161,7 +145,7 @@ export class TemporaryConversationsService {
             };
           }
 
-          // ðŸ”¥ NUEVO: Contar solo mensajes no leÃ­dos dirigidos al usuario actual
+          // 🔥 NUEVO: Contar solo mensajes no leídos usando conversationId
           if (username && usernameNormalized) {
             // Verificar si el usuario es participante de la conversacion
             const isUserParticipant = participants.some(
@@ -169,23 +153,29 @@ export class TemporaryConversationsService {
             );
 
             if (isUserParticipant) {
-              // Si es participante, contar mensajes no leidos dirigidos a el
-              const filteredConditions = messageConditions.filter(
-                (cond) =>
-                  this.normalizeUsername(cond.to) === usernameNormalized &&
-                  this.normalizeUsername(cond.from) !== usernameNormalized,
-              );
-
+              // Si es participante, buscar mensajes de esta conversación específica
               const allMessages = await this.messageRepository.find({
-                where: filteredConditions,
+                where: {
+                  conversationId: conv.id,
+                  isDeleted: false,
+                  threadId: IsNull(),
+                  isGroup: false,
+                },
               });
 
-              // Filtrar mensajes no leidos (normalizado en readBy)
+              // Filtrar solo mensajes no enviados por el usuario y no leídos por él
               unreadCount = allMessages.filter((msg) => {
-                if (!msg.readBy || msg.readBy.length === 0) {
-                  return true; // No ha sido leido por nadie
+                // Excluir mensajes enviados por el usuario mismo
+                if (this.normalizeUsername(msg.from) === usernameNormalized) {
+                  return false;
                 }
-                // Verificar si el usuario actual esta en readBy (normalizado)
+
+                // Verificar si el mensaje no ha sido leído
+                if (!msg.readBy || msg.readBy.length === 0) {
+                  return true; // No ha sido leído por nadie
+                }
+
+                // Verificar si el usuario actual está en readBy (normalizado)
                 const isReadByUser = msg.readBy.some(
                   (reader) =>
                     this.normalizeUsername(reader) === usernameNormalized,
@@ -197,16 +187,21 @@ export class TemporaryConversationsService {
               unreadCount = 0;
             }
           } else {
-            // Si no hay username, contar todos los mensajes no leidos (comportamiento anterior)
+            // Si no hay username, contar todos los mensajes no leídos de esta conversación
             const allMessages = await this.messageRepository.find({
-              where: messageConditions,
+              where: {
+                conversationId: conv.id,
+                isDeleted: false,
+                threadId: IsNull(),
+                isGroup: false,
+              },
             });
 
             unreadCount = allMessages.filter((msg) => !msg.isRead).length;
           }
         }
 
-        // ðŸ”¥ Obtener informaciÃ³n de los participantes (role y numeroAgente)
+        // 🔥 Obtener información de los participantes (role y numeroAgente)
         // Para conversaciones de monitoreo, obtener info del primer participante que no sea el admin
         let participantRole = null;
         let participantNumeroAgente = null;
@@ -235,13 +230,13 @@ export class TemporaryConversationsService {
             ? lastMessage.lastReplyFrom
             : null,
           unreadCount,
-          role: participantRole, // ðŸ”¥ Incluir role del participante
-          numeroAgente: participantNumeroAgente, // ðŸ”¥ Incluir numeroAgente del participante
+          role: participantRole, // 🔥 Incluir role del participante
+          numeroAgente: participantNumeroAgente, // 🔥 Incluir numeroAgente del participante
         };
       }),
     );
 
-    // Ordenar por Ãºltimo mensaje (mÃ¡s reciente primero)
+    // Ordenar por último mensaje (más reciente primero)
     enrichedConversations.sort((a, b) => {
       if (!a.lastMessageTime && !b.lastMessageTime) return 0;
       if (!a.lastMessageTime) return 1;

@@ -129,6 +129,9 @@ export class Message {
   room: TemporaryRoom;
 
   @Column({ type: 'int', nullable: true })
+  conversationId: number; // 🔥 NUEVO: ID de la conversación asignada (TemporaryConversation)
+
+  @Column({ type: 'int', nullable: true })
   roomId: number;
 
   @CreateDateColumn()
