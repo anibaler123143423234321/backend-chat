@@ -57,18 +57,16 @@ export class TemporaryRoomsController {
     return this.temporaryRoomsService.findUserRooms(username, pageNum, limitNum);
   }
 
-  // Rutas especÃ­ficas ANTES de rutas con parÃ¡metros
   @Get('admin/rooms')
   getAdminRooms(
     @Request() req,
     @Query('page') page?: number,
     @Query('limit') limit?: number,
     @Query('search') search?: string,
-    @Query('username') username?: string,
+    @Query('displayName') displayName?: string,
+    @Query('role') role?: string, // 👈 Recibir el rol
   ) {
-    // console.log('ðŸ” GET /api/temporary-rooms/admin/rooms called');
-    const userId = req.user?.id || 1; // Usar ID por defecto para pruebas
-    return this.temporaryRoomsService.getAdminRooms(userId, page, limit, search, username);
+    return this.temporaryRoomsService.getAdminRooms(page, limit, search, displayName, role);
   }
 
   @Get('user/current-room')

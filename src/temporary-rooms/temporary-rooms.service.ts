@@ -520,19 +520,13 @@ export class TemporaryRoomsService {
   }
 
   async getAdminRooms(
-    userId: number,
     page: number = 1,
     limit: number = 10,
     search?: string,
-    username?: string,
+    displayName?: string,
+    role?: string, // 👈 Recibir el rol
   ): Promise<any> {
-    // 🔥 MODIFICADO: Retornar salas con paginación y búsqueda
-    // console.log('ðŸ” Obteniendo salas del admin:', userId, 'page:', page, 'limit:', limit, 'search:', search);
-
-    // Usar el displayName del query parameter si está disponible
-    const displayName = username;
-
-    console.log('👤 Usuario para favoritos:', { userId, displayName });
+    console.log('👤 Usuario:', { displayName, role });
 
     // Obtener códigos de salas favoritas del usuario
     let favoriteRoomCodes: string[] = [];
@@ -549,38 +543,49 @@ export class TemporaryRoomsService {
     let whereConditions: any = { isActive: true };
 
     if (search && search.trim()) {
-      // Buscar por nombre O código de sala
       whereConditions = [
         { isActive: true, name: Like(`%${search}%`) },
         { isActive: true, roomCode: Like(`%${search}%`) },
       ];
     }
 
-    // 🔥 NUEVA LÓGICA: Obtener todas las salas que coincidan con la búsqueda
-    const allRooms = await this.temporaryRoomRepository.find({
+    // Obtener todas las salas que coincidan con la búsqueda
+    let allRooms = await this.temporaryRoomRepository.find({
       where: whereConditions,
       order: { createdAt: 'DESC' },
     });
+
+    // FILTRADO POR ROL (ADMIN y JEFEPISO solo ven sus salas asignadas)
+    // SUPERADMIN y PROGRAMADOR ven TODAS las salas
+    if (['ADMIN', 'JEFEPISO'].includes(role)) { // 👈 Usar el rol del query param
+      console.log(`🔒 Filtrando salas para rol ${role}`);
+      const userFullName = displayName || '';
+      console.log(`🔍 Filtrando por displayName: ${userFullName}`);
+
+      allRooms = allRooms.filter(room => {
+        const members = room.members || [];
+        return members.includes(userFullName);
+      });
+    } else {
+      console.log(`✅ Usuario con rol ${role || 'DESCONOCIDO'} ve TODAS las salas`);
+    }
 
     // Separar salas favoritas y no favoritas
     const favoriteRooms = allRooms.filter(room => favoriteRoomCodes.includes(room.roomCode));
     const nonFavoriteRooms = allRooms.filter(room => !favoriteRoomCodes.includes(room.roomCode));
 
-    // Combinar: favoritas primero, luego no favoritas
+    // Combinar: favoritas primero
     const sortedRooms = [...favoriteRooms, ...nonFavoriteRooms];
 
-    // Aplicar paginación a la lista ordenada
+    // Aplicar paginación
     const skip = (page - 1) * limit;
     const paginatedRooms = sortedRooms.slice(skip, skip + limit);
 
-    console.log(`📋 Total salas: ${allRooms.length}, Favoritas: ${favoriteRooms.length}, Mostrando: ${paginatedRooms.length}`);
+    console.log(`📋 Total: ${allRooms.length}, Favoritas: ${favoriteRooms.length}, Mostrando: ${paginatedRooms.length}`);
 
-    // console.log('ðŸ“‹ Salas encontradas:', rooms.length, 'Total:', total);
-
-    // 🔥 NUEVO: Agregar el último mensaje de cada sala
+    // Agregar el último mensaje de cada sala
     const roomsWithLastMessage = await Promise.all(
       paginatedRooms.map(async (room) => {
-        // Obtener el último mensaje de la sala
         const lastMessage = await this.messageRepository.findOne({
           where: {
             roomCode: room.roomCode,
