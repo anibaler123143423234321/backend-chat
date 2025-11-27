@@ -20,7 +20,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 export class TemporaryConversationsController {
   constructor(
     private readonly temporaryConversationsService: TemporaryConversationsService,
-  ) {}
+  ) { }
 
   @Post()
   create(@Body() createDto: CreateTemporaryConversationDto, @Request() req) {
@@ -97,10 +97,11 @@ export class TemporaryConversationsController {
       adminRole: string;
     },
   ) {
-    // Validar que el usuario sea admin
-    if (body.adminRole !== 'ADMIN') {
+    // Validar que el usuario sea admin, superadmin o programador
+    const allowedRoles = ['ADMIN', 'SUPERADMIN', 'PROGRAMADOR'];
+    if (!allowedRoles.includes(body.adminRole)) {
       throw new Error(
-        'Solo los administradores pueden crear conversaciones asignadas',
+        'Solo los administradores, superadministradores y programadores pueden crear conversaciones asignadas',
       );
     }
 
