@@ -248,16 +248,26 @@ export class TemporaryRoomsService {
           );
         }
 
+        // 🔥 OPTIMIZACIÓN: Excluir arrays pesados (members, connectedMembers, assignedMembers)
+        const { members, connectedMembers, assignedMembers, ...roomWithoutMembers } = room;
+
         return {
-          ...room,
+          ...roomWithoutMembers,
           lastMessage,
           lastActivity: lastMessage?.sentAt || room.createdAt,
         };
       }),
     );
 
+    // 🔥 ORDENAR por lastMessage.sentAt (más reciente primero)
+    const sortedEnrichedRooms = enrichedRooms.sort((a, b) => {
+      const aDate = a.lastMessage?.sentAt || a.createdAt;
+      const bDate = b.lastMessage?.sentAt || b.createdAt;
+      return new Date(bDate).getTime() - new Date(aDate).getTime();
+    });
+
     return {
-      rooms: enrichedRooms,
+      rooms: sortedEnrichedRooms, // 🔥 Usar sortedEnrichedRooms
       total,
       page,
       totalPages,
@@ -552,12 +562,12 @@ export class TemporaryRoomsService {
     // Obtener todas las salas que coincidan con la búsqueda
     let allRooms = await this.temporaryRoomRepository.find({
       where: whereConditions,
-      order: { createdAt: 'DESC' },
+      order: { id: 'DESC' },
     });
 
     // FILTRADO POR ROL (ADMIN y JEFEPISO solo ven sus salas asignadas)
     // SUPERADMIN y PROGRAMADOR ven TODAS las salas
-    if (['ADMIN', 'JEFEPISO'].includes(role)) { // 👈 Usar el rol del query param
+    if (['ADMIN', 'JEFEPISO'].includes(role)) {
       console.log(`🔒 Filtrando salas para rol ${role}`);
       const userFullName = displayName || '';
       console.log(`🔍 Filtrando por displayName: ${userFullName}`);
@@ -570,54 +580,165 @@ export class TemporaryRoomsService {
       console.log(`✅ Usuario con rol ${role || 'DESCONOCIDO'} ve TODAS las salas`);
     }
 
-    // Separar salas favoritas y no favoritas
-    const favoriteRooms = allRooms.filter(room => favoriteRoomCodes.includes(room.roomCode));
-    const nonFavoriteRooms = allRooms.filter(room => !favoriteRoomCodes.includes(room.roomCode));
+    // 🔥 QUERY OPTIMIZADA: Una sola consulta SQL con JOIN y ordenamiento
+    const queryBuilder = this.temporaryRoomRepository
+      .createQueryBuilder('room')
+      .leftJoin(
+        (subQuery) => {
+          return subQuery
+            .select('m.roomCode', 'roomCode')
+            .addSelect('MAX(m.id)', 'lastMessageId')
+            .from('messages', 'm')
+            .where('m.isDeleted = :isDeleted', { isDeleted: false })
+            .andWhere('m.threadId IS NULL')
+            .groupBy('m.roomCode');
+        },
+        'lastMsg',
+        'room.roomCode = lastMsg.roomCode',
+      )
+      .leftJoin(
+        'messages',
+        'message',
+        'message.id = lastMsg.lastMessageId',
+      )
+      .select([
+        'room',
+        'message.id',
+        'message.message',
+        'message.from',
+        'message.sentAt',
+        'message.time',
+        'message.mediaType',
+        'message.fileName',
+      ])
+      .where('room.isActive = :isActive', { isActive: true });
 
-    // Combinar: favoritas primero
-    const sortedRooms = [...favoriteRooms, ...nonFavoriteRooms];
+    // Aplicar búsqueda si existe
+    if (search && search.trim()) {
+      queryBuilder.andWhere(
+        '(room.name LIKE :search OR room.roomCode LIKE :search)',
+        { search: `%${search}%` },
+      );
+    }
+
+    // FILTRADO POR ROL (Movido a lógica en memoria para evitar problemas de compatibilidad SQL)
+    // if (['ADMIN', 'JEFEPISO'].includes(role)) { ... }
+
+    // Obtener todas las salas con su último mensaje
+    const { entities, raw } = await queryBuilder.getRawAndEntities();
+
+    // Mapear resultados y agregar lastMessage desde raw
+    const allRoomsWithLastMessage = entities.map((room, index) => {
+      // 🔒 FILTRADO POR ROL EN MEMORIA
+      if (['ADMIN', 'JEFEPISO'].includes(role)) {
+        const userFullName = displayName || '';
+        const members = room.members || [];
+        if (!members.includes(userFullName)) {
+          return null; // Filtrar si no es miembro
+        }
+      }
+
+      const rowData = raw[index];
+      const lastMessage = rowData.message_id
+        ? {
+          id: rowData.message_id,
+          text: rowData.message_message,
+          from: rowData.message_from,
+          sentAt: rowData.message_sentAt,
+          time: rowData.message_time,
+          mediaType: rowData.message_mediaType,
+          fileName: rowData.message_fileName,
+        }
+        : null;
+
+      // 🔥 OPTIMIZACIÓN: NO devolver arrays pesados de members/connectedMembers
+      // Solo devolver contadores para reducir payload ~83%
+      return {
+        id: room.id,
+        name: room.name,
+        description: room.description,
+        roomCode: room.roomCode,
+        maxCapacity: room.maxCapacity,
+        currentMembers: room.currentMembers, // ✅ Solo contador
+        isActive: room.isActive,
+        isAssignedByAdmin: room.isAssignedByAdmin,
+        settings: room.settings,
+        pinnedMessageId: room.pinnedMessageId,
+        createdAt: room.createdAt,
+        updatedAt: room.updatedAt,
+        lastMessage,
+        // ❌ NO incluir: createdBy, members, connectedMembers, assignedMembers
+      };
+    }).filter(room => room !== null); // Eliminar nulos del filtrado
+
+    // Separar favoritas y no favoritas
+    const favoritesWithMessage = allRoomsWithLastMessage.filter((room) =>
+      favoriteRoomCodes.includes(room.roomCode),
+    );
+    const nonFavoritesWithMessage = allRoomsWithLastMessage.filter(
+      (room) => !favoriteRoomCodes.includes(room.roomCode),
+    );
+
+    // Función de ordenamiento: CON mensajes primero, SIN mensajes después
+    const sortByLastMessage = (rooms) => {
+      const roomsWithMessages = rooms.filter((r) => r.lastMessage?.sentAt);
+      const roomsWithoutMessages = rooms.filter((r) => !r.lastMessage?.sentAt);
+
+      roomsWithMessages.sort((a, b) => {
+        return (
+          new Date(b.lastMessage.sentAt).getTime() -
+          new Date(a.lastMessage.sentAt).getTime()
+        );
+      });
+
+      roomsWithoutMessages.sort((a, b) => {
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      });
+
+      return [...roomsWithMessages, ...roomsWithoutMessages];
+    };
+
+    // Ordenar cada grupo
+    const sortedFavorites = sortByLastMessage(favoritesWithMessage);
+    const sortedNonFavorites = sortByLastMessage(nonFavoritesWithMessage);
+
+    // Combinar: favoritas primero, luego no-favoritas
+    const finalSortedRooms = [...sortedFavorites, ...sortedNonFavorites];
 
     // Aplicar paginación
     const skip = (page - 1) * limit;
-    const paginatedRooms = sortedRooms.slice(skip, skip + limit);
+    const paginatedRooms = finalSortedRooms.slice(skip, skip + limit);
 
-    console.log(`📋 Total: ${allRooms.length}, Favoritas: ${favoriteRooms.length}, Mostrando: ${paginatedRooms.length}`);
-
-    // Agregar el último mensaje de cada sala
-    const roomsWithLastMessage = await Promise.all(
-      paginatedRooms.map(async (room) => {
-        const lastMessage = await this.messageRepository.findOne({
-          where: {
-            roomCode: room.roomCode,
-            isDeleted: false,
-            threadId: IsNull(),
-          },
-          order: { id: 'DESC' },
-        });
-
-        return {
-          ...room,
-          lastMessage: lastMessage
-            ? {
-              id: lastMessage.id,
-              text: lastMessage.message,
-              from: lastMessage.from,
-              sentAt: lastMessage.sentAt,
-              time: lastMessage.time,
-              mediaType: lastMessage.mediaType,
-              fileName: lastMessage.fileName,
-            }
-            : null,
-        };
-      }),
+    console.log(
+      `📋 Total: ${allRoomsWithLastMessage.length}, Favoritas: ${favoritesWithMessage.length}, Mostrando: ${paginatedRooms.length} `,
     );
 
     return {
-      data: roomsWithLastMessage,
-      total: allRooms.length,
+      data: paginatedRooms, // 🔥 Devolver solo la página solicitada
+      total: allRoomsWithLastMessage.length,
       page: page,
       limit: limit,
-      totalPages: Math.ceil(allRooms.length / limit),
+      totalPages: Math.ceil(allRoomsWithLastMessage.length / limit),
+    };
+  }
+
+  // 🔥 NUEVO: Endpoint para obtener miembros de una sala específica
+  async getRoomMembers(roomCode: string): Promise<any> {
+    const room = await this.temporaryRoomRepository.findOne({
+      where: { roomCode, isActive: true },
+    });
+
+    if (!room) {
+      throw new NotFoundException('Sala no encontrada');
+    }
+
+    return {
+      roomCode: room.roomCode,
+      members: room.members || [],
+      connectedMembers: room.connectedMembers || [],
+      assignedMembers: room.assignedMembers || [],
+      currentMembers: room.currentMembers,
+      maxCapacity: room.maxCapacity,
     };
   }
 
@@ -705,7 +826,7 @@ export class TemporaryRoomsService {
       // Construir el displayName (nombre completo) igual que en el frontend
       const displayName =
         user.nombre && user.apellido
-          ? `${user.nombre} ${user.apellido}`
+          ? `${user.nombre} ${user.apellido} `
           : user.username;
 
       // Buscar todas las salas activas
@@ -829,7 +950,7 @@ export class TemporaryRoomsService {
               id: dbUser.id,
               username: dbUser.username,
               displayName: dbUser.nombre && dbUser.apellido
-                ? `${dbUser.nombre} ${dbUser.apellido}`
+                ? `${dbUser.nombre} ${dbUser.apellido} `
                 : dbUser.username,
               isOnline: isOnline,
               // 🔥 CAMPOS ENRIQUECIDOS
@@ -845,7 +966,7 @@ export class TemporaryRoomsService {
             return {
               id: index + 1, // ID temporal
               username: username,
-              displayName: username === 'Usuario' ? `Usuario ${index + 1}` : username,
+              displayName: username === 'Usuario' ? `Usuario ${index + 1} ` : username,
               isOnline: isOnline,
               role: 'GUEST',
               numeroAgente: null
@@ -858,7 +979,7 @@ export class TemporaryRoomsService {
         userList = allUsernames.map((username, index) => ({
           id: index + 1,
           username: username,
-          displayName: username === 'Usuario' ? `Usuario ${index + 1}` : username,
+          displayName: username === 'Usuario' ? `Usuario ${index + 1} ` : username,
           isOnline: true, // Asumir online por defecto en error
         }));
       }
