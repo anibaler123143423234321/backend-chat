@@ -57,6 +57,14 @@ export class MessagesService {
       isDeleted: false,
     };
 
+    // 🔥 CRÍTICO: Agregar fileName y mediaData para evitar que archivos diferentes se consideren duplicados
+    if (restDto.fileName) {
+      duplicateConditions.fileName = restDto.fileName;
+    }
+    if (restDto.mediaData) {
+      duplicateConditions.mediaData = restDto.mediaData;
+    }
+
     // 🔥 IMPORTANTE: Agregar threadId a las condiciones de duplicados
     // Los mensajes de hilo deben considerarse únicos incluso si tienen el mismo texto
     if (threadId !== undefined && threadId !== null) {

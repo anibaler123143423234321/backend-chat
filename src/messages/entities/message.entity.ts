@@ -134,6 +134,10 @@ export class Message {
   @Column({ type: 'int', nullable: true })
   roomId: number;
 
+  // 🔥 Campo simple para indicar mensaje reenviado
+  @Column({ type: 'boolean', default: false })
+  isForwarded: boolean; // Indica si el mensaje fue reenviado
+
   @CreateDateColumn()
   createdAt: Date;
 

@@ -117,4 +117,9 @@ export class CreateMessageDto {
 
   @IsOptional()
   metadata?: any;
+
+  // 🔥 Campo para mensajes reenviados
+  @IsBoolean()
+  @IsOptional()
+  isForwarded?: boolean;
 }

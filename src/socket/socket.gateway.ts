@@ -2668,72 +2668,51 @@ export class SocketGateway
 
     @SubscribeMessage('threadMessage')
     async handleThreadMessage(
-        @ConnectedSocket() client: Socket,
+        @ConnectedSocket() _client: Socket,
         @MessageBody() data: any,
     ) {
         console.log(
-            `🧵 WS: threadMessage - ThreadID: ${data.threadId}, De: ${data.from}, Para: ${data.to}`,
+            `🧵 WS: threadMessage - De: ${data.from}, threadId: ${data.threadId}`,
         );
 
         try {
-            const { from, to, isGroup, roomCode } = data;
+            // El mensaje ya debe estar guardado en BD por el frontend antes de emitir este evento
+            // Solo necesitamos reenviar el mensaje a todos los usuarios relevantes
 
-            if (isGroup && roomCode) {
-                // Mensaje de hilo en grupo/sala - enviar a todos los miembros de la sala
-                const roomUsers = this.roomUsers.get(roomCode);
-                if (roomUsers) {
+            // Determinar destinatarios basados en si es grupo o no
+            if (data.isGroup && data.roomCode) {
+                // Mensaje de hilo en grupo: enviar a todos los miembros de la sala
+                const roomUsers = this.roomUsers.get(data.roomCode);
+
+                if (roomUsers && roomUsers.size > 0) {
+                    console.log(
+                        `📋 Enviando threadMessage a ${roomUsers.size} usuarios en sala ${data.roomCode}`,
+                    );
+
                     roomUsers.forEach((member) => {
-                        const memberUser = this.users.get(member);
-                        if (memberUser && memberUser.socket.connected) {
-                            memberUser.socket.emit('threadMessage', data);
+                        const user = this.users.get(member);
+                        if (user && user.socket.connected) {
+                            user.socket.emit('threadMessage', data);
                         }
                     });
                 }
             } else {
-                // Mensaje de hilo en conversación 1-a-1
-                // 🔥 Búsqueda case-insensitive del remitente
-                let senderUser = this.users.get(from);
-                if (!senderUser && from) {
-                    const fromNormalized = from.toLowerCase().trim();
-                    const foundUsername = Array.from(this.users.keys()).find(
-                        (key) => key?.toLowerCase().trim() === fromNormalized,
-                    );
-                    if (foundUsername) {
-                        senderUser = this.users.get(foundUsername);
-                        console.log(
-                            `✅ Remitente encontrado con búsqueda case-insensitive: ${foundUsername}`,
-                        );
-                    }
+                // Mensaje de hilo individual: enviar al remitente y destinatario
+                const sender = this.users.get(data.from);
+                const recipient = this.users.get(data.to);
+
+                if (sender && sender.socket.connected) {
+                    sender.socket.emit('threadMessage', data);
                 }
 
-                if (senderUser && senderUser.socket.connected) {
-                    senderUser.socket.emit('threadMessage', data);
-                }
-
-                // 🔥 Búsqueda case-insensitive del destinatario
-                let recipientUser = this.users.get(to);
-                if (!recipientUser && to) {
-                    const toNormalized = to.toLowerCase().trim();
-                    const foundUsername = Array.from(this.users.keys()).find(
-                        (key) => key?.toLowerCase().trim() === toNormalized,
-                    );
-                    if (foundUsername) {
-                        recipientUser = this.users.get(foundUsername);
-                        console.log(
-                            `✅ Destinatario encontrado con búsqueda case-insensitive: ${foundUsername}`,
-                        );
-                    }
-                }
-
-                if (recipientUser && recipientUser.socket.connected) {
-                    recipientUser.socket.emit('threadMessage', data);
+                if (recipient && recipient.socket.connected) {
+                    recipient.socket.emit('threadMessage', data);
                 }
             }
 
-            // console.log(`✅ Mensaje de hilo enviado correctamente`);
+            console.log('✅ threadMessage reenviado exitosamente');
         } catch (error) {
-            console.error('❌ Error al enviar mensaje de hilo:', error);
-            client.emit('error', { message: 'Error al enviar mensaje de hilo' });
+            console.error('❌ Error al manejar threadMessage:', error);
         }
     }
 
@@ -2827,7 +2806,6 @@ export class SocketGateway
             client.emit('error', { message: 'Error al actualizar contador de hilo' });
         }
     }
-
     // ==================== REACCIONES A MENSAJES ====================
 
     @SubscribeMessage('toggleReaction')
