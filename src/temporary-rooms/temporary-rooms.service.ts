@@ -559,26 +559,8 @@ export class TemporaryRoomsService {
       ];
     }
 
-    // Obtener todas las salas que coincidan con la búsqueda
-    let allRooms = await this.temporaryRoomRepository.find({
-      where: whereConditions,
-      order: { id: 'DESC' },
-    });
-
-    // FILTRADO POR ROL (ADMIN y JEFEPISO solo ven sus salas asignadas)
-    // SUPERADMIN y PROGRAMADOR ven TODAS las salas
-    if (['ADMIN', 'JEFEPISO'].includes(role)) {
-      console.log(`🔒 Filtrando salas para rol ${role}`);
-      const userFullName = displayName || '';
-      console.log(`🔍 Filtrando por displayName: ${userFullName}`);
-
-      allRooms = allRooms.filter(room => {
-        const members = room.members || [];
-        return members.includes(userFullName);
-      });
-    } else {
-      console.log(`✅ Usuario con rol ${role || 'DESCONOCIDO'} ve TODAS las salas`);
-    }
+    // 🔥 NOTA: El filtrado por rol se hace en memoria después del JOIN (líneas 631-639)
+    // para evitar problemas de compatibilidad SQL
 
     // 🔥 QUERY OPTIMIZADA: Una sola consulta SQL con JOIN y ordenamiento
     const queryBuilder = this.temporaryRoomRepository
@@ -706,18 +688,16 @@ export class TemporaryRoomsService {
     const finalSortedRooms = [...sortedFavorites, ...sortedNonFavorites];
 
     // Aplicar paginación
-    const skip = (page - 1) * limit;
-    const paginatedRooms = finalSortedRooms.slice(skip, skip + limit);
-
-    console.log(
-      `📋 Total: ${allRoomsWithLastMessage.length}, Favoritas: ${favoritesWithMessage.length}, Mostrando: ${paginatedRooms.length} `,
-    );
+    const pageNum = Number(page);
+    const limitNum = Number(limit);
+    const skip = (pageNum - 1) * limitNum;
+    const paginatedRooms = finalSortedRooms.slice(skip, skip + limitNum);
 
     return {
       data: paginatedRooms, // 🔥 Devolver solo la página solicitada
       total: allRoomsWithLastMessage.length,
-      page: page,
-      limit: limit,
+      page: Number(page),    // 🔥 Asegurar tipo numérico
+      limit: Number(limit),  // 🔥 Asegurar tipo numérico
       totalPages: Math.ceil(allRoomsWithLastMessage.length / limit),
     };
   }
