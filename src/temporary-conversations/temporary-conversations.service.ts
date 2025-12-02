@@ -262,8 +262,6 @@ export class TemporaryConversationsService {
     totalPages: number;
     hasMore: boolean;
   }> {
-    const offset = (page - 1) * limit;
-
     // Normalizar username para comparación
     const usernameNormalized = this.normalizeUsername(username);
     console.log(
@@ -288,10 +286,14 @@ export class TemporaryConversationsService {
     }
 
     // Aplicar paginación a las conversaciones filtradas
+    const pageNum = Number(page);
+    const limitNum = Number(limit);
+    const offset = (pageNum - 1) * limitNum;
+
     const total = filteredConversations.length;
     const paginatedConversations = filteredConversations.slice(
       offset,
-      offset + limit,
+      offset + limitNum,
     );
     const totalPages = Math.ceil(total / limit);
     const hasMore = page < totalPages;
