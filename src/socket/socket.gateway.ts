@@ -1190,6 +1190,43 @@ export class SocketGateway
                 replyToSender,
                 replyToText,
             });
+
+            // 🔥 NUEVO: Emitir evento de actualización de conversación asignada
+            // Esto permite que ambos participantes reordenen sus listas automáticamente
+            if (data.isAssignedConversation && data.conversationId) {
+                console.log(`📤 Emitiendo assignedConversationUpdated para conversación ${data.conversationId}`);
+                
+                // Determinar el texto del mensaje para mostrar
+                let messageText = message;
+                if (!messageText && mediaType) {
+                    if (mediaType === 'image') messageText = '📷 Imagen';
+                    else if (mediaType === 'video') messageText = '🎥 Video';
+                    else if (mediaType === 'audio') messageText = '🎵 Audio';
+                    else if (mediaType === 'document') messageText = '📄 Documento';
+                    else messageText = '📎 Archivo';
+                } else if (!messageText && fileName) {
+                    messageText = '📎 Archivo';
+                }
+
+                const conversationUpdateData = {
+                    conversationId: data.conversationId,
+                    lastMessage: messageText,
+                    lastMessageTime: savedMessage?.sentAt || new Date().toISOString(),
+                    lastMessageFrom: from,
+                   lastMessageMediaType: mediaType
+                };
+
+                // Emitir a ambos participantes (remitente y destinatario)
+                const participants = [from, recipientUsername];
+                participants.forEach(participantName => {
+                    const participantConnection = this.users.get(participantName);
+                    if (participantConnection && participantConnection.socket.connected) {
+                        participantConnection.socket.emit('assignedConversationUpdated', conversationUpdateData);
+                        console.log(`✅ Evento assignedConversationUpdated emitido a ${participantName}`);
+                    }
+                });
+            }
+
         }
     }
 
