@@ -62,6 +62,25 @@ export class SocketGateway
             picture?: string;
         }>
     >(); // roomID -> Set<participant info>
+
+    // 🔥 NUEVO: Caché de datos de usuario para evitar consultas repetidas
+    private userCache = new Map<
+        string,
+        {
+            id: number;
+            username: string;
+            nombre: string;
+            apellido: string;
+            role: string;
+            numeroAgente: string;
+            cachedAt: number; // timestamp
+        }
+    >();
+    private CACHE_TTL = 5 * 60 * 1000; // 5 minutos
+
+    // 🔥 NUEVO: Map de admins para broadcasting eficiente
+    private adminUsers = new Map<string, { socket: Socket; userData: any }>();
+
     // 🔥 NUEVO: Método público para verificar si un usuario está conectado
     public isUserOnline(username: string): boolean {
         return this.users.has(username);
@@ -78,14 +97,20 @@ export class SocketGateway
         // Limpiar enlaces expirados cada 5 minutos
         setInterval(() => this.cleanExpiredLinks(), 5 * 60 * 1000);
 
-        // 🔥 NUEVO: Limpiar caché de mensajes cada 10 segundos
+        //  NUEVO: Limpiar caché de mensajes cada 10 segundos
         setInterval(() => this.cleanRecentMessagesCache(), 10 * 1000);
 
         // Inyectar referencia del gateway en el servicio para notificaciones
         this.temporaryRoomsService.setSocketGateway(this);
 
-        // 🔥 NUEVO: Limpiar conexiones huérfanas cada 5 minutos
+        //  NUEVO: Limpiar conexiones huérfanas cada 5 minutos
         setInterval(() => this.cleanOrphanedConnections(), 5 * 60 * 1000);
+
+        //  NUEVO: Limpiar caché de usuarios cada 10 minutos
+        setInterval(() => this.cleanUserCache(), 10 * 60 * 1000);
+
+        //  NUEVO: Monitorear estadísticas del sistema cada 30 minutos
+        setInterval(() => this.logSystemStats(), 30 * 60 * 1000);
     }
 
     // 🔥 NUEVO: Cargar grupos al iniciar el servidor
@@ -94,7 +119,7 @@ export class SocketGateway
         try {
             // Cargar todas las salas temporales como grupos
             const rooms = await this.temporaryRoomsService.findAll();
-            // console.log(`📦 Cargando ${rooms.length} salas/grupos desde BD...`);
+            // console.log(` Cargando ${rooms.length} salas/grupos desde BD...`);
 
             let totalMembers = 0;
             rooms.forEach((room) => {
@@ -124,7 +149,7 @@ export class SocketGateway
                 // Si el usuario estaba en una sala, solo removerlo de la memoria (NO de la BD)
                 if (user.currentRoom) {
                     const roomCode = user.currentRoom;
-                    // console.log(`🏠 Usuario ${username} estaba en sala ${roomCode}`);
+                    // console.log(` Usuario ${username} estaba en sala ${roomCode}`);
 
                     // NO remover de la base de datos - mantener en el historial
                     // Solo remover de la memoria para marcarlo como desconectado
@@ -136,7 +161,7 @@ export class SocketGateway
                         if (roomUsersSet.size === 0) {
                             this.roomUsers.delete(roomCode);
                             console.log(
-                                `✅ Sala ${roomCode} removida de memoria (sin usuarios)`,
+                                `Sala ${roomCode} removida de memoria (sin usuarios)`,
                             );
                         }
                     }
@@ -147,11 +172,12 @@ export class SocketGateway
 
                 // Remover usuario del mapa de usuarios conectados
                 this.users.delete(username);
+                this.adminUsers.delete(username); //  NUEVO: Limpiar adminUsers
                 // console.log(`✅ Usuario ${username} removido del mapa de usuarios`);
 
                 // 🔥 Obtener todas las conversaciones asignadas para actualizar correctamente la lista de usuarios
                 try {
-                    // 🔥 CORREGIDO: Construir displayName usando userData antes de que se pierda
+                    //  CORREGIDO: Construir displayName usando userData antes de que se pierda
                     const userData = user.userData;
                     const displayName =
                         userData?.nombre && userData?.apellido
@@ -163,7 +189,7 @@ export class SocketGateway
                     await this.broadcastUserList(allAssignedConversations);
                 } catch (error) {
                     console.error(
-                        '❌ Error al obtener conversaciones asignadas en handleDisconnect:',
+                        ' Error al obtener conversaciones asignadas en handleDisconnect:',
                         error,
                     );
                     this.broadcastUserList();
@@ -185,7 +211,7 @@ export class SocketGateway
         @MessageBody()
         data: { username: string; userData: any; assignedConversations?: any[] },
     ) {
-        console.log(`📝 WS: register - Usuario: ${data.username}`);
+        console.log(` WS: register - Usuario: ${data.username}`);
         const { username, userData, assignedConversations } = data;
         this.users.set(username, { socket: client, userData });
 
@@ -213,11 +239,17 @@ export class SocketGateway
                 });
                 await this.userRepository.save(dbUser);
             }
+
+            // 🔥 NUEVO: Agregar a adminUsers si es admin
+            if (userData?.role?.toString().toUpperCase().trim() === 'ADMIN') {
+                this.adminUsers.set(username, { socket: client, userData });
+                console.log(` Usuario admin agregado al Map: ${username}`);
+            }
         } catch (error) {
-            console.error(`❌ Error al guardar usuario ${username} en BD:`, error);
+            console.error(` Error al guardar usuario ${username} en BD:`, error);
         }
 
-        // 🔥 NUEVO: Restaurar salas del usuario desde BD
+        //  NUEVO: Restaurar salas del usuario desde BD
         try {
             const allRooms = await this.temporaryRoomsService.findAll();
             const userRooms = allRooms.filter(
@@ -229,7 +261,7 @@ export class SocketGateway
             if (userRooms.length > 0) {
                 const roomNames = userRooms.map((r) => r.name).join(', ');
                 console.log(
-                    `🏠 Restaurando ${userRooms.length} salas para ${username}: [${roomNames}]`,
+                    ` Restaurando ${userRooms.length} salas para ${username}: [${roomNames}]`,
                 );
             }
 
@@ -239,7 +271,7 @@ export class SocketGateway
                     this.roomUsers.set(room.roomCode, new Set());
                 }
                 this.roomUsers.get(room.roomCode)!.add(username);
-                // 🔥 Solo mostrar log detallado en modo desarrollo
+                //  Solo mostrar log detallado en modo desarrollo
                 if (process.env.NODE_ENV === 'development') {
                     console.log(`   ✓ "${room.name}" (${room.roomCode})`);
                 }
@@ -251,12 +283,12 @@ export class SocketGateway
                 if (user) {
                     user.currentRoom = userRooms[0].roomCode;
                     console.log(
-                        `✅ Sala actual del usuario restaurada a ${userRooms[0].roomCode}`,
+                        ` Sala actual del usuario restaurada a ${userRooms[0].roomCode}`,
                     );
                 }
             }
         } catch (error) {
-            console.error(`❌ Error al restaurar salas para ${username}:`, error);
+            console.error(` Error al restaurar salas para ${username}:`, error);
         }
 
         // Enviar confirmación de registro
@@ -264,10 +296,10 @@ export class SocketGateway
             message: `Registrado como ${username}`,
         });
 
-        // 🔥 CORREGIDO: Enviar userList actualizado a TODOS los usuarios conectados
+        //  CORREGIDO: Enviar userList actualizado a TODOS los usuarios conectados
         // para que vean al nuevo usuario conectado en tiempo real
         try {
-            // 🔥 CORREGIDO: Construir displayName para filtrar correctamente por nombre completo
+            //  CORREGIDO: Construir displayName para filtrar correctamente por nombre completo
             const displayName =
                 userData?.nombre && userData?.apellido
                     ? `${userData.nombre} ${userData.apellido}`
@@ -291,7 +323,7 @@ export class SocketGateway
         @MessageBody() data: { page: number; pageSize: number },
     ) {
         console.log(
-            `📄 WS: requestUserListPage - Página: ${data.page}, Tamaño: ${data.pageSize}`,
+            ` WS: requestUserListPage - Página: ${data.page}, Tamaño: ${data.pageSize}`,
         );
 
         // Obtener el usuario que hace la petición
@@ -440,12 +472,12 @@ export class SocketGateway
                                                 nombre: dbUser.nombre || null,
                                                 apellido: dbUser.apellido || null,
                                                 email: dbUser.email || null,
-                                                role: dbUser.role || 'USER', // 🔥 Obtener role de la BD
+                                                role: dbUser.role || 'USER', //  Obtener role de la BD
                                                 picture: null, // No tenemos picture en la entidad User de chat
                                                 sede: null,
                                                 sede_id: null,
-                                                numeroAgente: dbUser.numeroAgente || null, // 🔥 Obtener numeroAgente de la BD
-                                                isOnline: isUserConnected, // 🔥 CORREGIDO: Estado de conexión real
+                                                numeroAgente: dbUser.numeroAgente || null, //  Obtener numeroAgente de la BD
+                                                isOnline: isUserConnected, //  CORREGIDO: Estado de conexión real
                                             });
                                         }
                                     } catch (error) {
@@ -512,7 +544,7 @@ export class SocketGateway
             });
         }
 
-        // 🔥 NUEVO: Actualizar la lista de usuarios de ambos participantes para que se vean mutuamente
+        //  NUEVO: Actualizar la lista de usuarios de ambos participantes para que se vean mutuamente
         // Esto asegura que ambos usuarios vean al otro en su lista inmediatamente después de la asignación
         const userListWithData = Array.from(this.users.entries()).map(
             ([username, { userData }]) => {
@@ -676,9 +708,9 @@ export class SocketGateway
         }
 
         // También notificar a todos los ADMIN
-        this.users.forEach(({ socket, userData }) => {
-            const role = userData?.role?.toString().toUpperCase().trim();
-            if (socket.connected && role === 'ADMIN') {
+        // 🔥 OPTIMIZADO: Usar adminUsers en lugar de iterar todos los usuarios
+        this.adminUsers.forEach(({ socket }) => {
+            if (socket.connected) {
                 socket.emit('conversationDataUpdated', {
                     conversationId: data.conversationId,
                     conversationName: data.conversationName,
@@ -762,10 +794,10 @@ export class SocketGateway
             replyToMessageId,
             replyToSender,
             replyToText,
-            roomCode: messageRoomCode, // 🔥 roomCode del mensaje (si viene del frontend)
+            roomCode: messageRoomCode, //  roomCode del mensaje (si viene del frontend)
         } = data;
 
-        // 🔥 Obtener información del remitente (role y numeroAgente)
+        //  Obtener información del remitente (role y numeroAgente)
         const senderUser = this.users.get(from);
         let senderRole = senderUser?.userData?.role || null;
         let senderNumeroAgente = senderUser?.userData?.numeroAgente || null;
@@ -778,7 +810,7 @@ export class SocketGateway
             senderNumeroAgente,
         });
 
-        // 🔥 OPTIMIZACIÓN: Cachear información del usuario para evitar consultas repetidas a BD
+        //  OPTIMIZACIÓN: Cachear información del usuario para evitar consultas repetidas a BD
         if (!senderRole || !senderNumeroAgente) {
             // Primero verificar si ya tenemos el usuario en memoria (de una conexión anterior)
             const cachedUser = this.users.get(from);
@@ -799,7 +831,7 @@ export class SocketGateway
                             `✅ Información del remitente obtenida de BD: role=${senderRole}, numeroAgente=${senderNumeroAgente}`,
                         );
 
-                        // 🔥 Cachear en memoria para futuras consultas
+                        //  Cachear en memoria para futuras consultas
                         if (cachedUser) {
                             cachedUser.userData = {
                                 ...cachedUser.userData,
@@ -816,24 +848,24 @@ export class SocketGateway
             }
         }
 
-        // 🔥 CRÍTICO: Determinar el roomCode ANTES de guardar en BD
+        //  CRÍTICO: Determinar el roomCode ANTES de guardar en BD
         const user = this.users.get(from);
         const finalRoomCode = messageRoomCode || user?.currentRoom;
 
-        console.log(`🔥 DEBUG - finalRoomCode calculado: "${finalRoomCode}" (messageRoomCode: "${messageRoomCode}", currentRoom: "${user?.currentRoom}")`);
+        console.log(` DEBUG - finalRoomCode calculado: "${finalRoomCode}" (messageRoomCode: "${messageRoomCode}", currentRoom: "${user?.currentRoom}")`);
 
-        // 🔥 GUARDAR MENSAJE EN BD PRIMERO para obtener el ID
+        //  GUARDAR MENSAJE EN BD PRIMERO para obtener el ID
         let savedMessage = null;
         try {
             savedMessage = await this.saveMessageToDatabase({
                 ...data,
-                roomCode: finalRoomCode, // 🔥 Usar roomCode correcto
-                senderRole, // 🔥 Incluir role del remitente
-                senderNumeroAgente, // 🔥 Incluir numeroAgente del remitente
+                roomCode: finalRoomCode, //  Usar roomCode correcto
+                senderRole, //  Incluir role del remitente
+                senderNumeroAgente, //  Incluir numeroAgente del remitente
             });
             console.log(`✅ Mensaje guardado en BD con ID: ${savedMessage?.id}`);
 
-            // 🔥 NUEVO: Si el mensaje es una encuesta, crear la entidad Poll
+            //  NUEVO: Si el mensaje es una encuesta, crear la entidad Poll
             if (savedMessage && data.isPoll && data.poll) {
                 try {
                     const poll = await this.pollsService.createPoll(
@@ -935,17 +967,17 @@ export class SocketGateway
                                 `✅ Enviando mensaje a ${member} en sala ${finalRoomCode}${isMentioned ? ' (MENCIONADO)' : ''} - Socket ID: ${memberUser.socket.id}`,
                             );
                             memberUser.socket.emit('message', {
-                                id: savedMessage?.id, // 🔥 Incluir ID del mensaje
+                                id: savedMessage?.id, //  Incluir ID del mensaje
                                 from: from || 'Usuario Desconocido',
-                                senderRole, // 🔥 Incluir role del remitente
-                                senderNumeroAgente, // 🔥 Incluir numeroAgente del remitente
+                                senderRole, //  Incluir role del remitente
+                                senderNumeroAgente, //  Incluir numeroAgente del remitente
                                 group: to,
-                                groupName: to, // 🔥 NUEVO: Incluir groupName explícitamente para el frontend
-                                roomCode: finalRoomCode, // 🔥 CRÍTICO: Incluir roomCode para validación en frontend
+                                groupName: to, //  Incluir groupName explícitamente para el frontend
+                                roomCode: finalRoomCode, //  CRÍTICO: Incluir roomCode para validación en frontend
                                 message,
                                 isGroup: true,
                                 time: time || formatPeruTime(),
-                                sentAt: savedMessage?.sentAt, // 🔥 Incluir sentAt para extraer hora correcta en frontend
+                                sentAt: savedMessage?.sentAt, //  Incluir sentAt para extraer hora correcta en frontend
                                 mediaType,
                                 mediaData,
                                 fileName,
@@ -953,8 +985,8 @@ export class SocketGateway
                                 replyToMessageId,
                                 replyToSender,
                                 replyToText,
-                                hasMention: isMentioned, // 🔥 NUEVO: Indicar si el usuario fue mencionado
-                                // 🔥 NUEVO: Campos de videollamada
+                                hasMention: isMentioned, //  NUEVO: Indicar si el usuario fue mencionado
+                                //  NUEVO: Campos de videollamada
                                 type: data.type,
                                 videoCallUrl: data.videoCallUrl,
                                 videoRoomID: data.videoRoomID,
@@ -1009,14 +1041,14 @@ export class SocketGateway
                                 }
                             }
                         } else {
-                            // 🔥 NUEVO: Log cuando no se puede enviar
+                            //  NUEVO: Log cuando no se puede enviar
                             console.warn(
                                 `⚠️ No se puede enviar mensaje a ${member}: socket no conectado o usuario no existe`,
                             );
                         }
                     });
                 } else {
-                    // 🔥 NUEVO: Log cuando no hay usuarios en la sala
+                    //  NUEVO: Log cuando no hay usuarios en la sala
                     console.warn(`⚠️ No hay usuarios en la sala ${finalRoomCode}`);
                 }
             } else {
@@ -1026,7 +1058,7 @@ export class SocketGateway
                     `👥 Enviando a grupo normal: ${to}, Miembros: ${group?.size || 0}`,
                 );
                 if (group) {
-                    // 🔥 Obtener el roomCode del grupo (buscar en roomUsers)
+                    //  Obtener el roomCode del grupo (buscar en roomUsers)
                     let groupRoomCode = null;
                     for (const [code, users] of this.roomUsers.entries()) {
                         if (users.has(from)) {
@@ -1035,7 +1067,7 @@ export class SocketGateway
                         }
                     }
 
-                    // 🔥 Detectar menciones en el mensaje
+                    //  Detectar menciones en el mensaje
                     const mentionRegex =
                         /@([a-zA-ZÁÉÍÓÚÑáéíóúñ][a-zA-ZÁÉÍÓÚÑáéíóúñ\s]+?)(?=\s{2,}|$|[.,!?;:]|\n)/g;
                     const mentions = [];
@@ -1049,7 +1081,7 @@ export class SocketGateway
                     groupMembers.forEach((member) => {
                         const user = this.users.get(member);
                         if (user && user.socket.connected) {
-                            // 🔥 Verificar si este usuario fue mencionado
+                            //  Verificar si este usuario fue mencionado
                             const isMentioned = mentions.some(
                                 (mention) =>
                                     member.toUpperCase().includes(mention.toUpperCase()) ||
@@ -1057,17 +1089,17 @@ export class SocketGateway
                             );
 
                             user.socket.emit('message', {
-                                id: savedMessage?.id, // 🔥 Incluir ID del mensaje
+                                id: savedMessage?.id, //  Incluir ID del mensaje
                                 from: from || 'Usuario Desconocido',
-                                senderRole, // 🔥 Incluir role del remitente
-                                senderNumeroAgente, // 🔥 Incluir numeroAgente del remitente
+                                senderRole, //  Incluir role del remitente
+                                senderNumeroAgente, //  Incluir numeroAgente del remitente
                                 group: to,
-                                groupName: to, // 🔥 NUEVO: Incluir groupName explícitamente para el frontend
-                                roomCode: groupRoomCode, // 🔥 CRÍTICO: Incluir roomCode para validación en frontend
+                                groupName: to, //  Incluir groupName explícitamente para el frontend
+                                roomCode: groupRoomCode, //  CRÍTICO: Incluir roomCode para validación en frontend
                                 message,
                                 isGroup: true,
                                 time: time || formatPeruTime(),
-                                sentAt: savedMessage?.sentAt, // 🔥 Incluir sentAt para extraer hora correcta en frontend
+                                sentAt: savedMessage?.sentAt, //  Incluir sentAt para extraer hora correcta en frontend
                                 mediaType,
                                 mediaData,
                                 fileName,
@@ -1075,8 +1107,8 @@ export class SocketGateway
                                 replyToMessageId,
                                 replyToSender,
                                 replyToText,
-                                hasMention: isMentioned, // 🔥 NUEVO: Indicar si el usuario fue mencionado
-                                // 🔥 NUEVO: Campos de videollamada
+                                hasMention: isMentioned, //  NUEVO: Indicar si el usuario fue mencionado
+                                //  NUEVO: Campos de videollamada
                                 type: data.type,
                                 videoCallUrl: data.videoCallUrl,
                                 videoRoomID: data.videoRoomID,
@@ -1121,17 +1153,17 @@ export class SocketGateway
                 }
             }
 
-            // 🔥 Preparar el objeto del mensaje para enviar
+            // Preparar el objeto del mensaje para enviar
             const messageToSend = {
-                id: savedMessage?.id, // 🔥 Incluir ID del mensaje guardado en BD
+                id: savedMessage?.id, // Incluir ID del mensaje guardado en BD
                 from: from || 'Usuario Desconocido',
-                senderRole, // 🔥 Incluir role del remitente
-                senderNumeroAgente, // 🔥 Incluir numeroAgente del remitente
+                senderRole, // Incluir role del remitente
+                senderNumeroAgente, // Incluir numeroAgente del remitente
                 to: recipientUsername,
                 message,
                 isGroup: false,
                 time: time || formatPeruTime(),
-                sentAt: savedMessage?.sentAt, // 🔥 Incluir sentAt para extraer hora correcta en frontend
+                sentAt: savedMessage?.sentAt, //  Incluir sentAt para extraer hora correcta en frontend
                 mediaType,
                 mediaData,
                 fileName,
@@ -1139,15 +1171,15 @@ export class SocketGateway
                 replyToMessageId,
                 replyToSender,
                 replyToText,
-                conversationId: savedMessage?.conversationId, // 🔥 Incluir conversationId para chats asignados
-                // 🔥 NUEVO: Campos de videollamada
+                conversationId: savedMessage?.conversationId, //  Incluir conversationId para chats asignados
+                //  NUEVO: Campos de videollamada
                 type: data.type,
                 videoCallUrl: data.videoCallUrl,
                 videoRoomID: data.videoRoomID,
                 metadata: data.metadata,
             };
 
-            // 🔥 Enviar mensaje al destinatario
+            //  Enviar mensaje al destinatario
             if (recipient && recipient.socket.connected) {
                 console.log(
                     `✅ Enviando mensaje a ${recipientUsername} (socket conectado)`,
@@ -1182,7 +1214,7 @@ export class SocketGateway
                 sender.socket.emit('message', messageToSend);
             }
 
-            // 🔥 Emitir evento de monitoreo a todos los ADMIN/JEFEPISO
+            //  Emitir evento de monitoreo a todos los ADMIN/JEFEPISO
             this.broadcastMonitoringMessage({
                 id: savedMessage?.id,
                 from: from || 'Usuario Desconocido',
@@ -1190,7 +1222,7 @@ export class SocketGateway
                 message,
                 isGroup: false,
                 time: time || formatPeruTime(),
-                sentAt: savedMessage?.sentAt, // 🔥 Incluir sentAt para extraer hora correcta en frontend
+                sentAt: savedMessage?.sentAt, //  Incluir sentAt para extraer hora correcta en frontend
                 mediaType,
                 mediaData,
                 fileName,
@@ -1202,7 +1234,7 @@ export class SocketGateway
                 replyToText,
             });
 
-            // 🔥 NUEVO: Emitir evento de actualización de conversación asignada
+            // NUEVO: Emitir evento de actualización de conversación asignada
             // Esto permite que ambos participantes reordenen sus listas automáticamente
             if (data.isAssignedConversation && data.conversationId) {
                 console.log(`📤 Emitiendo assignedConversationUpdated para conversación ${data.conversationId}`);
@@ -1248,9 +1280,9 @@ export class SocketGateway
             isGroup,
             from,
             fromId,
-            senderRole, // 🔥 Extraer role del remitente
-            senderNumeroAgente, // 🔥 Extraer numeroAgente del remitente
-            roomCode, // 🔥 CRÍTICO: Extraer roomCode del data
+            senderRole, //  Extraer role del remitente
+            senderNumeroAgente, //  Extraer numeroAgente del remitente
+            roomCode, //  CRÍTICO: Extraer roomCode del data
             mediaType,
             mediaData,
             fileName,
@@ -1260,7 +1292,7 @@ export class SocketGateway
             replyToText,
             isAssignedConversation,
             actualRecipient,
-            // 🔥 NUEVO: Campos de videollamada
+            //  NUEVO: Campos de videollamada
             type,
             videoCallUrl,
             videoRoomID,
@@ -1278,30 +1310,30 @@ export class SocketGateway
                 `🔍 Guardando mensaje - isAssignedConversation: ${isAssignedConversation}, actualRecipient: ${actualRecipient}, to: ${to}, recipientForDB: ${recipientForDB}`,
             );
 
-            // 🔥 CRÍTICO: Calcular sentAt y time desde el servidor (no confiar en el cliente)
+            //  CRÍTICO: Calcular sentAt y time desde el servidor (no confiar en el cliente)
             const peruDate = getPeruDate();
             const calculatedTime = formatPeruTime(peruDate);
 
             const messageData = {
                 from,
                 fromId,
-                senderRole, // 🔥 Incluir role del remitente
-                senderNumeroAgente, // 🔥 Incluir numeroAgente del remitente
+                senderRole, //  Incluir role del remitente
+                senderNumeroAgente, // Incluir numeroAgente del remitente
                 to: isGroup ? null : recipientForDB,
                 message,
                 isGroup,
                 groupName: isGroup ? to : null,
-                roomCode: isGroup ? (roomCode || this.getRoomCodeFromUser(from)) : null, // 🔥 USAR roomCode del data primero
+                roomCode: isGroup ? (roomCode || this.getRoomCodeFromUser(from)) : null, //  USAR roomCode del data primero
                 mediaType,
                 mediaData,
                 fileName,
                 fileSize,
                 sentAt: peruDate,
-                time: calculatedTime, // 🔥 SIEMPRE calcular desde sentAt, no usar el time del cliente
+                time: calculatedTime, //  SIEMPRE calcular desde sentAt, no usar el time del cliente
                 replyToMessageId,
                 replyToSender,
                 replyToText,
-                // 🔥 NUEVO: Campos de videollamada
+                // NUEVO: Campos de videollamada
                 type,
                 videoCallUrl,
                 videoRoomID,
@@ -1348,7 +1380,7 @@ export class SocketGateway
         );
 
         try {
-            // 🔥 OPTIMIZACIÓN: El mensaje ya fue editado en la BD por el endpoint HTTP
+            // OPTIMIZACIÓN: El mensaje ya fue editado en la BD por el endpoint HTTP
             // Solo necesitamos hacer broadcast del evento a los demás usuarios
             const editEvent: any = {
                 messageId: data.messageId,
@@ -1357,7 +1389,7 @@ export class SocketGateway
                 isEdited: true,
             };
 
-            // 🔥 Incluir campos multimedia si se proporcionan
+            // Incluir campos multimedia si se proporcionan
             if (data.mediaType !== undefined) editEvent.mediaType = data.mediaType;
             if (data.mediaData !== undefined) editEvent.mediaData = data.mediaData;
             if (data.fileName !== undefined) editEvent.fileName = data.fileName;
@@ -1416,7 +1448,7 @@ export class SocketGateway
         );
 
         try {
-            // 🔥 El mensaje ya fue eliminado en la BD por el endpoint HTTP
+            // El mensaje ya fue eliminado en la BD por el endpoint HTTP
             // Solo necesitamos hacer broadcast del evento a los demás usuarios
             const deleteEvent: any = {
                 messageId: data.messageId,
@@ -1640,15 +1672,15 @@ export class SocketGateway
             `🏠 WS: joinRoom - Usuario: ${data.from}, Sala: ${data.roomCode}, Monitoreo: ${data.isMonitoring || false}`,
         );
 
-        // 🔥 Si es monitoreo (ADMIN/JEFEPISO), NO actualizar BD, solo memoria
+        //  Si es monitoreo (ADMIN/JEFEPISO), NO actualizar BD, solo memoria
         if (!data.isMonitoring) {
             try {
-                // 🔥 Actualizar la base de datos usando el servicio
+                // Actualizar la base de datos usando el servicio
                 const joinDto = { roomCode: data.roomCode, username: data.from };
                 await this.temporaryRoomsService.joinRoom(joinDto, data.from);
                 // console.log(`✅ Usuario ${data.from} unido a sala en BD`);
             } catch (error) {
-                // 🔥 NUEVO: Notificar al cliente del error
+                // NUEVO: Notificar al cliente del error
                 console.error(
                     `❌ Error al unir usuario ${data.from} a sala en BD:`,
                     error,
@@ -1688,17 +1720,17 @@ export class SocketGateway
         );
 
         let allUsernames: string[] = [];
-        // 🔥 NUEVO: Variable para guardar el ID del mensaje fijado
+        // NUEVO: Variable para guardar el ID del mensaje fijado
         let currentPinnedMessageId: number | null = null;
 
         try {
             const room = await this.temporaryRoomsService.findByRoomCode(
                 data.roomCode,
             );
-            // 🔥 MODIFICADO: Usar TODOS los usuarios añadidos (members)
+            // MODIFICADO: Usar TODOS los usuarios añadidos (members)
             allUsernames = room.members || [];
 
-            // 🔥 NUEVO: Capturar el mensaje fijado de la base de datos
+            //  NUEVO: Capturar el mensaje fijado de la base de datos
             currentPinnedMessageId = room.pinnedMessageId;
 
         } catch (error) {
@@ -1709,7 +1741,7 @@ export class SocketGateway
         // Crear lista con TODOS los usuarios añadidos a la sala y su estado de conexión
         const roomUsersList = allUsernames.map((username) => {
             const user = this.users.get(username);
-            // 🔥 CORREGIDO: Determinar isOnline basándose en si el usuario está conectado globalmente
+            // CORREGIDO: Determinar isOnline basándose en si el usuario está conectado globalmente
             const isOnline = this.users.has(username) && user?.socket?.connected;
             return {
                 id: user?.userData?.id || null,
@@ -1728,13 +1760,13 @@ export class SocketGateway
             roomCode: data.roomCode,
             roomName: data.roomName,
             users: roomUsersList,
-            // 🔥 NUEVO: Enviar el ID del mensaje fijado al frontend
+            // NUEVO: Enviar el ID del mensaje fijado al frontend
             pinnedMessageId: currentPinnedMessageId
         });
 
         console.log(`✅ Confirmación enviada a ${data.from}. PinnedMsg: ${currentPinnedMessageId}`);
 
-        // 🔥 NUEVO: Resetear contador de mensajes no leídos para este usuario en esta sala
+        // NUEVO: Resetear contador de mensajes no leídos para este usuario en esta sala
         if (!data.isMonitoring) {
             this.emitUnreadCountReset(data.roomCode, data.from);
         }
@@ -1909,7 +1941,7 @@ export class SocketGateway
             );
 
             if (socket.connected) {
-                // 🔥 COMENTADO: Ahora enviamos la lista incluso si el usuario está en una sala
+                // COMENTADO: Ahora enviamos la lista incluso si el usuario está en una sala
                 // para que reciban actualizaciones de estado online/offline en tiempo real
                 // if (currentRoom) {
                 //   console.log(
@@ -1928,7 +1960,7 @@ export class SocketGateway
                 );
 
                 if (isAdmin) {
-                    // 🔥 ADMIN: Enviar usuarios conectados + usuarios de conversaciones (offline)
+                    //  ADMIN: Enviar usuarios conectados + usuarios de conversaciones (offline)
                     // Esto asegura que vean cambios de estado en tiempo real
                     const adminUsersToSend = [...userListWithData]; // Usuarios conectados
 
@@ -1939,25 +1971,73 @@ export class SocketGateway
                             conv.participants?.forEach((p) => allParticipants.add(p));
                         });
 
-                        // Para cada participante, verificar si ya está en la lista
-                        for (const participantName of allParticipants) {
-                            if (
-                                !adminUsersToSend.some((u) => u.username === participantName)
-                            ) {
-                                // Buscar en BD para obtener datos completos
+                        // OPTIMIZADO: Filtrar participantes que NO están conectados
+                        const offlineParticipants = Array.from(allParticipants).filter(
+                            (p) => !adminUsersToSend.some((u) => u.username === p),
+                        );
+
+                        if (offlineParticipants.length > 0) {
+                            console.log(
+                                `📊 Buscando ${offlineParticipants.length} participantes offline en BD/caché`,
+                            );
+
+                            //  PASO 1: Verificar caché primero
+                            const uncachedParticipants: string[] = [];
+                            offlineParticipants.forEach((participantName) => {
+                                const cached = this.userCache.get(participantName);
+                                if (cached && Date.now() - cached.cachedAt < this.CACHE_TTL) {
+                                    // Usar datos del caché
+                                    const isUserConnected =
+                                        this.users.has(cached.username) ||
+                                        this.users.has(participantName);
+
+                                    adminUsersToSend.push({
+                                        id: cached.id || null,
+                                        username: cached.username,
+                                        nombre: cached.nombre || null,
+                                        apellido: cached.apellido || null,
+                                        email: null,
+                                        role: cached.role || 'USER',
+                                        picture: null,
+                                        sede: null,
+                                        sede_id: null,
+                                        numeroAgente: cached.numeroAgente || null,
+                                        isOnline: isUserConnected,
+                                    });
+                                } else {
+                                    uncachedParticipants.push(participantName);
+                                }
+                            });
+
+                            console.log(
+                                `✅ ${offlineParticipants.length - uncachedParticipants.length} usuarios obtenidos del caché`,
+                            );
+
+                            // PASO 2: Consulta masiva para usuarios NO en caché
+                            if (uncachedParticipants.length > 0) {
                                 try {
-                                    const dbUser = await this.userRepository
+                                    console.log(
+                                        `🔍 Consultando BD para ${uncachedParticipants.length} usuarios no cacheados`,
+                                    );
+
+                                    // UNA SOLA CONSULTA para todos los participantes offline
+                                    const dbUsers = await this.userRepository
                                         .createQueryBuilder('user')
                                         .where(
-                                            'CONCAT(user.nombre, " ", user.apellido) = :fullName',
-                                            { fullName: participantName },
+                                            'CONCAT(user.nombre, " ", user.apellido) IN (:...names)',
+                                            { names: uncachedParticipants },
                                         )
-                                        .orWhere('user.username = :username', {
-                                            username: participantName,
+                                        .orWhere('user.username IN (:...usernames)', {
+                                            usernames: uncachedParticipants,
                                         })
-                                        .getOne();
+                                        .getMany(); // ← getMany() en lugar de getOne() en loop
 
-                                    if (dbUser) {
+                                    console.log(
+                                        `✅ Consulta masiva completada: ${dbUsers.length} usuarios encontrados`,
+                                    );
+
+                                    // PASO 3: Procesar resultados y cachear
+                                    dbUsers.forEach((dbUser) => {
                                         const fullName =
                                             dbUser.nombre && dbUser.apellido
                                                 ? `${dbUser.nombre} ${dbUser.apellido}`
@@ -1978,12 +2058,23 @@ export class SocketGateway
                                             sede: null,
                                             sede_id: null,
                                             numeroAgente: dbUser.numeroAgente || null,
-                                            isOnline: isUserConnected, // offline
+                                            isOnline: isUserConnected,
                                         });
-                                    }
+
+                                        // CACHEAR para futuras consultas
+                                        this.userCache.set(fullName, {
+                                            id: dbUser.id,
+                                            username: fullName,
+                                            nombre: dbUser.nombre,
+                                            apellido: dbUser.apellido,
+                                            role: dbUser.role,
+                                            numeroAgente: dbUser.numeroAgente,
+                                            cachedAt: Date.now(),
+                                        });
+                                    });
                                 } catch (error) {
                                     console.error(
-                                        `❌ Error al buscar usuario ${participantName} en BD:`,
+                                        `❌ Error en consulta masiva de usuarios:`,
                                         error,
                                     );
                                 }
@@ -2023,7 +2114,7 @@ export class SocketGateway
                         `    📝 Usuario actual agregado: ${ownUserData?.username || 'none'}`,
                     );
 
-                    // 🔥 CORREGIDO: Obtener conversaciones del usuario actual
+                    //  CORREGIDO: Obtener conversaciones del usuario actual
                     // IMPORTANTE: Las conversaciones guardan participantes con NOMBRE COMPLETO, no username
                     let userConversations = [];
                     if (assignedConversations && assignedConversations.length > 0) {
@@ -2117,12 +2208,12 @@ export class SocketGateway
                                                         nombre: dbUser.nombre || null,
                                                         apellido: dbUser.apellido || null,
                                                         email: dbUser.email || null,
-                                                        role: dbUser.role || 'USER', // 🔥 Obtener role de la BD
+                                                        role: dbUser.role || 'USER', // Obtener role de la BD
                                                         picture: null, // No tenemos picture en la entidad User de chat
                                                         sede: null,
                                                         sede_id: null,
-                                                        numeroAgente: dbUser.numeroAgente || null, // 🔥 Obtener numeroAgente de la BD
-                                                        isOnline: isUserConnected, // 🔥 CORREGIDO: Estado de conexión real
+                                                        numeroAgente: dbUser.numeroAgente || null, // Obtener numeroAgente de la BD
+                                                        isOnline: isUserConnected, // CORREGIDO: Estado de conexión real
                                                     });
                                                 }
                                             } catch (error) {
@@ -2170,9 +2261,9 @@ export class SocketGateway
         let memberCount: number = 0;
         try {
             const room = await this.temporaryRoomsService.findByRoomCode(roomCode);
-            // 🔥 MODIFICADO: Usar TODOS los usuarios añadidos (members) para mostrar en la lista
+            // MODIFICADO: Usar TODOS los usuarios añadidos (members) para mostrar en la lista
             allUsernames = room.members || [];
-            // 🔥 El contador debe ser el total de usuarios añadidos a la sala
+            // El contador debe ser el total de usuarios añadidos a la sala
             memberCount = room.members?.length || 0;
         } catch (error) {
             // Si hay error, usar solo los usuarios conectados
@@ -2183,7 +2274,7 @@ export class SocketGateway
         // Crear lista con TODOS los usuarios añadidos a la sala y su estado de conexión
         const roomUsersList = allUsernames.map((username) => {
             const user = this.users.get(username);
-            // 🔥 CORREGIDO: Determinar isOnline basándose en si el usuario está conectado globalmente
+            // CORREGIDO: Determinar isOnline basándose en si el usuario está conectado globalmente
             const isOnline = this.users.has(username) && user?.socket?.connected;
             return {
                 id: user?.userData?.id || null,
@@ -2396,14 +2487,14 @@ export class SocketGateway
         //   `📴 WS: endVideoCall - Sala: ${data.roomID}, RoomCode: ${data.roomCode}, Cerrada por: ${data.closedBy}`,
         // );
 
-        // 🔥 NUEVO: Marcar la videollamada como inactiva en la BD
+        // NUEVO: Marcar la videollamada como inactiva en la BD
         try {
             // Buscar el mensaje de videollamada por videoRoomID usando el servicio
             let videoCallMessage = await this.messagesService.findByVideoRoomID(
                 data.roomID,
             );
 
-            // 🔥 FALLBACK: Mensajes antiguos sin videoRoomID (solo tienen URL y roomCode)
+            // FALLBACK: Mensajes antiguos sin videoRoomID (solo tienen URL y roomCode)
             if (!videoCallMessage && data.roomCode) {
                 videoCallMessage =
                     await this.messagesService.findLatestVideoCallByRoomCode(
@@ -3090,7 +3181,7 @@ export class SocketGateway
     }
 
     /**
-     * 🔥 NUEVO: Emitir evento de monitoreo a todos los ADMIN/JEFEPISO
+     *  NUEVO: Emitir evento de monitoreo a todos los ADMIN/JEFEPISO
      * Cuando se envía un mensaje entre dos usuarios, notificar a los monitores
      */
     private broadcastMonitoringMessage(messageData: any) {
@@ -3106,7 +3197,7 @@ export class SocketGateway
         });
     }
 
-    // 🔥 NUEVO: Emitir actualización de contador de mensajes no leídos para un usuario específico
+    //  NUEVO: Emitir actualización de contador de mensajes no leídos para un usuario específico
     public emitUnreadCountUpdateForUser(
         roomCode: string,
         username: string,
@@ -3131,7 +3222,7 @@ export class SocketGateway
         }
     }
 
-    // 🔥 NUEVO: Emitir reset de contador cuando usuario entra a sala
+    //  NUEVO: Emitir reset de contador cuando usuario entra a sala
     public emitUnreadCountReset(roomCode: string, username: string) {
         console.log(
             `📊 Emitiendo reset de contador no leído - Sala: ${roomCode}, Usuario: ${username}`,
@@ -3146,7 +3237,7 @@ export class SocketGateway
     }
 
     /**
-     * 🔥 NUEVO: Método público para emitir evento de monitoreo desde el controller HTTP
+     *  NUEVO: Método público para emitir evento de monitoreo desde el controller HTTP
      * Se usa cuando se crea un mensaje a través del endpoint POST /api/messages
      */
     public broadcastMonitoringMessagePublic(messageData: any) {
@@ -3162,13 +3253,13 @@ export class SocketGateway
         });
     }
 
-    // 🔥 NUEVO: Generar hash de mensaje para detección de duplicados
+    // Generar hash de mensaje para detección de duplicados
     private createMessageHash(data: any): string {
         const hashContent = `${data.from}-${data.to}-${data.message || ''}-${data.isGroup}`;
         return crypto.createHash('sha256').update(hashContent).digest('hex');
     }
 
-    // 🔥 NUEVO: Limpiar caché de mensajes antiguos (más de 5 segundos)
+    // Limpiar caché de mensajes antiguos (más de 5 segundos)
     private cleanRecentMessagesCache() {
         const now = Date.now();
         const CACHE_EXPIRY = 5000; // 5 segundos
@@ -3180,7 +3271,7 @@ export class SocketGateway
         }
     }
 
-    // 🔥 NUEVO: Verificar si un mensaje es duplicado
+    // NUEVO: Verificar si un mensaje es duplicado
     private isDuplicateMessage(data: any): boolean {
         const messageHash = this.createMessageHash(data);
         const now = Date.now();
@@ -3298,7 +3389,7 @@ export class SocketGateway
     // ==================== TRACKING DE PARTICIPANTES EN VIDEOLLAMADAS ====================
 
     /**
-     * 🔥 NUEVO: Modificar joinVideoRoom para trackear participantes
+     * Modificar joinVideoRoom para trackear participantes
      * Este método se llamará cuando un usuario se una una videollamada
      */
     @SubscribeMessage('joinVideoRoomList')
@@ -3342,12 +3433,12 @@ export class SocketGateway
             `✅ Usuario ${data.username} unido a sala de video ${data.roomID} - Total: ${participants.size}`,
         );
 
-        // 🔥 Emitir lista actualizada de participantes
+        // Emitir lista actualizada de participantes
         this.broadcastVideoRoomParticipants(data.roomID);
     }
 
     /**
-     * 🔥 NUEVO: Handler para cuando un usuario sale de la videollamada
+     * NUEVO: Handler para cuando un usuario sale de la videollamada
      */
     @SubscribeMessage('leaveVideoRoomList')
     handleLeaveListVideoRoom(
@@ -3381,12 +3472,12 @@ export class SocketGateway
             }
         }
 
-        // 🔥 Emitir lista actualizada de participantes
+        // Emitir lista actualizada de participantes
         this.broadcastVideoRoomParticipants(data.roomID);
     }
 
     /**
-     * 🔥 NUEVO: Método helper para broadcast de participantes
+     * NUEVO: Método helper para broadcast de participantes
      */
     private broadcastVideoRoomParticipants(roomID: string) {
         const participants = this.videoRoomParticipants.get(roomID) || new Set();
@@ -3506,5 +3597,73 @@ export class SocketGateway
         if (cleaned > 0) {
             console.log(`✅ Limpiadas ${cleaned} conexiones huérfanas en total`);
         }
+    }
+
+    // Método para limpiar caché de usuarios expirado
+    private cleanUserCache() {
+        const now = Date.now();
+        let cleaned = 0;
+        for (const [username, cachedUser] of this.userCache.entries()) {
+            if (now - cachedUser.cachedAt > this.CACHE_TTL) {
+                this.userCache.delete(username);
+                cleaned++;
+            }
+        }
+        if (cleaned > 0) {
+            console.log(
+                `🧹 Limpiadas ${cleaned} entradas del caché de usuarios (${this.userCache.size} restantes)`,
+            );
+        }
+    }
+
+    // Método para monitorear estadísticas del sistema
+    private logSystemStats() {
+        const stats = {
+            timestamp: new Date().toISOString(),
+            connections: {
+                total: this.users.size,
+                admins: this.adminUsers.size,
+                regular: this.users.size - this.adminUsers.size,
+            },
+            cache: {
+                userCacheSize: this.userCache.size,
+                userCacheLimit: Math.floor(this.CACHE_TTL / 60000) + ' minutos TTL',
+            },
+            groups: {
+                total: this.groups.size,
+                activeRooms: this.roomUsers.size,
+            },
+            memory: {
+                estimatedCacheKB: Math.round((this.userCache.size * 0.1)), // ~0.1KB por usuario
+            },
+        };
+
+        console.log('📊 ==================== SYSTEM STATS ====================');
+        console.log(`⏰ Timestamp: ${stats.timestamp}`);
+        console.log(`👥 Conexiones: ${stats.connections.total} total (${stats.connections.admins} admins, ${stats.connections.regular} regulares)`);
+        console.log(`💾 Caché: ${stats.cache.userCacheSize} usuarios cacheados (TTL: ${stats.cache.userCacheLimit})`);
+        console.log(`🏠 Grupos: ${stats.groups.total} grupos, ${stats.groups.activeRooms} salas activas`);
+        console.log(`📈 Memoria estimada del caché: ~${stats.memory.estimatedCacheKB}KB`);
+        console.log('=======================================================');
+    }
+
+    // Método público para obtener estadísticas (útil para endpoints de admin)
+    public getSystemStats() {
+        return {
+            timestamp: new Date().toISOString(),
+            connections: {
+                total: this.users.size,
+                admins: this.adminUsers.size,
+                regular: this.users.size - this.adminUsers.size,
+            },
+            cache: {
+                userCacheSize: this.userCache.size,
+                userCacheTTL: this.CACHE_TTL,
+            },
+            groups: {
+                total: this.groups.size,
+                activeRooms: this.roomUsers.size,
+            },
+        };
     }
 }
