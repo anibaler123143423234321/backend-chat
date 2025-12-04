@@ -15,20 +15,20 @@ export const databaseConfig: TypeOrmModuleOptions = {
   extra: {
     createDatabaseIfNotExist: true,
     // Configuraciones para manejar mejor los errores de conexión
-    connectionLimit: 20, // Aumentado de 10 a 20
-    acquireTimeout: 120000, // Aumentado a 2 minutos
-    timeout: 120000, // Aumentado a 2 minutos
+    connectionLimit: 15, // Reducido de 20 a 15 - WebSockets optimizados requieren menos conexiones
+    acquireTimeout: 60000, // Reducido de 120s a 60s - timeout más agresivo
+    timeout: 120000, // Mantenido en 2 minutos
     connectTimeout: 60000, // 1 minuto para conectar
     // Configuraciones de MySQL para conexiones más estables
     charset: 'utf8mb4',
     // Configuraciones de pool de conexiones mejoradas
     pool: {
-      min: 5, // Aumentado de 2 a 5
-      max: 20, // Aumentado de 10 a 20
-      acquireTimeoutMillis: 120000, // 2 minutos
+      min: 3, // Reducido de 5 a 3
+      max: 15, // Reducido de 20 a 15
+      acquireTimeoutMillis: 60000, // Reducido de 120s a 60s
       createTimeoutMillis: 60000, // 1 minuto
       destroyTimeoutMillis: 10000, // 10 segundos
-      idleTimeoutMillis: 600000, // 10 minutos (aumentado de 30 segundos)
+      idleTimeoutMillis: 300000, // 5 minutos (reducido de 10 minutos)
       reapIntervalMillis: 1000,
       createRetryIntervalMillis: 500, // Aumentado de 200 a 500ms
     },

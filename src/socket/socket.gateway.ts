@@ -26,6 +26,14 @@ import { getPeruDate, formatPeruTime } from '../utils/date.utils';
     },
     transports: ['websocket', 'polling'],
     path: '/socket.io/',
+    // 🔥 NUEVO: Configuraciones de optimización para evitar sobrecarga del servidor
+    pingTimeout: 30000, // 30 segundos - tiempo máximo sin respuesta antes de desconectar
+    pingInterval: 25000, // 25 segundos - frecuencia de verificación de conexión
+    maxHttpBufferSize: 10 * 1024 * 1024, // 10MB - límite de tamaño de mensaje
+    connectTimeout: 45000, // 45 segundos - timeout de conexión inicial
+    upgradeTimeout: 10000, // 10 segundos - timeout de upgrade de polling a websocket
+    allowEIO3: false, // Deshabilitar compatibilidad con Engine.IO v3 (más antiguo)
+    perMessageDeflate: false, // Deshabilitar compresión para reducir CPU
 })
 @Injectable()
 export class SocketGateway
@@ -75,6 +83,9 @@ export class SocketGateway
 
         // Inyectar referencia del gateway en el servicio para notificaciones
         this.temporaryRoomsService.setSocketGateway(this);
+
+        // 🔥 NUEVO: Limpiar conexiones huérfanas cada 5 minutos
+        setInterval(() => this.cleanOrphanedConnections(), 5 * 60 * 1000);
     }
 
     // 🔥 NUEVO: Cargar grupos al iniciar el servidor
@@ -1195,7 +1206,7 @@ export class SocketGateway
             // Esto permite que ambos participantes reordenen sus listas automáticamente
             if (data.isAssignedConversation && data.conversationId) {
                 console.log(`📤 Emitiendo assignedConversationUpdated para conversación ${data.conversationId}`);
-                
+
                 // Determinar el texto del mensaje para mostrar
                 let messageText = message;
                 if (!messageText && mediaType) {
@@ -1213,7 +1224,7 @@ export class SocketGateway
                     lastMessage: messageText,
                     lastMessageTime: savedMessage?.sentAt || new Date().toISOString(),
                     lastMessageFrom: from,
-                   lastMessageMediaType: mediaType
+                    lastMessageMediaType: mediaType
                 };
 
                 // Emitir a ambos participantes (remitente y destinatario)
@@ -3479,6 +3490,21 @@ export class SocketGateway
                     message: 'Error al fijar el mensaje',
                 });
             }
+        }
+    }
+
+    // 🔥 NUEVO: Método para limpiar conexiones huérfanas
+    private cleanOrphanedConnections() {
+        let cleaned = 0;
+        for (const [username, user] of this.users.entries()) {
+            if (!user.socket.connected) {
+                this.users.delete(username);
+                cleaned++;
+                console.log(`🧹 Limpiando conexión huérfana: ${username}`);
+            }
+        }
+        if (cleaned > 0) {
+            console.log(`✅ Limpiadas ${cleaned} conexiones huérfanas en total`);
         }
     }
 }
