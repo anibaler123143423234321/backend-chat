@@ -210,33 +210,27 @@ export class TemporaryConversationsService {
 
         return {
           ...conv,
-          lastMessage: lastMessage ? lastMessage.text : null,
-          lastMessageFrom: lastMessage ? lastMessage.from : null,
-          lastMessageTime: lastMessage ? lastMessage.sentAt : null,
-          lastMessageMediaType: lastMessage ? lastMessage.mediaType : null,
-          lastMessageThreadCount: lastMessage ? lastMessage.threadCount : 0,
-          lastMessageLastReplyFrom: lastMessage
-            ? lastMessage.lastReplyFrom
-            : null,
+          _lastMessageSentAt: lastMessage?.sentAt, // Campo temporal para ordenar
           unreadCount,
-          role: participantRole, // ?? Incluir role del participante
-          numeroAgente: participantNumeroAgente, // ?? Incluir numeroAgente del participante
+          role: participantRole,
+          numeroAgente: participantNumeroAgente,
         };
       }),
     );
 
     // Ordenar por �ltimo mensaje (m�s reciente primero)
+    // Ordenar por último mensaje (más reciente primero) usando el campo interno _lastMessageSentAt
     enrichedConversations.sort((a, b) => {
-      if (!a.lastMessageTime && !b.lastMessageTime) return 0;
-      if (!a.lastMessageTime) return 1;
-      if (!b.lastMessageTime) return -1;
-      return (
-        new Date(b.lastMessageTime).getTime() -
-        new Date(a.lastMessageTime).getTime()
-      );
+      const aTime = (a as any)._lastMessageSentAt;
+      const bTime = (b as any)._lastMessageSentAt;
+      if (!aTime && !bTime) return 0;
+      if (!aTime) return 1;
+      if (!bTime) return -1;
+      return new Date(bTime).getTime() - new Date(aTime).getTime();
     });
 
-    return enrichedConversations;
+    // Eliminar campo temporal antes de devolver
+    return enrichedConversations.map(({ _lastMessageSentAt, ...rest }: any) => rest);
   }
 
   // ?? NUEVO: M�todo con paginaci�n para conversaciones asignadas
@@ -418,13 +412,6 @@ export class TemporaryConversationsService {
 
         return {
           ...conv,
-          lastMessage: lastMessage ? lastMessage.text : null,
-          lastMessageFrom: lastMessage ? lastMessage.from : null,
-          lastMessageTime: lastMessage ? lastMessage.sentAt : null,
-          lastMessageThreadCount: lastMessage ? lastMessage.threadCount : 0,
-          lastMessageLastReplyFrom: lastMessage
-            ? lastMessage.lastReplyFrom
-            : null,
           unreadCount,
         };
       }),
@@ -592,14 +579,6 @@ export class TemporaryConversationsService {
 
         return {
           ...conv,
-          lastMessage: lastMessage ? lastMessage.text : null,
-          lastMessageFrom: lastMessage ? lastMessage.from : null,
-          lastMessageTime: lastMessage ? lastMessage.sentAt : null,
-          lastMessageMediaType: lastMessage ? lastMessage.mediaType : null,
-          lastMessageThreadCount: lastMessage ? lastMessage.threadCount : 0,
-          lastMessageLastReplyFrom: lastMessage
-            ? lastMessage.lastReplyFrom
-            : null,
           unreadCount,
           role: otherParticipantRole, // 🔥 Incluir role del otro participante
           numeroAgente: otherParticipantNumeroAgente, // 🔥 Incluir numeroAgente del otro participante
@@ -609,13 +588,7 @@ export class TemporaryConversationsService {
 
     // Ordenar por último mensaje (más reciente primero)
     enrichedConversations.sort((a, b) => {
-      if (!a.lastMessageTime && !b.lastMessageTime) return 0;
-      if (!a.lastMessageTime) return 1;
-      if (!b.lastMessageTime) return -1;
-      return (
-        new Date(b.lastMessageTime).getTime() -
-        new Date(a.lastMessageTime).getTime()
-      );
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
 
     return enrichedConversations;
@@ -993,14 +966,6 @@ export class TemporaryConversationsService {
 
         return {
           ...conv,
-          lastMessage: lastMessage ? lastMessage.text : null,
-          lastMessageFrom: lastMessage ? lastMessage.from : null,
-          lastMessageTime: lastMessage ? lastMessage.sentAt : null,
-          lastMessageMediaType: lastMessage ? lastMessage.mediaType : null,
-          lastMessageThreadCount: lastMessage ? lastMessage.threadCount : 0,
-          lastMessageLastReplyFrom: lastMessage
-            ? lastMessage.lastReplyFrom
-            : null,
           unreadCount,
           role: participantRole,
           numeroAgente: participantNumeroAgente,
