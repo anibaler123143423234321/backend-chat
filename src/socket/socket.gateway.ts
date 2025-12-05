@@ -762,24 +762,12 @@ export class SocketGateway
         @ConnectedSocket() client: Socket,
         @MessageBody() data: any,
     ) {
-        console.log(
-            `📨 WS: message - De: ${data.from}, Para: ${data.to}, Grupo: ${data.isGroup}`,
-        );
-
         // 🔥 NUEVO: Verificar si es un mensaje duplicado
         if (this.isDuplicateMessage(data)) {
-            console.log('⚠️ Mensaje duplicado ignorado por el backend');
             return; // Ignorar el mensaje duplicado
         }
 
-        console.log(`📦 Datos completos del mensaje:`, {
-            from: data.from,
-            to: data.to,
-            isGroup: data.isGroup,
-            isAssignedConversation: data.isAssignedConversation,
-            actualRecipient: data.actualRecipient,
-            message: data.message?.substring(0, 50),
-        });
+        // Log removido para optimización - datos del mensaje
 
         const {
             to,
@@ -802,13 +790,7 @@ export class SocketGateway
         let senderRole = senderUser?.userData?.role || null;
         let senderNumeroAgente = senderUser?.userData?.numeroAgente || null;
 
-        console.log(`🔍 DEBUG - Usuario en memoria:`, {
-            from,
-            hasSenderUser: !!senderUser,
-            userData: senderUser?.userData,
-            senderRole,
-            senderNumeroAgente,
-        });
+        // Log DEBUG removido para optimización
 
         //  OPTIMIZACIÓN: Cachear información del usuario para evitar consultas repetidas a BD
         if (!senderRole || !senderNumeroAgente) {
@@ -827,9 +809,7 @@ export class SocketGateway
                     if (dbUser) {
                         senderRole = dbUser.role || senderRole;
                         senderNumeroAgente = dbUser.numeroAgente || senderNumeroAgente;
-                        console.log(
-                            `✅ Información del remitente obtenida de BD: role=${senderRole}, numeroAgente=${senderNumeroAgente}`,
-                        );
+                        // Log optimizado: info de remitente cachada
 
                         //  Cachear en memoria para futuras consultas
                         if (cachedUser) {
@@ -852,8 +832,6 @@ export class SocketGateway
         const user = this.users.get(from);
         const finalRoomCode = messageRoomCode || user?.currentRoom;
 
-        console.log(` DEBUG - finalRoomCode calculado: "${finalRoomCode}" (messageRoomCode: "${messageRoomCode}", currentRoom: "${user?.currentRoom}")`);
-
         //  GUARDAR MENSAJE EN BD PRIMERO para obtener el ID
         let savedMessage = null;
         try {
@@ -863,7 +841,6 @@ export class SocketGateway
                 senderRole, //  Incluir role del remitente
                 senderNumeroAgente, //  Incluir numeroAgente del remitente
             });
-            console.log(`✅ Mensaje guardado en BD con ID: ${savedMessage?.id}`);
 
             //  NUEVO: Si el mensaje es una encuesta, crear la entidad Poll
             if (savedMessage && data.isPoll && data.poll) {
@@ -876,7 +853,7 @@ export class SocketGateway
                         savedMessage.id,
                         from,
                     );
-                    console.log(`✅ Encuesta creada con ID: ${poll.id} para mensaje ${savedMessage.id}`);
+                    // Encuesta creada exitosamente
                 } catch (pollError) {
                     console.error('❌ Error al crear encuesta:', pollError);
                 }
@@ -1007,20 +984,8 @@ export class SocketGateway
                                     sentAt: savedMessage?.sentAt || new Date().toISOString(),
                                 };
 
-                                console.log(
-                                    `📊 DEBUG - Preparando lastMessage para ${member}:`,
-                                    lastMessageData,
-                                );
-                                console.log(
-                                    `📊 DEBUG - savedMessage?.sentAt:`,
-                                    savedMessage?.sentAt,
-                                );
-
                                 if (!isViewingThisRoom) {
                                     // Usuario NO está viendo esta sala, enviar actualización con contador
-                                    console.log(
-                                        `📊 Usuario ${member} NO está viendo sala ${finalRoomCode}, enviando con contador`,
-                                    );
                                     this.emitUnreadCountUpdateForUser(
                                         finalRoomCode,
                                         member,
@@ -1029,9 +994,6 @@ export class SocketGateway
                                     );
                                 } else {
                                     // Usuario SÍ está viendo esta sala, solo actualizar último mensaje sin incrementar contador
-                                    console.log(
-                                        `📊 Usuario ${member} SÍ está viendo sala ${finalRoomCode}, enviando sin contador`,
-                                    );
                                     this.emitUnreadCountUpdateForUser(
                                         finalRoomCode,
                                         member,
@@ -3047,20 +3009,14 @@ export class SocketGateway
         }
     }
 
-    // ==================== NOTIFICACIONES DE SALAS ====================
-
     /**
-     * Notificar a todos los usuarios ADMIN y JEFEPISO que se creó una nueva sala
+     * 🚀 OPTIMIZADO: Notificar solo a usuarios ADMIN/JEFEPISO usando adminUsers Map
+     * En lugar de iterar sobre todos los 400 usuarios, iteramos solo sobre los ~5 admins
      */
     broadcastRoomCreated(room: any) {
-        console.log(
-            `✨ Broadcasting room created: ${room.roomCode} (ID: ${room.id})`,
-        );
-
-        // Enviar notificación a todos los ADMIN y JEFEPISO
-        this.users.forEach(({ socket, userData }) => {
-            const role = userData?.role?.toString().toUpperCase().trim();
-            if (socket.connected && (role === 'ADMIN' || role === 'JEFEPISO')) {
+        // Usar adminUsers Map para O(k) en lugar de O(n)
+        this.adminUsers.forEach(({ socket }) => {
+            if (socket.connected) {
                 socket.emit('roomCreated', {
                     id: room.id,
                     name: room.name,
@@ -3075,16 +3031,12 @@ export class SocketGateway
     }
 
     /**
-     * Notificar a todos los usuarios ADMIN y JEFEPISO que una sala fue eliminada/desactivada
-     * También notifica a todos los miembros de la sala
+     * 🚀 OPTIMIZADO: Notificar solo a admins + miembros de la sala
      */
     broadcastRoomDeleted(roomCode: string, roomId: number) {
-        console.log(`🗑️ Broadcasting room deleted: ${roomCode} (ID: ${roomId})`);
-
-        // Enviar notificación a todos los ADMIN y JEFEPISO
-        this.users.forEach(({ socket, userData }) => {
-            const role = userData?.role?.toString().toUpperCase().trim();
-            if (socket.connected && (role === 'ADMIN' || role === 'JEFEPISO')) {
+        // Usar adminUsers Map para O(k) en lugar de O(n)
+        this.adminUsers.forEach(({ socket }) => {
+            if (socket.connected) {
                 socket.emit('roomDeleted', {
                     roomCode,
                     roomId,

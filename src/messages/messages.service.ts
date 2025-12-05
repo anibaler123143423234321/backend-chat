@@ -148,88 +148,80 @@ export class MessagesService {
   }
 
   // 🔥 NUEVO: Obtener todos los conteos de mensajes no leídos para un usuario
+  // 🚀 OPTIMIZADO: Una sola consulta SQL agregada en lugar de N consultas
   async getAllUnreadCountsForUser(
     username: string,
   ): Promise<{ [key: string]: number }> {
-    // console.log(
-    //   `📊 getAllUnreadCountsForUser llamado para usuario: ${username}`,
-    // );
-
     try {
       const result: { [key: string]: number } = {};
       const usernameNormalized = this.normalizeUsername(username);
 
-      // 1. Obtener conteos para SALAS (Grupos)
-      const roomCodes = await this.messageRepository
+      // 1. 🚀 OPTIMIZADO: Obtener conteos para TODAS las salas en UNA SOLA consulta
+      // En lugar de hacer N consultas (una por sala), hacemos una consulta agregada
+      const roomUnreadCounts = await this.messageRepository
         .createQueryBuilder('message')
-        .select('DISTINCT message.roomCode')
+        .select('message.roomCode', 'roomCode')
+        .addSelect('COUNT(*)', 'unreadCount')
         .where('message.isGroup = :isGroup', { isGroup: true })
         .andWhere('message.roomCode IS NOT NULL')
         .andWhere('message.isDeleted = :isDeleted', { isDeleted: false })
-        .andWhere('message.threadId IS NULL') // Solo mensajes principales, no de hilos
+        .andWhere('message.threadId IS NULL')
+        .andWhere('LOWER(message.from) != LOWER(:username)', { username })
+        // Mensajes sin readBy o donde el usuario no está en readBy
+        .andWhere(
+          "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(LOWER(message.readBy), LOWER(:usernameJson)))",
+          { usernameJson: JSON.stringify(username) }
+        )
+        .groupBy('message.roomCode')
         .getRawMany();
 
-      for (const { roomCode } of roomCodes) {
-        const count = await this.getUnreadCountForUserInRoom(
-          roomCode,
-          username,
-        );
+      // Mapear resultados al objeto de respuesta
+      for (const row of roomUnreadCounts) {
+        const count = parseInt(row.unreadCount, 10);
         if (count > 0) {
-          result[roomCode] = count;
+          result[row.roomCode] = count;
         }
       }
 
-      // 2. Obtener conteos para CONVERSACIONES ASIGNADAS
-      // 🔥 NUEVO ENFOQUE: Usar conversationId para evitar ambigüedad
-      // Buscar todas las conversaciones activas donde el usuario es participante
+      // 2. 🚀 OPTIMIZADO: Conteos para CONVERSACIONES ASIGNADAS en UNA SOLA consulta
+      // Primero obtenemos solo los IDs de conversaciones del usuario (rápido, sin mensajes)
       const allConversations = await this.temporaryConversationRepository.find({
         where: { isActive: true },
+        select: ['id', 'participants'], // Solo campos necesarios
       });
 
-      const userConversations = allConversations.filter((conv) => {
-        const participants = conv.participants || [];
-        return participants.some(
-          (p) => this.normalizeUsername(p) === usernameNormalized,
-        );
-      });
-
-      // console.log(
-      //   `📊 Conversaciones asignadas encontradas para ${username}: ${userConversations.length}`,
-      // );
-
-      for (const conv of userConversations) {
-        // 🔥 CRÍTICO: Filtrar mensajes por conversationId en lugar de from/to
-        // Esto previene que mensajes de un agente incrementen contadores en otros chats
-        const messages = await this.messageRepository.find({
-          where: {
-            conversationId: conv.id,
-            isDeleted: false,
-            threadId: IsNull(),
-            isGroup: false,
-          },
-          select: ['id', 'readBy', 'from', 'to'],
-        });
-
-        // Filtrar solo mensajes dirigidos al usuario actual (no enviados por él)
-        const unreadCount = messages.filter((msg) => {
-          // Mensaje debe ser dirigido al usuario (no enviado por él)
-          if (this.normalizeUsername(msg.from) === usernameNormalized) {
-            return false; // El usuario lo envió, no cuenta como no leído
-          }
-
-          // Verificar si el usuario ya lo leyó
-          if (!msg.readBy || msg.readBy.length === 0) {
-            return true; // No ha sido leído por nadie
-          }
-
-          const isReadByUser = msg.readBy.some(
-            (reader) => this.normalizeUsername(reader) === usernameNormalized,
+      const userConversationIds = allConversations
+        .filter((conv) => {
+          const participants = conv.participants || [];
+          return participants.some(
+            (p) => this.normalizeUsername(p) === usernameNormalized,
           );
-          return !isReadByUser;
-        }).length;
+        })
+        .map((conv) => conv.id);
 
-        if (unreadCount > 0) {
-          result[conv.id.toString()] = unreadCount;
+      // Si el usuario tiene conversaciones, hacer UNA consulta agregada
+      if (userConversationIds.length > 0) {
+        const convUnreadCounts = await this.messageRepository
+          .createQueryBuilder('message')
+          .select('message.conversationId', 'conversationId')
+          .addSelect('COUNT(*)', 'unreadCount')
+          .where('message.conversationId IN (:...ids)', { ids: userConversationIds })
+          .andWhere('message.isDeleted = :isDeleted', { isDeleted: false })
+          .andWhere('message.threadId IS NULL')
+          .andWhere('message.isGroup = :isGroup', { isGroup: false })
+          .andWhere('LOWER(message.from) != LOWER(:username)', { username })
+          .andWhere(
+            "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(LOWER(message.readBy), LOWER(:usernameJson)))",
+            { usernameJson: JSON.stringify(username) }
+          )
+          .groupBy('message.conversationId')
+          .getRawMany();
+
+        for (const row of convUnreadCounts) {
+          const count = parseInt(row.unreadCount, 10);
+          if (count > 0) {
+            result[row.conversationId.toString()] = count;
+          }
         }
       }
 
@@ -875,9 +867,6 @@ export class MessagesService {
 
         // Si no tiene readBy o está vacío, no ha sido leído
         if (!msg.readBy || msg.readBy.length === 0) {
-          console.log(
-            `📊 DEBUG - Mensaje ${msg.id} no leído (sin readBy): from="${msg.from}"`,
-          );
           return true;
         }
 
