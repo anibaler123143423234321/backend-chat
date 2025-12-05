@@ -27,13 +27,7 @@ export class MessagesService {
   ) { }
 
   async create(createMessageDto: CreateMessageDto): Promise<Message> {
-    // 🔥 DEBUG: Verificar si conversationId está llegando
-    console.log('🔍 DEBUG - createMessageDto received:', {
-      conversationId: createMessageDto.conversationId,
-      isAssignedConversation: createMessageDto['isAssignedConversation'],
-      from: createMessageDto.from,
-      to: createMessageDto.to,
-    });
+    // Log eliminado para optimización
 
     // 🔥 NUEVO: Verificar duplicados antes de guardar
     const {
@@ -1045,7 +1039,7 @@ export class MessagesService {
       );
     });
 
-    console.log('✅ Mensajes filtrados por búsqueda:', filteredMessages.length);
+    // Log eliminado para optimización
 
     // Limitar resultados al límite especificado
     const limitedResults = filteredMessages.slice(0, limit);

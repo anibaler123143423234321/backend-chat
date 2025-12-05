@@ -122,7 +122,6 @@ export class TemporaryRoomsService {
     });
   }
 
-  // 🔥 NUEVO: Método con paginación para salas del usuario
   async findUserRooms(
     username: string,
     page: number = 1,
@@ -134,14 +133,9 @@ export class TemporaryRoomsService {
     totalPages: number;
     hasMore: boolean;
   }> {
-    console.log(
-      `🔍 findUserRooms - Usuario: "${username}", Página: ${page}, Límite: ${limit}`,
-    );
-
     // Buscar el usuario para obtener su displayName
     const user = await this.userRepository.findOne({ where: { username } });
     if (!user) {
-      console.log(`❌ Usuario no encontrado en la base de datos: "${username}"`);
       return {
         rooms: [],
         total: 0,
@@ -157,42 +151,17 @@ export class TemporaryRoomsService {
         ? `${user.nombre} ${user.apellido}`
         : user.username;
 
-    console.log(`✅ Usuario encontrado:`, {
-      username: user.username,
-      nombre: user.nombre,
-      apellido: user.apellido,
-      displayName,
-    });
-
     // Obtener todas las salas activas
     const allRooms = await this.temporaryRoomRepository.find({
       where: { isActive: true },
       order: { createdAt: 'DESC' },
     });
 
-    console.log(`📊 Total de salas activas: ${allRooms.length}`);
-    console.log(`🔍 Buscando salas donde "${displayName}" es miembro...`);
-
     // Filtrar salas donde el usuario es miembro
     const userRooms = allRooms.filter((room) => {
       const members = room.members || [];
-      const isMember = members.includes(displayName);
-
-      if (isMember) {
-        console.log(`  ✅ Usuario ES miembro de sala: ${room.name} (${room.roomCode})`);
-      }
-
-      return isMember;
+      return members.includes(displayName);
     });
-
-    // 🔥 DEBUG: Mostrar las primeras 3 salas y sus miembros
-    if (allRooms.length > 0) {
-      console.log(`🔍 Primeras 3 salas y sus miembros:`);
-      allRooms.slice(0, 3).forEach((room, index) => {
-        console.log(`  Sala ${index + 1}: ${room.name} (${room.roomCode})`);
-        console.log(`    Miembros:`, room.members);
-      });
-    }
 
     // Aplicar paginación
     const total = userRooms.length;
@@ -200,10 +169,6 @@ export class TemporaryRoomsService {
     const paginatedRooms = userRooms.slice(offset, offset + limit);
     const totalPages = Math.ceil(total / limit);
     const hasMore = page < totalPages;
-
-    console.log(
-      `  Total salas del usuario: ${total}, Página actual: ${page}/${totalPages}, Mostrando: ${paginatedRooms.length}`,
-    );
 
     // Enriquecer cada sala con información adicional (último mensaje, etc.)
     const enrichedRooms = await Promise.all(

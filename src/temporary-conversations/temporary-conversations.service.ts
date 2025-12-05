@@ -51,12 +51,7 @@ export class TemporaryConversationsService {
 
     // Normalizar username para comparación (remover acentos y convertir a minúsculas)
     const usernameNormalized = this.normalizeUsername(username);
-    console.log(
-      `🔍 findAll - Buscando conversaciones para: "${username}" (normalizado: "${usernameNormalized}")`,
-    );
-    console.log(
-      `  Total de conversaciones activas: ${allConversations.length}`,
-    );
+    // Logs eliminados para optimización
 
     // 🔥 FILTRAR: Si hay username, solo devolver conversaciones donde el usuario es participante
     let conversationsToEnrich = allConversations;
@@ -66,16 +61,10 @@ export class TemporaryConversationsService {
         const isParticipant = participants.some(
           (p) => this.normalizeUsername(p) === usernameNormalized,
         );
-        if (isParticipant) {
-          console.log(
-            `  ✓ Conversación incluida: "${conv.name}" - participants: ${JSON.stringify(participants)}`,
-          );
-        }
+        // Log eliminado para optimización
         return isParticipant;
       });
-      console.log(
-        `  Conversaciones filtradas: ${conversationsToEnrich.length}`,
-      );
+      // Log eliminado para optimización
     }
 
     // Enriquecer cada conversación con el último mensaje y contador de no leídos
@@ -264,9 +253,7 @@ export class TemporaryConversationsService {
   }> {
     // Normalizar username para comparación
     const usernameNormalized = this.normalizeUsername(username);
-    console.log(
-      `🔍 findAssignedConversations - Usuario: "${username}" (normalizado: "${usernameNormalized}"), Página: ${page}, Límite: ${limit}`,
-    );
+    // Log eliminado para optimización
 
     // Obtener todas las conversaciones activas primero para filtrar
     const allConversations = await this.temporaryConversationRepository.find({
@@ -298,9 +285,7 @@ export class TemporaryConversationsService {
     const totalPages = Math.ceil(total / limit);
     const hasMore = page < totalPages;
 
-    console.log(
-      `  Total filtradas: ${total}, Página actual: ${page}/${totalPages}, Mostrando: ${paginatedConversations.length}`,
-    );
+    // Log eliminado para optimización
 
     // Enriquecer cada conversación con el último mensaje y contador de no leídos
     const enrichedConversations = await Promise.all(
@@ -474,20 +459,14 @@ export class TemporaryConversationsService {
 
     // 🔥 MODIFICADO: Filtrar conversaciones donde el usuario está en assignedUsers (normalizado)
     const usernameNormalized = this.normalizeUsername(username);
-    console.log(
-      `🔍 findByUser - Buscando conversaciones para: "${username}" (normalizado: "${usernameNormalized}")`,
-    );
+    // Log eliminado para optimización
 
     const userConversations = allConversations.filter((conv) => {
       if (!conv.assignedUsers) return false;
       const found = conv.assignedUsers.some((u) => {
         const uNormalized = this.normalizeUsername(u);
         const match = uNormalized === usernameNormalized;
-        if (match) {
-          console.log(
-            `  ✓ Conversación encontrada: "${conv.name}" - assignedUsers: ${JSON.stringify(conv.assignedUsers)}`,
-          );
-        }
+        // Log eliminado para optimización
         return match;
       });
       return found;

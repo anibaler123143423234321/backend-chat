@@ -1,4 +1,4 @@
-﻿import {
+import {
     ConnectedSocket,
     MessageBody,
     OnGatewayConnection,
@@ -26,14 +26,14 @@ import { getPeruDate, formatPeruTime } from '../utils/date.utils';
     },
     transports: ['websocket', 'polling'],
     path: '/socket.io/',
-    // 🔥 NUEVO: Configuraciones de optimización para evitar sobrecarga del servidor
-    pingTimeout: 30000, // 30 segundos - tiempo máximo sin respuesta antes de desconectar
-    pingInterval: 25000, // 25 segundos - frecuencia de verificación de conexión
-    maxHttpBufferSize: 10 * 1024 * 1024, // 10MB - límite de tamaño de mensaje
-    connectTimeout: 45000, // 45 segundos - timeout de conexión inicial
+    // ?? NUEVO: Configuraciones de optimizaci�n para evitar sobrecarga del servidor
+    pingTimeout: 30000, // 30 segundos - tiempo m�ximo sin respuesta antes de desconectar
+    pingInterval: 25000, // 25 segundos - frecuencia de verificaci�n de conexi�n
+    maxHttpBufferSize: 10 * 1024 * 1024, // 10MB - l�mite de tama�o de mensaje
+    connectTimeout: 45000, // 45 segundos - timeout de conexi�n inicial
     upgradeTimeout: 10000, // 10 segundos - timeout de upgrade de polling a websocket
-    allowEIO3: false, // Deshabilitar compatibilidad con Engine.IO v3 (más antiguo)
-    perMessageDeflate: false, // Deshabilitar compresión para reducir CPU
+    allowEIO3: false, // Deshabilitar compatibilidad con Engine.IO v3 (m�s antiguo)
+    perMessageDeflate: false, // Deshabilitar compresi�n para reducir CPU
 })
 @Injectable()
 export class SocketGateway
@@ -49,10 +49,10 @@ export class SocketGateway
     private temporaryLinks = new Map<string, any>();
     private publicRooms = new Map<string, any>();
     private roomUsers = new Map<string, Set<string>>(); // roomCode -> Set<usernames>
-    // 🔥 NUEVO: Caché de mensajes recientes para detección de duplicados
+    // ?? NUEVO: Cach� de mensajes recientes para detecci�n de duplicados
     private recentMessages = new Map<string, number>(); // messageHash -> timestamp
 
-    // 🔥 NUEVO: Tracking de participantes en videollamadas
+    // ?? NUEVO: Tracking de participantes en videollamadas
     private videoRoomParticipants = new Map<
         string,
         Set<{
@@ -63,7 +63,7 @@ export class SocketGateway
         }>
     >(); // roomID -> Set<participant info>
 
-    // 🔥 NUEVO: Caché de datos de usuario para evitar consultas repetidas
+    // ?? NUEVO: Cach� de datos de usuario para evitar consultas repetidas
     private userCache = new Map<
         string,
         {
@@ -78,10 +78,10 @@ export class SocketGateway
     >();
     private CACHE_TTL = 5 * 60 * 1000; // 5 minutos
 
-    // 🔥 NUEVO: Map de admins para broadcasting eficiente
+    // ?? NUEVO: Map de admins para broadcasting eficiente
     private adminUsers = new Map<string, { socket: Socket; userData: any }>();
 
-    // 🔥 NUEVO: Método público para verificar si un usuario está conectado
+    // ?? NUEVO: M�todo p�blico para verificar si un usuario est� conectado
     public isUserOnline(username: string): boolean {
         return this.users.has(username);
     }
@@ -97,25 +97,25 @@ export class SocketGateway
         // Limpiar enlaces expirados cada 5 minutos
         setInterval(() => this.cleanExpiredLinks(), 5 * 60 * 1000);
 
-        //  NUEVO: Limpiar caché de mensajes cada 10 segundos
+        //  NUEVO: Limpiar cach� de mensajes cada 10 segundos
         setInterval(() => this.cleanRecentMessagesCache(), 10 * 1000);
 
         // Inyectar referencia del gateway en el servicio para notificaciones
         this.temporaryRoomsService.setSocketGateway(this);
 
-        //  NUEVO: Limpiar conexiones huérfanas cada 5 minutos
+        //  NUEVO: Limpiar conexiones hu�rfanas cada 5 minutos
         setInterval(() => this.cleanOrphanedConnections(), 5 * 60 * 1000);
 
-        //  NUEVO: Limpiar caché de usuarios cada 10 minutos
+        //  NUEVO: Limpiar cach� de usuarios cada 10 minutos
         setInterval(() => this.cleanUserCache(), 10 * 60 * 1000);
 
-        //  NUEVO: Monitorear estadísticas del sistema cada 30 minutos
+        //  NUEVO: Monitorear estad�sticas del sistema cada 30 minutos
         setInterval(() => this.logSystemStats(), 30 * 60 * 1000);
     }
 
-    // 🔥 NUEVO: Cargar grupos al iniciar el servidor
+    // ?? NUEVO: Cargar grupos al iniciar el servidor
     async afterInit(_server: Server) {
-        console.log('🚀 Inicializando Socket Gateway...');
+        // console.log('?? Inicializando Socket Gateway...');
         try {
             // Cargar todas las salas temporales como grupos
             const rooms = await this.temporaryRoomsService.findAll();
@@ -126,17 +126,17 @@ export class SocketGateway
                 const members = new Set(room.members || []);
                 this.groups.set(room.name, members);
                 totalMembers += members.size;
-                // 🔥 Solo mostrar log detallado en modo desarrollo
+                // ?? Solo mostrar log detallado en modo desarrollo
                 if (process.env.NODE_ENV === 'development') {
-                    console.log(`   ✓ "${room.name}" (${members.size} miembros)`);
+                    // console.log(`   ? "${room.name}" (${members.size} miembros)`);
                 }
             });
 
-            console.log(
-                `✅ Socket Gateway inicializado: ${this.groups.size} salas, ${totalMembers} miembros totales`,
-            );
+            // console.log(
+            //    `? Socket Gateway inicializado: ${this.groups.size} salas, ${totalMembers} miembros totales`,
+            //);
         } catch (error) {
-            console.error('❌ Error al cargar grupos en afterInit:', error);
+            console.error('? Error al cargar grupos en afterInit:', error);
         }
     }
 
@@ -144,7 +144,7 @@ export class SocketGateway
         // Remover usuario del chat si existe
         for (const [username, user] of this.users.entries()) {
             if (user.socket === client) {
-                console.log(`🔌 Desconectando usuario: ${username}`);
+                // console.log(`?? Desconectando usuario: ${username}`);
 
                 // Si el usuario estaba en una sala, solo removerlo de la memoria (NO de la BD)
                 if (user.currentRoom) {
@@ -156,26 +156,26 @@ export class SocketGateway
                     const roomUsersSet = this.roomUsers.get(roomCode);
                     if (roomUsersSet) {
                         roomUsersSet.delete(username);
-                        // console.log(`✅ Usuario ${username} removido de sala en memoria`);
+                        // console.log(`? Usuario ${username} removido de sala en memoria`);
 
                         if (roomUsersSet.size === 0) {
                             this.roomUsers.delete(roomCode);
-                            console.log(
-                                `Sala ${roomCode} removida de memoria (sin usuarios)`,
-                            );
+                            // console.log(
+                            //     `Sala ${roomCode} removida de memoria (sin usuarios)`,
+                            // );
                         }
                     }
 
-                    // Notificar a otros usuarios de la sala que este usuario se desconectó
+                    // Notificar a otros usuarios de la sala que este usuario se desconect�
                     await this.broadcastRoomUsers(roomCode);
                 }
 
                 // Remover usuario del mapa de usuarios conectados
                 this.users.delete(username);
                 this.adminUsers.delete(username); //  NUEVO: Limpiar adminUsers
-                // console.log(`✅ Usuario ${username} removido del mapa de usuarios`);
+                // console.log(`? Usuario ${username} removido del mapa de usuarios`);
 
-                // 🔥 Obtener todas las conversaciones asignadas para actualizar correctamente la lista de usuarios
+                // ?? Obtener todas las conversaciones asignadas para actualizar correctamente la lista de usuarios
                 try {
                     //  CORREGIDO: Construir displayName usando userData antes de que se pierda
                     const userData = user.userData;
@@ -211,11 +211,11 @@ export class SocketGateway
         @MessageBody()
         data: { username: string; userData: any; assignedConversations?: any[] },
     ) {
-        console.log(` WS: register - Usuario: ${data.username}`);
+        // console.log(` WS: register - Usuario: ${data.username}`);
         const { username, userData, assignedConversations } = data;
         this.users.set(username, { socket: client, userData });
 
-        // 🔥 Guardar o actualizar usuario en la base de datos con numeroAgente y role
+        // ?? Guardar o actualizar usuario en la base de datos con numeroAgente y role
         try {
             let dbUser = await this.userRepository.findOne({ where: { username } });
 
@@ -240,10 +240,10 @@ export class SocketGateway
                 await this.userRepository.save(dbUser);
             }
 
-            // 🔥 NUEVO: Agregar a adminUsers si es admin
+            // ?? NUEVO: Agregar a adminUsers si es admin
             if (userData?.role?.toString().toUpperCase().trim() === 'ADMIN') {
                 this.adminUsers.set(username, { socket: client, userData });
-                console.log(` Usuario admin agregado al Map: ${username}`);
+                // console.log(` Usuario admin agregado al Map: ${username}`);
             }
         } catch (error) {
             console.error(` Error al guardar usuario ${username} en BD:`, error);
@@ -260,9 +260,9 @@ export class SocketGateway
 
             if (userRooms.length > 0) {
                 const roomNames = userRooms.map((r) => r.name).join(', ');
-                console.log(
-                    ` Restaurando ${userRooms.length} salas para ${username}: [${roomNames}]`,
-                );
+                // console.log(
+                //     ` Restaurando ${userRooms.length} salas para ${username}: [${roomNames}]`,
+                // );
             }
 
             for (const room of userRooms) {
@@ -273,7 +273,7 @@ export class SocketGateway
                 this.roomUsers.get(room.roomCode)!.add(username);
                 //  Solo mostrar log detallado en modo desarrollo
                 if (process.env.NODE_ENV === 'development') {
-                    console.log(`   ✓ "${room.name}" (${room.roomCode})`);
+                    // console.log(`   ? "${room.name}" (${room.roomCode})`);
                 }
             }
 
@@ -282,16 +282,16 @@ export class SocketGateway
                 const user = this.users.get(username);
                 if (user) {
                     user.currentRoom = userRooms[0].roomCode;
-                    console.log(
-                        ` Sala actual del usuario restaurada a ${userRooms[0].roomCode}`,
-                    );
+                    // console.log(
+                    //     ` Sala actual del usuario restaurada a ${userRooms[0].roomCode}`,
+                    // );
                 }
             }
         } catch (error) {
             console.error(` Error al restaurar salas para ${username}:`, error);
         }
 
-        // Enviar confirmación de registro
+        // Enviar confirmaci�n de registro
         client.emit('info', {
             message: `Registrado como ${username}`,
         });
@@ -310,7 +310,7 @@ export class SocketGateway
             await this.broadcastUserList(allAssignedConversations);
         } catch (error) {
             console.error(
-                '❌ Error al obtener conversaciones asignadas en handleRegister:',
+                '? Error al obtener conversaciones asignadas en handleRegister:',
                 error,
             );
             this.broadcastUserList(assignedConversations);
@@ -322,11 +322,11 @@ export class SocketGateway
         @ConnectedSocket() client: Socket,
         @MessageBody() data: { page: number; pageSize: number },
     ) {
-        console.log(
-            ` WS: requestUserListPage - Página: ${data.page}, Tamaño: ${data.pageSize}`,
-        );
+        // console.log(
+        //     ` WS: requestUserListPage - P�gina: ${data.page}, Tama�o: ${data.pageSize}`,
+        // );
 
-        // Obtener el usuario que hace la petición
+        // Obtener el usuario que hace la petici�n
         let requestingUser = null;
         for (const [username, { socket, userData }] of this.users.entries()) {
             if (socket.id === client.id) {
@@ -336,7 +336,7 @@ export class SocketGateway
         }
 
         if (!requestingUser) {
-            console.log('❌ Usuario no encontrado');
+            // console.log('? Usuario no encontrado');
             return;
         }
 
@@ -346,11 +346,11 @@ export class SocketGateway
             requestingUser.userData.role.toString().toUpperCase().trim() === 'ADMIN';
 
         if (!isAdmin) {
-            console.log('❌ Usuario no es admin');
+            // console.log('? Usuario no es admin');
             return;
         }
 
-        // Crear lista de usuarios con toda su información
+        // Crear lista de usuarios con toda su informaci�n
         const userListWithData = Array.from(this.users.entries()).map(
             ([username, { userData }]) => ({
                 id: userData?.id || null,
@@ -373,7 +373,7 @@ export class SocketGateway
         const end = start + pageSize;
         const paginatedUsers = userListWithData.slice(start, end);
 
-        // Enviar página solicitada
+        // Enviar p�gina solicitada
         client.emit('userListPage', {
             users: paginatedUsers,
             page: page,
@@ -388,14 +388,14 @@ export class SocketGateway
         @ConnectedSocket() client: Socket,
         @MessageBody() data: { username: string; assignedConversations: any[] },
     ) {
-        console.log(
-            `🔄 WS: updateAssignedConversations - Usuario: ${data.username}`,
-        );
+        // console.log(
+        //     `?? WS: updateAssignedConversations - Usuario: ${data.username}`,
+        // );
 
-        // Actualizar la lista de usuarios para este usuario específico
+        // Actualizar la lista de usuarios para este usuario espec�fico
         const userConnection = this.users.get(data.username);
         if (userConnection && userConnection.socket.connected) {
-            // Crear lista de usuarios conectados con toda su información
+            // Crear lista de usuarios conectados con toda su informaci�n
             const connectedUsersMap = new Map<string, any>();
             Array.from(this.users.entries()).forEach(([uname, { userData }]) => {
                 connectedUsersMap.set(uname, {
@@ -413,22 +413,22 @@ export class SocketGateway
                 });
             });
 
-            // Incluir información del usuario actual + usuarios de conversaciones asignadas
+            // Incluir informaci�n del usuario actual + usuarios de conversaciones asignadas
             const usersToSend = [];
 
-            // Agregar información del usuario actual
+            // Agregar informaci�n del usuario actual
             const ownUserData = connectedUsersMap.get(data.username);
             if (ownUserData) {
                 usersToSend.push(ownUserData);
             }
 
-            // Agregar información de los otros usuarios en las conversaciones asignadas
+            // Agregar informaci�n de los otros usuarios en las conversaciones asignadas
             if (data.assignedConversations && data.assignedConversations.length > 0) {
                 for (const conv of data.assignedConversations) {
                     if (conv.participants && Array.isArray(conv.participants)) {
                         for (const participantName of conv.participants) {
                             if (participantName !== data.username) {
-                                // Verificar si ya está en la lista
+                                // Verificar si ya est� en la lista
                                 if (usersToSend.some((u) => u.username === participantName)) {
                                     continue;
                                 }
@@ -437,10 +437,10 @@ export class SocketGateway
                                 const participantData = connectedUsersMap.get(participantName);
 
                                 if (participantData) {
-                                    // Usuario está conectado
+                                    // Usuario est� conectado
                                     usersToSend.push(participantData);
                                 } else {
-                                    // Usuario NO está conectado, buscar en la base de datos
+                                    // Usuario NO est� conectado, buscar en la base de datos
                                     try {
                                         // Buscar por nombre completo (participantName puede ser "Nombre Apellido")
                                         const dbUser = await this.userRepository
@@ -460,12 +460,12 @@ export class SocketGateway
                                                     ? `${dbUser.nombre} ${dbUser.apellido}`
                                                     : dbUser.username;
 
-                                            // 🔥 CORREGIDO: Verificar si el usuario está conectado
+                                            // ?? CORREGIDO: Verificar si el usuario est� conectado
                                             const isUserConnected =
                                                 this.users.has(fullName) ||
                                                 this.users.has(dbUser.username);
 
-                                            // Agregar usuario de la BD con estado de conexión correcto
+                                            // Agregar usuario de la BD con estado de conexi�n correcto
                                             usersToSend.push({
                                                 id: dbUser.id || null,
                                                 username: fullName,
@@ -477,12 +477,12 @@ export class SocketGateway
                                                 sede: null,
                                                 sede_id: null,
                                                 numeroAgente: dbUser.numeroAgente || null, //  Obtener numeroAgente de la BD
-                                                isOnline: isUserConnected, //  CORREGIDO: Estado de conexión real
+                                                isOnline: isUserConnected, //  CORREGIDO: Estado de conexi�n real
                                             });
                                         }
                                     } catch (error) {
                                         console.error(
-                                            `❌ Error al buscar usuario ${participantName} en BD:`,
+                                            `? Error al buscar usuario ${participantName} en BD:`,
                                             error,
                                         );
                                     }
@@ -493,12 +493,12 @@ export class SocketGateway
                 }
             }
 
-            console.log(
-                `📤 Enviando lista de usuarios a ${data.username}:`,
-                usersToSend.map(
-                    (u) => `${u.username} (${u.isOnline ? 'online' : 'offline'})`,
-                ),
-            );
+            // console.log(
+            //     `?? Enviando lista de usuarios a ${data.username}:`,
+            //     usersToSend.map(
+            //         (u) => `${u.username} (${u.isOnline ? 'online' : 'offline'})`,
+            //     ),
+            // );
             userConnection.socket.emit('userList', { users: usersToSend });
         }
     }
@@ -515,9 +515,9 @@ export class SocketGateway
             assignedConversations?: any[];
         },
     ) {
-        console.log(
-            `💬 WS: conversationAssigned - ${data.conversationName} entre ${data.user1} y ${data.user2}`,
-        );
+        // console.log(
+        //     `?? WS: conversationAssigned - ${data.conversationName} entre ${data.user1} y ${data.user2}`,
+        // );
 
         // Notificar a ambos usuarios
         const user1Connection = this.users.get(data.user1);
@@ -527,7 +527,7 @@ export class SocketGateway
             conversationName: data.conversationName,
             linkId: data.linkId,
             otherUser: '',
-            message: `Se te ha asignado una conversación: ${data.conversationName}`,
+            message: `Se te ha asignado una conversaci�n: ${data.conversationName}`,
         };
 
         if (user1Connection && user1Connection.socket.connected) {
@@ -545,10 +545,10 @@ export class SocketGateway
         }
 
         //  NUEVO: Actualizar la lista de usuarios de ambos participantes para que se vean mutuamente
-        // Esto asegura que ambos usuarios vean al otro en su lista inmediatamente después de la asignación
+        // Esto asegura que ambos usuarios vean al otro en su lista inmediatamente despu�s de la asignaci�n
         const userListWithData = Array.from(this.users.entries()).map(
             ([username, { userData }]) => {
-                // Calcular el nombre completo para comparación
+                // Calcular el nombre completo para comparaci�n
                 const fullName =
                     userData?.nombre && userData?.apellido
                         ? `${userData.nombre} ${userData.apellido}`
@@ -557,7 +557,7 @@ export class SocketGateway
                 return {
                     id: userData?.id || null,
                     username: username,
-                    fullName: fullName, // Agregar fullName para comparación
+                    fullName: fullName, // Agregar fullName para comparaci�n
                     nombre: userData?.nombre || null,
                     apellido: userData?.apellido || null,
                     email: userData?.email || null,
@@ -580,7 +580,7 @@ export class SocketGateway
                 // Para usuarios no admin, enviar lista actualizada con el otro participante
                 const usersToSend = [];
 
-                // Agregar información del usuario actual (buscar por username o fullName)
+                // Agregar informaci�n del usuario actual (buscar por username o fullName)
                 const ownUserData = userListWithData.find(
                     (u) => u.username === data.user1 || u.fullName === data.user1,
                 );
@@ -590,7 +590,7 @@ export class SocketGateway
                     usersToSend.push(userDataToSend);
                 }
 
-                // Agregar información del otro participante (buscar por username o fullName)
+                // Agregar informaci�n del otro participante (buscar por username o fullName)
                 const user2Data = userListWithData.find(
                     (u) => u.username === data.user2 || u.fullName === data.user2,
                 );
@@ -600,10 +600,10 @@ export class SocketGateway
                     usersToSend.push(userDataToSend);
                 }
 
-                console.log(
-                    `🔄 Actualizando lista de usuarios para ${data.user1}:`,
-                    usersToSend.map((u) => u.username),
-                );
+                // console.log(
+                //     `?? Actualizando lista de usuarios para ${data.user1}:`,
+                //     usersToSend.map((u) => u.username),
+                // );
                 user1Connection.socket.emit('userList', { users: usersToSend });
             }
         }
@@ -618,7 +618,7 @@ export class SocketGateway
                 // Para usuarios no admin, enviar lista actualizada con el otro participante
                 const usersToSend = [];
 
-                // Agregar información del usuario actual (buscar por username o fullName)
+                // Agregar informaci�n del usuario actual (buscar por username o fullName)
                 const ownUserData = userListWithData.find(
                     (u) => u.username === data.user2 || u.fullName === data.user2,
                 );
@@ -628,7 +628,7 @@ export class SocketGateway
                     usersToSend.push(userDataToSend);
                 }
 
-                // Agregar información del otro participante (buscar por username o fullName)
+                // Agregar informaci�n del otro participante (buscar por username o fullName)
                 const user1Data = userListWithData.find(
                     (u) => u.username === data.user1 || u.fullName === data.user1,
                 );
@@ -638,10 +638,10 @@ export class SocketGateway
                     usersToSend.push(userDataToSend);
                 }
 
-                console.log(
-                    `🔄 Actualizando lista de usuarios para ${data.user2}:`,
-                    usersToSend.map((u) => u.username),
-                );
+                // console.log(
+                //     `?? Actualizando lista de usuarios para ${data.user2}:`,
+                //     usersToSend.map((u) => u.username),
+                // );
                 user2Connection.socket.emit('userList', { users: usersToSend });
             }
         }
@@ -657,9 +657,9 @@ export class SocketGateway
             participants: string[];
         },
     ) {
-        console.log(
-            `🗑️ WS: conversationRemoved - ID: ${data.conversationId}, Name: ${data.conversationName}, Participants: ${data.participants?.length || 0}`,
-        );
+        // console.log(
+        //     `??? WS: conversationRemoved - ID: ${data.conversationId}, Name: ${data.conversationName}, Participants: ${data.participants?.length || 0}`,
+        // );
 
         // Notificar a todos los participantes
         const participants = data.participants || [];
@@ -670,11 +670,11 @@ export class SocketGateway
                     conversationId: data.conversationId,
                     conversationName: data.conversationName,
                 });
-                console.log(
-                    `✅ Notificando remoción a ${participantName} - Conversación: ${data.conversationName}`,
-                );
+                // console.log(
+                //     `? Notificando remoci�n a ${participantName} - Conversaci�n: ${data.conversationName}`,
+                // );
             } else {
-                console.log(`⚠️ Usuario no encontrado o no conectado: ${participantName}`);
+                // console.log(`?? Usuario no encontrado o no conectado: ${participantName}`);
             }
         });
     }
@@ -689,11 +689,11 @@ export class SocketGateway
             conversationId: string;
         },
     ) {
-        console.log(
-            `🔄 WS: conversationUpdated - ${data.conversationName} (ID: ${data.conversationId})`,
-        );
+        // console.log(
+        //     `?? WS: conversationUpdated - ${data.conversationName} (ID: ${data.conversationId})`,
+        // );
 
-        // Notificar a todos los participantes que la conversación fue actualizada
+        // Notificar a todos los participantes que la conversaci�n fue actualizada
         if (data.participants && Array.isArray(data.participants)) {
             data.participants.forEach((participantName) => {
                 const participantConnection = this.users.get(participantName);
@@ -701,20 +701,20 @@ export class SocketGateway
                     participantConnection.socket.emit('conversationDataUpdated', {
                         conversationId: data.conversationId,
                         conversationName: data.conversationName,
-                        message: `La conversación "${data.conversationName}" ha sido actualizada`,
+                        message: `La conversaci�n "${data.conversationName}" ha sido actualizada`,
                     });
                 }
             });
         }
 
-        // También notificar a todos los ADMIN
-        // 🔥 OPTIMIZADO: Usar adminUsers en lugar de iterar todos los usuarios
+        // Tambi�n notificar a todos los ADMIN
+        // ?? OPTIMIZADO: Usar adminUsers en lugar de iterar todos los usuarios
         this.adminUsers.forEach(({ socket }) => {
             if (socket.connected) {
                 socket.emit('conversationDataUpdated', {
                     conversationId: data.conversationId,
                     conversationName: data.conversationName,
-                    message: `La conversación "${data.conversationName}" ha sido actualizada`,
+                    message: `La conversaci�n "${data.conversationName}" ha sido actualizada`,
                 });
             }
         });
@@ -730,7 +730,7 @@ export class SocketGateway
         if (data.roomCode) {
             const roomUsers = this.roomUsers.get(data.roomCode);
             if (roomUsers) {
-                // Emitir a todos los usuarios de la sala excepto al que está escribiendo
+                // Emitir a todos los usuarios de la sala excepto al que est� escribiendo
                 roomUsers.forEach((member) => {
                     if (member !== data.from) {
                         const memberUser = this.users.get(member);
@@ -762,12 +762,12 @@ export class SocketGateway
         @ConnectedSocket() client: Socket,
         @MessageBody() data: any,
     ) {
-        // 🔥 NUEVO: Verificar si es un mensaje duplicado
+        // ?? NUEVO: Verificar si es un mensaje duplicado
         if (this.isDuplicateMessage(data)) {
             return; // Ignorar el mensaje duplicado
         }
 
-        // Log removido para optimización - datos del mensaje
+        // Log removido para optimizaci�n - datos del mensaje
 
         const {
             to,
@@ -785,22 +785,22 @@ export class SocketGateway
             roomCode: messageRoomCode, //  roomCode del mensaje (si viene del frontend)
         } = data;
 
-        //  Obtener información del remitente (role y numeroAgente)
+        //  Obtener informaci�n del remitente (role y numeroAgente)
         const senderUser = this.users.get(from);
         let senderRole = senderUser?.userData?.role || null;
         let senderNumeroAgente = senderUser?.userData?.numeroAgente || null;
 
-        // Log DEBUG removido para optimización
+        // Log DEBUG removido para optimizaci�n
 
-        //  OPTIMIZACIÓN: Cachear información del usuario para evitar consultas repetidas a BD
+        //  OPTIMIZACI�N: Cachear informaci�n del usuario para evitar consultas repetidas a BD
         if (!senderRole || !senderNumeroAgente) {
-            // Primero verificar si ya tenemos el usuario en memoria (de una conexión anterior)
+            // Primero verificar si ya tenemos el usuario en memoria (de una conexi�n anterior)
             const cachedUser = this.users.get(from);
             if (cachedUser?.userData?.role && cachedUser?.userData?.numeroAgente) {
                 senderRole = cachedUser.userData.role;
                 senderNumeroAgente = cachedUser.userData.numeroAgente;
             } else {
-                // Solo consultar BD si no está en caché
+                // Solo consultar BD si no est� en cach�
                 try {
                     const dbUser = await this.userRepository.findOne({
                         where: { username: from },
@@ -820,15 +820,15 @@ export class SocketGateway
                             };
                         }
                     } else {
-                        console.warn(`⚠️ Usuario ${from} no encontrado en BD`);
+                        // console.warn(`?? Usuario ${from} no encontrado en BD`);
                     }
                 } catch (error) {
-                    console.error(`❌ Error al buscar usuario en BD:`, error);
+                    console.error(`? Error al buscar usuario en BD:`, error);
                 }
             }
         }
 
-        //  CRÍTICO: Determinar el roomCode ANTES de guardar en BD
+        //  CR�TICO: Determinar el roomCode ANTES de guardar en BD
         const user = this.users.get(from);
         const finalRoomCode = messageRoomCode || user?.currentRoom;
 
@@ -855,40 +855,40 @@ export class SocketGateway
                     );
                     // Encuesta creada exitosamente
                 } catch (pollError) {
-                    console.error('❌ Error al crear encuesta:', pollError);
+                    console.error('? Error al crear encuesta:', pollError);
                 }
             }
         } catch (error) {
-            console.error(`❌ Error al guardar mensaje en BD:`, error);
+            console.error(`? Error al guardar mensaje en BD:`, error);
         }
 
         if (isGroup) {
-            console.log(`🔵 Procesando mensaje de GRUPO`);
+            // console.log(`?? Procesando mensaje de GRUPO`);
 
-            console.log(`👤 Usuario remitente:`, {
-                username: from,
-                messageRoomCode, // Ya está disponible del destructuring
-                currentRoom: user?.currentRoom,
-                finalRoomCode,
-                hasUser: !!user,
-            });
+            // console.log(`?? Usuario remitente:`, {
+            //     username: from,
+            //     messageRoomCode, // Ya est� disponible del destructuring
+            //     currentRoom: user?.currentRoom,
+            //     finalRoomCode,
+            //     hasUser: !!user,
+            // });
 
             if (finalRoomCode) {
                 // Es una sala temporal
                 let roomUsers = this.roomUsers.get(finalRoomCode);
-                console.log(
-                    `🏠 Enviando a sala temporal: ${finalRoomCode}, Miembros en memoria: ${roomUsers?.size || 0}`,
-                );
+                // console.log(
+                //     `?? Enviando a sala temporal: ${finalRoomCode}, Miembros en memoria: ${roomUsers?.size || 0}`,
+                // );
 
-                // 🔥 SIEMPRE sincronizar con la base de datos para asegurar que todos reciban el mensaje
+                // ?? SIEMPRE sincronizar con la base de datos para asegurar que todos reciban el mensaje
                 try {
                     const room =
                         await this.temporaryRoomsService.findByRoomCode(finalRoomCode);
                     if (room && room.connectedMembers) {
-                        console.log(
-                            `🔄 Sincronizando usuarios de BD para sala ${finalRoomCode}:`,
-                            room.connectedMembers,
-                        );
+                        // console.log(
+                        //     `?? Sincronizando usuarios de BD para sala ${finalRoomCode}:`,
+                        //     room.connectedMembers,
+                        // );
 
                         // Combinar usuarios en memoria con usuarios de BD
                         const allUsers = new Set([
@@ -899,58 +899,58 @@ export class SocketGateway
                         ]);
 
                         roomUsers = allUsers;
-                        console.log(`✅ Total de usuarios para envío: ${roomUsers.size}`);
+                        // console.log(`? Total de usuarios para env�o: ${roomUsers.size}`);
                     }
                 } catch (error) {
                     console.error(
-                        `❌ Error al sincronizar usuarios de sala ${finalRoomCode}:`,
+                        `? Error al sincronizar usuarios de sala ${finalRoomCode}:`,
                         error,
                     );
                 }
 
                 if (roomUsers && roomUsers.size > 0) {
-                    console.log(
-                        `📋 Lista completa de usuarios en sala ${finalRoomCode}:`,
-                        Array.from(roomUsers),
-                    );
+                    // console.log(
+                    //     `?? Lista completa de usuarios en sala ${finalRoomCode}:`,
+                    //     Array.from(roomUsers),
+                    // );
 
-                    // 🔥 Detectar menciones en el mensaje
+                    // ?? Detectar menciones en el mensaje
                     const mentionRegex =
-                        /@([a-zA-ZÁÉÍÓÚÑáéíóúñ][a-zA-ZÁÉÍÓÚÑáéíóúñ\s]+?)(?=\s{2,}|$|[.,!?;:]|\n)/g;
+                        /@([a-zA-Z������������][a-zA-Z������������\s]+?)(?=\s{2,}|$|[.,!?;:]|\n)/g;
                     const mentions = [];
                     let match;
                     while ((match = mentionRegex.exec(message)) !== null) {
                         mentions.push(match[1].trim());
                     }
-                    console.log(`📢 Menciones detectadas en mensaje:`, mentions);
+                    // console.log(`?? Menciones detectadas en mensaje:`, mentions);
 
                     roomUsers.forEach((member) => {
                         const memberUser = this.users.get(member);
 
-                        // 🔥 NUEVO: Validar que el socket esté conectado
+                        // ?? NUEVO: Validar que el socket est� conectado
                         if (
                             memberUser &&
                             memberUser.socket &&
                             memberUser.socket.connected
                         ) {
-                            // 🔥 Verificar si este usuario fue mencionado
+                            // ?? Verificar si este usuario fue mencionado
                             const isMentioned = mentions.some(
                                 (mention) =>
                                     member.toUpperCase().includes(mention.toUpperCase()) ||
                                     mention.toUpperCase().includes(member.toUpperCase()),
                             );
 
-                            console.log(
-                                `✅ Enviando mensaje a ${member} en sala ${finalRoomCode}${isMentioned ? ' (MENCIONADO)' : ''} - Socket ID: ${memberUser.socket.id}`,
-                            );
+                            // console.log(
+                            //     `? Enviando mensaje a ${member} en sala ${finalRoomCode}${isMentioned ? ' (MENCIONADO)' : ''} - Socket ID: ${memberUser.socket.id}`,
+                            // );
                             memberUser.socket.emit('message', {
                                 id: savedMessage?.id, //  Incluir ID del mensaje
                                 from: from || 'Usuario Desconocido',
                                 senderRole, //  Incluir role del remitente
                                 senderNumeroAgente, //  Incluir numeroAgente del remitente
                                 group: to,
-                                groupName: to, //  Incluir groupName explícitamente para el frontend
-                                roomCode: finalRoomCode, //  CRÍTICO: Incluir roomCode para validación en frontend
+                                groupName: to, //  Incluir groupName expl�citamente para el frontend
+                                roomCode: finalRoomCode, //  CR�TICO: Incluir roomCode para validaci�n en frontend
                                 message,
                                 isGroup: true,
                                 time: time || formatPeruTime(),
@@ -970,12 +970,12 @@ export class SocketGateway
                                 metadata: data.metadata,
                             });
 
-                            // 🔥 NUEVO: Actualizar último mensaje para todos los usuarios (excepto el remitente)
-                            // Esto asegura que el último mensaje se actualice en tiempo real en la lista de salas
+                            // ?? NUEVO: Actualizar �ltimo mensaje para todos los usuarios (excepto el remitente)
+                            // Esto asegura que el �ltimo mensaje se actualice en tiempo real en la lista de salas
                             if (member !== from) {
-                                // Verificar si el usuario está viendo esta sala actualmente
+                                // Verificar si el usuario est� viendo esta sala actualmente
                                 const isViewingThisRoom = memberUser.currentRoom === finalRoomCode;
-                                // console.log(`📊 DEBUG - Usuario ${member}: currentRoom="${memberUser.currentRoom}", roomCode="${finalRoomCode}", isViewingThisRoom=${isViewingThisRoom}`);
+                                // console.log(`?? DEBUG - Usuario ${member}: currentRoom="${memberUser.currentRoom}", roomCode="${finalRoomCode}", isViewingThisRoom=${isViewingThisRoom}`);
 
                                 const lastMessageData = {
                                     text: message,
@@ -985,7 +985,7 @@ export class SocketGateway
                                 };
 
                                 if (!isViewingThisRoom) {
-                                    // Usuario NO está viendo esta sala, enviar actualización con contador
+                                    // Usuario NO est� viendo esta sala, enviar actualizaci�n con contador
                                     this.emitUnreadCountUpdateForUser(
                                         finalRoomCode,
                                         member,
@@ -993,7 +993,7 @@ export class SocketGateway
                                         lastMessageData,
                                     );
                                 } else {
-                                    // Usuario SÍ está viendo esta sala, solo actualizar último mensaje sin incrementar contador
+                                    // Usuario S� est� viendo esta sala, solo actualizar �ltimo mensaje sin incrementar contador
                                     this.emitUnreadCountUpdateForUser(
                                         finalRoomCode,
                                         member,
@@ -1004,21 +1004,21 @@ export class SocketGateway
                             }
                         } else {
                             //  NUEVO: Log cuando no se puede enviar
-                            console.warn(
-                                `⚠️ No se puede enviar mensaje a ${member}: socket no conectado o usuario no existe`,
-                            );
+                            // console.warn(
+                            //     `?? No se puede enviar mensaje a ${member}: socket no conectado o usuario no existe`,
+                            // );
                         }
                     });
                 } else {
                     //  NUEVO: Log cuando no hay usuarios en la sala
-                    console.warn(`⚠️ No hay usuarios en la sala ${finalRoomCode}`);
+                    // console.warn(`?? No hay usuarios en la sala ${finalRoomCode}`);
                 }
             } else {
                 // Es un grupo normal
                 const group = this.groups.get(to);
-                console.log(
-                    `👥 Enviando a grupo normal: ${to}, Miembros: ${group?.size || 0}`,
-                );
+                // console.log(
+                //     `?? Enviando a grupo normal: ${to}, Miembros: ${group?.size || 0}`,
+                // );
                 if (group) {
                     //  Obtener el roomCode del grupo (buscar en roomUsers)
                     let groupRoomCode = null;
@@ -1031,13 +1031,13 @@ export class SocketGateway
 
                     //  Detectar menciones en el mensaje
                     const mentionRegex =
-                        /@([a-zA-ZÁÉÍÓÚÑáéíóúñ][a-zA-ZÁÉÍÓÚÑáéíóúñ\s]+?)(?=\s{2,}|$|[.,!?;:]|\n)/g;
+                        /@([a-zA-Z������������][a-zA-Z������������\s]+?)(?=\s{2,}|$|[.,!?;:]|\n)/g;
                     const mentions = [];
                     let match;
                     while ((match = mentionRegex.exec(message)) !== null) {
                         mentions.push(match[1].trim());
                     }
-                    console.log(`📢 Menciones detectadas en mensaje de grupo:`, mentions);
+                    // console.log(`?? Menciones detectadas en mensaje de grupo:`, mentions);
 
                     const groupMembers = Array.from(group);
                     groupMembers.forEach((member) => {
@@ -1056,8 +1056,8 @@ export class SocketGateway
                                 senderRole, //  Incluir role del remitente
                                 senderNumeroAgente, //  Incluir numeroAgente del remitente
                                 group: to,
-                                groupName: to, //  Incluir groupName explícitamente para el frontend
-                                roomCode: groupRoomCode, //  CRÍTICO: Incluir roomCode para validación en frontend
+                                groupName: to, //  Incluir groupName expl�citamente para el frontend
+                                roomCode: groupRoomCode, //  CR�TICO: Incluir roomCode para validaci�n en frontend
                                 message,
                                 isGroup: true,
                                 time: time || formatPeruTime(),
@@ -1081,24 +1081,24 @@ export class SocketGateway
                 }
             }
         } else {
-            console.log(`🔴 Procesando mensaje INDIVIDUAL (1-a-1)`);
+            // console.log(`?? Procesando mensaje INDIVIDUAL (1-a-1)`);
             // Mensaje individual
             let recipientUsername = to;
 
-            // Si es una conversación asignada, obtener el destinatario real
+            // Si es una conversaci�n asignada, obtener el destinatario real
             if (data.isAssignedConversation && data.actualRecipient) {
                 recipientUsername = data.actualRecipient;
-                console.log(
-                    `📧 Conversación asignada detectada. Destinatario real: ${recipientUsername}`,
-                );
+                // console.log(
+                //     `?? Conversaci�n asignada detectada. Destinatario real: ${recipientUsername}`,
+                // );
             }
 
             // Log de usuarios conectados
             const connectedUsers = Array.from(this.users.keys());
-            console.log(`👥 Usuarios conectados: ${connectedUsers.join(', ')}`);
-            console.log(`🔍 Buscando destinatario: ${recipientUsername}`);
+            // console.log(`?? Usuarios conectados: ${connectedUsers.join(', ')}`);
+            // console.log(`?? Buscando destinatario: ${recipientUsername}`);
 
-            // 🔥 Búsqueda case-insensitive del destinatario
+            // ?? B�squeda case-insensitive del destinatario
             let recipient = this.users.get(recipientUsername);
 
             // Si no se encuentra con el nombre exacto, buscar case-insensitive
@@ -1109,9 +1109,9 @@ export class SocketGateway
                 );
                 if (foundUsername) {
                     recipient = this.users.get(foundUsername);
-                    console.log(
-                        `✅ Usuario encontrado con búsqueda case-insensitive: ${foundUsername}`,
-                    );
+                    // console.log(
+                    //     `? Usuario encontrado con b�squeda case-insensitive: ${foundUsername}`,
+                    // );
                 }
             }
 
@@ -1143,36 +1143,36 @@ export class SocketGateway
 
             //  Enviar mensaje al destinatario
             if (recipient && recipient.socket.connected) {
-                console.log(
-                    `✅ Enviando mensaje a ${recipientUsername} (socket conectado)`,
-                );
-                console.log(`📦 Datos del mensaje:`, {
-                    id: savedMessage?.id,
-                    from,
-                    to: recipientUsername,
-                    message: message?.substring(0, 50),
-                    isGroup: false,
-                });
+                // console.log(
+                //     `? Enviando mensaje a ${recipientUsername} (socket conectado)`,
+                // );
+                // console.log(`?? Datos del mensaje:`, {
+                //     id: savedMessage?.id,
+                //     from,
+                //     to: recipientUsername,
+                //     message: message?.substring(0, 50),
+                //     isGroup: false,
+                // });
 
                 recipient.socket.emit('message', messageToSend);
-                console.log(`✅ Mensaje emitido exitosamente a ${recipientUsername}`);
+                // console.log(`? Mensaje emitido exitosamente a ${recipientUsername}`);
             } else {
-                console.log(
-                    `❌ No se pudo enviar mensaje a ${recipientUsername} (usuario no conectado o no encontrado)`,
-                );
+                // console.log(
+                //     `? No se pudo enviar mensaje a ${recipientUsername} (usuario no conectado o no encontrado)`,
+                // );
                 if (recipient) {
-                    console.log(`   Socket conectado: ${recipient.socket.connected}`);
+                    // console.log(`   Socket conectado: ${recipient.socket.connected}`);
                 } else {
-                    console.log(`   Destinatario no encontrado en el Map de usuarios`);
+                    // console.log(`   Destinatario no encontrado en el Map de usuarios`);
                 }
             }
 
-            // 🔥 NUEVO: Enviar mensaje de vuelta al remitente para que vea su propio mensaje
+            // ?? NUEVO: Enviar mensaje de vuelta al remitente para que vea su propio mensaje
             const sender = this.users.get(from);
             if (sender && sender.socket.connected) {
-                console.log(
-                    `✅ Enviando confirmación de mensaje al remitente: ${from}`,
-                );
+                // console.log(
+                //     `? Enviando confirmaci�n de mensaje al remitente: ${from}`,
+                // );
                 sender.socket.emit('message', messageToSend);
             }
 
@@ -1196,21 +1196,21 @@ export class SocketGateway
                 replyToText,
             });
 
-            // NUEVO: Emitir evento de actualización de conversación asignada
-            // Esto permite que ambos participantes reordenen sus listas automáticamente
+            // NUEVO: Emitir evento de actualizaci�n de conversaci�n asignada
+            // Esto permite que ambos participantes reordenen sus listas autom�ticamente
             if (data.isAssignedConversation && data.conversationId) {
-                console.log(`📤 Emitiendo assignedConversationUpdated para conversación ${data.conversationId}`);
+                // console.log(`?? Emitiendo assignedConversationUpdated para conversaci�n ${data.conversationId}`);
 
                 // Determinar el texto del mensaje para mostrar
                 let messageText = message;
                 if (!messageText && mediaType) {
-                    if (mediaType === 'image') messageText = '📷 Imagen';
-                    else if (mediaType === 'video') messageText = '🎥 Video';
-                    else if (mediaType === 'audio') messageText = '🎵 Audio';
-                    else if (mediaType === 'document') messageText = '📄 Documento';
-                    else messageText = '📎 Archivo';
+                    if (mediaType === 'image') messageText = '?? Imagen';
+                    else if (mediaType === 'video') messageText = '?? Video';
+                    else if (mediaType === 'audio') messageText = '?? Audio';
+                    else if (mediaType === 'document') messageText = '?? Documento';
+                    else messageText = '?? Archivo';
                 } else if (!messageText && fileName) {
-                    messageText = '📎 Archivo';
+                    messageText = '?? Archivo';
                 }
 
                 const conversationUpdateData = {
@@ -1227,7 +1227,7 @@ export class SocketGateway
                     const participantConnection = this.users.get(participantName);
                     if (participantConnection && participantConnection.socket.connected) {
                         participantConnection.socket.emit('assignedConversationUpdated', conversationUpdateData);
-                        console.log(`✅ Evento assignedConversationUpdated emitido a ${participantName}`);
+                        // console.log(`? Evento assignedConversationUpdated emitido a ${participantName}`);
                     }
                 });
             }
@@ -1244,7 +1244,7 @@ export class SocketGateway
             fromId,
             senderRole, //  Extraer role del remitente
             senderNumeroAgente, //  Extraer numeroAgente del remitente
-            roomCode, //  CRÍTICO: Extraer roomCode del data
+            roomCode, //  CR�TICO: Extraer roomCode del data
             mediaType,
             mediaData,
             fileName,
@@ -1262,17 +1262,17 @@ export class SocketGateway
         } = data;
 
         try {
-            // Si es una conversación asignada, usar el destinatario real
+            // Si es una conversaci�n asignada, usar el destinatario real
             let recipientForDB = to;
             if (isAssignedConversation && actualRecipient) {
                 recipientForDB = actualRecipient;
             }
 
-            console.log(
-                `🔍 Guardando mensaje - isAssignedConversation: ${isAssignedConversation}, actualRecipient: ${actualRecipient}, to: ${to}, recipientForDB: ${recipientForDB}`,
-            );
+            // console.log(
+            //     `?? Guardando mensaje - isAssignedConversation: ${isAssignedConversation}, actualRecipient: ${actualRecipient}, to: ${to}, recipientForDB: ${recipientForDB}`,
+            // );
 
-            //  CRÍTICO: Calcular sentAt y time desde el servidor (no confiar en el cliente)
+            //  CR�TICO: Calcular sentAt y time desde el servidor (no confiar en el cliente)
             const peruDate = getPeruDate();
             const calculatedTime = formatPeruTime(peruDate);
 
@@ -1302,20 +1302,20 @@ export class SocketGateway
                 metadata,
             };
 
-            console.log(`💾 Guardando mensaje en BD:`, messageData);
-            console.log(`🔍 DEBUG - senderNumeroAgente antes de guardar:`, {
-                senderNumeroAgente,
-                senderRole,
-                fromId,
-                from,
-            });
+            // console.log(`?? Guardando mensaje en BD:`, messageData);
+            // console.log(`?? DEBUG - senderNumeroAgente antes de guardar:`, {
+            //     senderNumeroAgente,
+            //     senderRole,
+            //     fromId,
+            //     from,
+            // });
             const savedMessage = await this.messagesService.create(messageData);
-            console.log(
-                `✅ Mensaje guardado exitosamente en BD con ID: ${savedMessage.id}`,
-            );
-            return savedMessage; // 🔥 Retornar el mensaje guardado con su ID
+            // console.log(
+            //     `? Mensaje guardado exitosamente en BD con ID: ${savedMessage.id}`,
+            // );
+            return savedMessage; // ?? Retornar el mensaje guardado con su ID
         } catch (error) {
-            console.error(`❌ Error al guardar mensaje en BD:`, error);
+            console.error(`? Error al guardar mensaje en BD:`, error);
             return null;
         }
     }
@@ -1337,13 +1337,13 @@ export class SocketGateway
             roomCode?: string;
         },
     ) {
-        console.log(
-            `✏️ WS: editMessage - ID: ${data.messageId}, Usuario: ${data.username} (solo broadcast)`,
-        );
+        // console.log(
+        //     `?? WS: editMessage - ID: ${data.messageId}, Usuario: ${data.username} (solo broadcast)`,
+        // );
 
         try {
-            // OPTIMIZACIÓN: El mensaje ya fue editado en la BD por el endpoint HTTP
-            // Solo necesitamos hacer broadcast del evento a los demás usuarios
+            // OPTIMIZACI�N: El mensaje ya fue editado en la BD por el endpoint HTTP
+            // Solo necesitamos hacer broadcast del evento a los dem�s usuarios
             const editEvent: any = {
                 messageId: data.messageId,
                 newText: data.newText,
@@ -1367,9 +1367,9 @@ export class SocketGateway
                             userConnection.socket.emit('messageEdited', editEvent);
                         }
                     });
-                    console.log(
-                        `✅ Broadcast de edición enviado a ${roomUsersSet.size} usuarios en sala ${data.roomCode}`,
-                    );
+                    // console.log(
+                    //     `? Broadcast de edici�n enviado a ${roomUsersSet.size} usuarios en sala ${data.roomCode}`,
+                    // );
                 }
             } else {
                 // Enviar al destinatario individual
@@ -1377,17 +1377,17 @@ export class SocketGateway
                 if (recipient && recipient.socket.connected) {
                     recipient.socket.emit('messageEdited', editEvent);
                 }
-                // También enviar al remitente para sincronizar
+                // Tambi�n enviar al remitente para sincronizar
                 const sender = this.users.get(data.username);
                 if (sender && sender.socket.connected) {
                     sender.socket.emit('messageEdited', editEvent);
                 }
-                console.log(
-                    `✅ Notificación de edición enviada a ${data.to} y ${data.username}`,
-                );
+                // console.log(
+                //     `? Notificaci�n de edici�n enviada a ${data.to} y ${data.username}`,
+                // );
             }
         } catch (error) {
-            console.error('❌ Error al hacer broadcast de mensaje editado:', error);
+            console.error('? Error al hacer broadcast de mensaje editado:', error);
         }
     }
 
@@ -1405,13 +1405,13 @@ export class SocketGateway
             deletedBy?: string;
         },
     ) {
-        console.log(
-            `🗑️ WS: deleteMessage - ID: ${data.messageId}, Usuario: ${data.username}${data.isAdmin ? ' (ADMIN)' : ''}`,
-        );
+        // console.log(
+        //     `??? WS: deleteMessage - ID: ${data.messageId}, Usuario: ${data.username}${data.isAdmin ? ' (ADMIN)' : ''}`,
+        // );
 
         try {
             // El mensaje ya fue eliminado en la BD por el endpoint HTTP
-            // Solo necesitamos hacer broadcast del evento a los demás usuarios
+            // Solo necesitamos hacer broadcast del evento a los dem�s usuarios
             const deleteEvent: any = {
                 messageId: data.messageId,
                 isDeleted: true,
@@ -1429,9 +1429,9 @@ export class SocketGateway
                             userConnection.socket.emit('messageDeleted', deleteEvent);
                         }
                     });
-                    console.log(
-                        `✅ Broadcast de eliminación enviado a ${roomUsersSet.size} usuarios en sala ${data.roomCode}`,
-                    );
+                    // console.log(
+                    //     `? Broadcast de eliminaci�n enviado a ${roomUsersSet.size} usuarios en sala ${data.roomCode}`,
+                    // );
                 }
             } else {
                 // Enviar al destinatario individual
@@ -1439,17 +1439,17 @@ export class SocketGateway
                 if (recipient && recipient.socket.connected) {
                     recipient.socket.emit('messageDeleted', deleteEvent);
                 }
-                // También enviar al remitente para sincronizar
+                // Tambi�n enviar al remitente para sincronizar
                 const sender = this.users.get(data.username);
                 if (sender && sender.socket.connected) {
                     sender.socket.emit('messageDeleted', deleteEvent);
                 }
-                console.log(
-                    `✅ Notificación de eliminación enviada a ${data.to} y ${data.username}`,
-                );
+                // console.log(
+                //     `? Notificaci�n de eliminaci�n enviada a ${data.to} y ${data.username}`,
+                // );
             }
         } catch (error) {
-            console.error('❌ Error al hacer broadcast de mensaje eliminado:', error);
+            console.error('? Error al hacer broadcast de mensaje eliminado:', error);
         }
     }
 
@@ -1458,12 +1458,12 @@ export class SocketGateway
         @ConnectedSocket() client: Socket,
         @MessageBody() data: { groupName: string; members: string[]; from: string },
     ) {
-        console.log(`👥 WS: createGroup - Grupo: ${data.groupName}`);
+        // console.log(`?? WS: createGroup - Grupo: ${data.groupName}`);
         const groupMembers = new Set(data.members);
         groupMembers.add(data.from || 'Usuario');
         this.groups.set(data.groupName, groupMembers);
 
-        // 🔥 NUEVO: Persistir grupo en BD como sala temporal
+        // ?? NUEVO: Persistir grupo en BD como sala temporal
         try {
             const createRoomDto = {
                 name: data.groupName,
@@ -1476,9 +1476,9 @@ export class SocketGateway
                 1, // userId por defecto
                 data.from,
             );
-            console.log(`✅ Grupo "${data.groupName}" persistido en BD`);
+            // console.log(`? Grupo "${data.groupName}" persistido en BD`);
         } catch (error) {
-            console.error(`❌ Error al persistir grupo en BD:`, error);
+            console.error(`? Error al persistir grupo en BD:`, error);
         }
 
         this.broadcastGroupList();
@@ -1489,14 +1489,14 @@ export class SocketGateway
         @ConnectedSocket() client: Socket,
         @MessageBody() data: { groupName: string; from: string },
     ) {
-        console.log(
-            `➕ WS: joinGroup - Usuario: ${data.from}, Grupo: ${data.groupName}`,
-        );
+        // console.log(
+        //     `? WS: joinGroup - Usuario: ${data.from}, Grupo: ${data.groupName}`,
+        // );
         const groupToJoin = this.groups.get(data.groupName);
         if (groupToJoin) {
             groupToJoin.add(data.from || 'Usuario');
 
-            // 🔥 NUEVO: Sincronizar cambios en BD
+            // ?? NUEVO: Sincronizar cambios en BD
             try {
                 const room = await this.temporaryRoomsService.findByName(
                     data.groupName,
@@ -1507,10 +1507,10 @@ export class SocketGateway
                         members: updatedMembers,
                         currentMembers: updatedMembers.length,
                     } as any);
-                    console.log(`✅ Grupo "${data.groupName}" actualizado en BD`);
+                    // console.log(`? Grupo "${data.groupName}" actualizado en BD`);
                 }
             } catch (error) {
-                console.error(`❌ Error al actualizar grupo en BD:`, error);
+                console.error(`? Error al actualizar grupo en BD:`, error);
             }
 
             this.broadcastGroupList();
@@ -1522,14 +1522,14 @@ export class SocketGateway
         @ConnectedSocket() client: Socket,
         @MessageBody() data: { groupName: string; from: string },
     ) {
-        console.log(
-            `➖ WS: leaveGroup - Usuario: ${data.from}, Grupo: ${data.groupName}`,
-        );
+        // console.log(
+        //     `? WS: leaveGroup - Usuario: ${data.from}, Grupo: ${data.groupName}`,
+        // );
         const groupToLeave = this.groups.get(data.groupName);
         if (groupToLeave) {
             groupToLeave.delete(data.from || 'Usuario');
 
-            // 🔥 NUEVO: Sincronizar cambios en BD
+            // ?? NUEVO: Sincronizar cambios en BD
             try {
                 const room = await this.temporaryRoomsService.findByName(
                     data.groupName,
@@ -1540,10 +1540,10 @@ export class SocketGateway
                         members: updatedMembers,
                         currentMembers: updatedMembers.length,
                     } as any);
-                    console.log(`✅ Grupo "${data.groupName}" actualizado en BD`);
+                    // console.log(`? Grupo "${data.groupName}" actualizado en BD`);
                 }
             } catch (error) {
-                console.error(`❌ Error al actualizar grupo en BD:`, error);
+                console.error(`? Error al actualizar grupo en BD:`, error);
             }
 
             this.broadcastGroupList();
@@ -1561,9 +1561,9 @@ export class SocketGateway
             from: string;
         },
     ) {
-        console.log(
-            `🔗 WS: createTemporaryLink - Tipo: ${data.linkType}, De: ${data.from}`,
-        );
+        // console.log(
+        //     `?? WS: createTemporaryLink - Tipo: ${data.linkType}, De: ${data.from}`,
+        // );
         const linkId = this.generateTemporaryLink(
             data.linkType,
             data.participants,
@@ -1592,7 +1592,7 @@ export class SocketGateway
 
         if (link && link.isActive && link.expiresAt > getPeruDate()) {
             if (link.type === 'conversation') {
-                const groupName = `Conversación Temporal ${linkId.substring(0, 8)}`;
+                const groupName = `Conversaci�n Temporal ${linkId.substring(0, 8)}`;
                 const tempGroup = new Set<string>(
                     (link.participants || []) as string[],
                 );
@@ -1614,7 +1614,7 @@ export class SocketGateway
             }
         } else {
             client.emit('error', {
-                message: 'Enlace temporal no válido o expirado',
+                message: 'Enlace temporal no v�lido o expirado',
             });
         }
     }
@@ -1630,9 +1630,9 @@ export class SocketGateway
             isMonitoring?: boolean;
         },
     ) {
-        console.log(
-            `🏠 WS: joinRoom - Usuario: ${data.from}, Sala: ${data.roomCode}, Monitoreo: ${data.isMonitoring || false}`,
-        );
+        // console.log(
+        //     `?? WS: joinRoom - Usuario: ${data.from}, Sala: ${data.roomCode}, Monitoreo: ${data.isMonitoring || false}`,
+        // );
 
         //  Si es monitoreo (ADMIN/JEFEPISO), NO actualizar BD, solo memoria
         if (!data.isMonitoring) {
@@ -1640,11 +1640,11 @@ export class SocketGateway
                 // Actualizar la base de datos usando el servicio
                 const joinDto = { roomCode: data.roomCode, username: data.from };
                 await this.temporaryRoomsService.joinRoom(joinDto, data.from);
-                // console.log(`✅ Usuario ${data.from} unido a sala en BD`);
+                // console.log(`? Usuario ${data.from} unido a sala en BD`);
             } catch (error) {
                 // NUEVO: Notificar al cliente del error
                 console.error(
-                    `❌ Error al unir usuario ${data.from} a sala en BD:`,
+                    `? Error al unir usuario ${data.from} a sala en BD:`,
                     error,
                 );
                 client.emit('joinRoomError', {
@@ -1654,9 +1654,9 @@ export class SocketGateway
                 return; // No continuar si falla en BD
             }
         } else {
-            console.log(
-                `👁️ Usuario ${data.from} uniéndose como MONITOR (solo en memoria)`,
-            );
+            // console.log(
+            //     `??? Usuario ${data.from} uni�ndose como MONITOR (solo en memoria)`,
+            // );
         }
 
         // Agregar usuario a la sala en memoria
@@ -1664,19 +1664,19 @@ export class SocketGateway
             this.roomUsers.set(data.roomCode, new Set());
         }
         this.roomUsers.get(data.roomCode)!.add(data.from);
-        // console.log(`✅ Usuario ${data.from} agregado a sala en memoria`);
+        // console.log(`? Usuario ${data.from} agregado a sala en memoria`);
 
         // Actualizar la sala actual del usuario
         const user = this.users.get(data.from);
         if (user) {
             user.currentRoom = data.roomCode;
-            // console.log(`✅ Sala actual del usuario actualizada a ${data.roomCode}`);
+            // console.log(`? Sala actual del usuario actualizada a ${data.roomCode}`);
         }
 
         // Notificar a todos en la sala
         await this.broadcastRoomUsers(data.roomCode);
 
-        // Obtener TODOS los usuarios añadidos a la sala para roomJoined
+        // Obtener TODOS los usuarios a�adidos a la sala para roomJoined
         const connectedUsernamesList = Array.from(
             this.roomUsers.get(data.roomCode) || [],
         );
@@ -1689,21 +1689,21 @@ export class SocketGateway
             const room = await this.temporaryRoomsService.findByRoomCode(
                 data.roomCode,
             );
-            // MODIFICADO: Usar TODOS los usuarios añadidos (members)
+            // MODIFICADO: Usar TODOS los usuarios a�adidos (members)
             allUsernames = room.members || [];
 
             //  NUEVO: Capturar el mensaje fijado de la base de datos
             currentPinnedMessageId = room.pinnedMessageId;
 
         } catch (error) {
-            console.error(`❌ Error al obtener sala ${data.roomCode}:`, error);
+            console.error(`? Error al obtener sala ${data.roomCode}:`, error);
             allUsernames = connectedUsernamesList;
         }
 
-        // Crear lista con TODOS los usuarios añadidos a la sala y su estado de conexión
+        // Crear lista con TODOS los usuarios a�adidos a la sala y su estado de conexi�n
         const roomUsersList = allUsernames.map((username) => {
             const user = this.users.get(username);
-            // CORREGIDO: Determinar isOnline basándose en si el usuario está conectado globalmente
+            // CORREGIDO: Determinar isOnline bas�ndose en si el usuario est� conectado globalmente
             const isOnline = this.users.has(username) && user?.socket?.connected;
             return {
                 id: user?.userData?.id || null,
@@ -1717,7 +1717,7 @@ export class SocketGateway
             };
         });
 
-        // Confirmar al usuario que se unió
+        // Confirmar al usuario que se uni�
         client.emit('roomJoined', {
             roomCode: data.roomCode,
             roomName: data.roomName,
@@ -1726,9 +1726,9 @@ export class SocketGateway
             pinnedMessageId: currentPinnedMessageId
         });
 
-        console.log(`✅ Confirmación enviada a ${data.from}. PinnedMsg: ${currentPinnedMessageId}`);
+        // console.log(`? Confirmaci�n enviada a ${data.from}. PinnedMsg: ${currentPinnedMessageId}`);
 
-        // NUEVO: Resetear contador de mensajes no leídos para este usuario en esta sala
+        // NUEVO: Resetear contador de mensajes no le�dos para este usuario en esta sala
         if (!data.isMonitoring) {
             this.emitUnreadCountReset(data.roomCode, data.from);
         }
@@ -1740,14 +1740,14 @@ export class SocketGateway
         @MessageBody()
         data: { roomCode: string; username: string; kickedBy: string },
     ) {
-        console.log(
-            `👢 WS: kickUser - Usuario: ${data.username}, Sala: ${data.roomCode}, Expulsado por: ${data.kickedBy}`,
-        );
+        // console.log(
+        //     `?? WS: kickUser - Usuario: ${data.username}, Sala: ${data.roomCode}, Expulsado por: ${data.kickedBy}`,
+        // );
 
         // Verificar que quien expulsa sea admin
         const kickerUser = this.users.get(data.kickedBy);
         if (!kickerUser || !kickerUser.userData) {
-            console.log('❌ Usuario que intenta expulsar no encontrado');
+            // console.log('? Usuario que intenta expulsar no encontrado');
             return;
         }
 
@@ -1756,7 +1756,7 @@ export class SocketGateway
             .toUpperCase()
             .trim();
         if (kickerRole !== 'ADMIN' && kickerRole !== 'JEFEPISO') {
-            console.log('❌ Usuario no tiene permisos para expulsar');
+            // console.log('? Usuario no tiene permisos para expulsar');
             return;
         }
 
@@ -1764,7 +1764,7 @@ export class SocketGateway
             // Remover usuario de la base de datos
             await this.temporaryRoomsService.leaveRoom(data.roomCode, data.username);
         } catch (error) {
-            console.error('❌ Error al remover usuario de BD:', error);
+            console.error('? Error al remover usuario de BD:', error);
         }
 
         // Remover usuario de la sala en memoria
@@ -1785,9 +1785,9 @@ export class SocketGateway
         // Actualizar lista de usuarios en la sala usando broadcastRoomUsers
         await this.broadcastRoomUsers(data.roomCode);
 
-        console.log(
-            `✅ Usuario ${data.username} expulsado de la sala ${data.roomCode}`,
-        );
+        // console.log(
+        //     `? Usuario ${data.username} expulsado de la sala ${data.roomCode}`,
+        // );
     }
 
     @SubscribeMessage('leaveRoom')
@@ -1795,9 +1795,9 @@ export class SocketGateway
         @ConnectedSocket() client: Socket,
         @MessageBody() data: { roomCode: string; from: string },
     ) {
-        console.log(
-            `🚪 WS: leaveRoom - Usuario: ${data.from}, Sala: ${data.roomCode}`,
-        );
+        // console.log(
+        //     `?? WS: leaveRoom - Usuario: ${data.from}, Sala: ${data.roomCode}`,
+        // );
 
         try {
             // Remover usuario de la base de datos
@@ -1824,11 +1824,11 @@ export class SocketGateway
         // Notificar a todos en la sala
         await this.broadcastRoomUsers(data.roomCode);
 
-        // Reenviar lista general de usuarios (ya que salió de la sala)
+        // Reenviar lista general de usuarios (ya que sali� de la sala)
         this.broadcastUserList();
     }
 
-    // ===== MÉTODOS PRIVADOS DEL CHAT =====
+    // ===== M�TODOS PRIVADOS DEL CHAT =====
 
     private getRoomCodeFromUser(username: string): string | null {
         const user = this.users.get(username);
@@ -1865,7 +1865,7 @@ export class SocketGateway
     }
 
     private async broadcastUserList(assignedConversations?: any[]) {
-        // Crear lista de usuarios conectados con toda su información
+        // Crear lista de usuarios conectados con toda su informaci�n
         const connectedUsersMap = new Map<string, any>();
         const userListWithData = Array.from(this.users.entries()).map(
             ([username, { userData }]) => {
@@ -1887,27 +1887,24 @@ export class SocketGateway
             },
         );
 
-        // console.log('📋 Enviando lista de usuarios con datos completos:', userListWithData);
+        // console.log('?? Enviando lista de usuarios con datos completos:', userListWithData);
 
-        console.log(
-            `🔄 broadcastUserList - Total usuarios conectados: ${this.users.size}`,
-        );
+        // Log optimizado: evitar log por cada broadcast
+        // console.log(`?? broadcastUserList - Total usuarios conectados: ${this.users.size}`);
 
         // Procesar cada usuario conectado
         for (const [
             _username,
             { socket, userData, currentRoom },
         ] of this.users.entries()) {
-            console.log(
-                `  👤 Procesando usuario: ${userData?.username || 'Unknown'}, socket conectado: ${socket.connected}`,
-            );
+            // Log eliminado para optimizaci�n
 
             if (socket.connected) {
-                // COMENTADO: Ahora enviamos la lista incluso si el usuario está en una sala
+                // COMENTADO: Ahora enviamos la lista incluso si el usuario est� en una sala
                 // para que reciban actualizaciones de estado online/offline en tiempo real
                 // if (currentRoom) {
                 //   console.log(
-                //     `🚫 Usuario ${userData?.username || 'Usuario'} está en sala ${currentRoom}, no enviar lista general`,
+                //     `?? Usuario ${userData?.username || 'Usuario'} est� en sala ${currentRoom}, no enviar lista general`,
                 //   );
                 //   continue;
                 // }
@@ -1917,9 +1914,7 @@ export class SocketGateway
                     userData?.role &&
                     userData.role.toString().toUpperCase().trim() === 'ADMIN';
 
-                console.log(
-                    `    ℹ️ Usuario ${userData?.username} es admin: ${isAdmin}`,
-                );
+                // Log eliminado para optimizaci�n
 
                 if (isAdmin) {
                     //  ADMIN: Enviar usuarios conectados + usuarios de conversaciones (offline)
@@ -1933,22 +1928,20 @@ export class SocketGateway
                             conv.participants?.forEach((p) => allParticipants.add(p));
                         });
 
-                        // OPTIMIZADO: Filtrar participantes que NO están conectados
+                        // OPTIMIZADO: Filtrar participantes que NO est�n conectados
                         const offlineParticipants = Array.from(allParticipants).filter(
                             (p) => !adminUsersToSend.some((u) => u.username === p),
                         );
 
                         if (offlineParticipants.length > 0) {
-                            console.log(
-                                `📊 Buscando ${offlineParticipants.length} participantes offline en BD/caché`,
-                            );
+                            // Log eliminado para optimizaci�n
 
-                            //  PASO 1: Verificar caché primero
+                            //  PASO 1: Verificar cach� primero
                             const uncachedParticipants: string[] = [];
                             offlineParticipants.forEach((participantName) => {
                                 const cached = this.userCache.get(participantName);
                                 if (cached && Date.now() - cached.cachedAt < this.CACHE_TTL) {
-                                    // Usar datos del caché
+                                    // Usar datos del cach�
                                     const isUserConnected =
                                         this.users.has(cached.username) ||
                                         this.users.has(participantName);
@@ -1971,16 +1964,14 @@ export class SocketGateway
                                 }
                             });
 
-                            console.log(
-                                `✅ ${offlineParticipants.length - uncachedParticipants.length} usuarios obtenidos del caché`,
-                            );
+                            // Log eliminado para optimizaci�n
 
-                            // PASO 2: Consulta masiva para usuarios NO en caché
+                            // PASO 2: Consulta masiva para usuarios NO en cach�
                             if (uncachedParticipants.length > 0) {
                                 try {
-                                    console.log(
-                                        `🔍 Consultando BD para ${uncachedParticipants.length} usuarios no cacheados`,
-                                    );
+                                    // console.log(
+                                    //     `?? Consultando BD para ${uncachedParticipants.length} usuarios no cacheados`,
+                                    // );
 
                                     // UNA SOLA CONSULTA para todos los participantes offline
                                     const dbUsers = await this.userRepository
@@ -1992,11 +1983,11 @@ export class SocketGateway
                                         .orWhere('user.username IN (:...usernames)', {
                                             usernames: uncachedParticipants,
                                         })
-                                        .getMany(); // ← getMany() en lugar de getOne() en loop
+                                        .getMany(); // ? getMany() en lugar de getOne() en loop
 
-                                    console.log(
-                                        `✅ Consulta masiva completada: ${dbUsers.length} usuarios encontrados`,
-                                    );
+                                    // console.log(
+                                    //     `? Consulta masiva completada: ${dbUsers.length} usuarios encontrados`,
+                                    // );
 
                                     // PASO 3: Procesar resultados y cachear
                                     dbUsers.forEach((dbUser) => {
@@ -2036,7 +2027,7 @@ export class SocketGateway
                                     });
                                 } catch (error) {
                                     console.error(
-                                        `❌ Error en consulta masiva de usuarios:`,
+                                        `? Error en consulta masiva de usuarios:`,
                                         error,
                                     );
                                 }
@@ -2044,12 +2035,12 @@ export class SocketGateway
                         }
                     }
 
-                    console.log(
-                        `    👑 ADMIN: Enviando ${adminUsersToSend.length} usuarios (${userListWithData.length} online + ${adminUsersToSend.length - userListWithData.length} offline)`,
-                    );
+                    // console.log(
+                    //     `    ?? ADMIN: Enviando ${adminUsersToSend.length} usuarios (${userListWithData.length} online + ${adminUsersToSend.length - userListWithData.length} offline)`,
+                    // );
 
                     // Enviar todos los usuarios (paginado)
-                    const pageSize = 50; // Aumentar tamaño de página para admins
+                    const pageSize = 50; // Aumentar tama�o de p�gina para admins
                     const firstPage = adminUsersToSend.slice(0, pageSize);
                     socket.emit('userList', {
                         users: firstPage,
@@ -2059,22 +2050,22 @@ export class SocketGateway
                         hasMore: adminUsersToSend.length > pageSize,
                     });
                 } else {
-                    console.log(
-                        `    👤 Procesando usuario NO ADMIN: ${userData?.username}`,
-                    );
+                    // console.log(
+                    //     `    ?? Procesando usuario NO ADMIN: ${userData?.username}`,
+                    // );
 
-                    // Para usuarios no admin, incluir su propia información + usuarios de conversaciones asignadas
+                    // Para usuarios no admin, incluir su propia informaci�n + usuarios de conversaciones asignadas
                     const usersToSend = [];
 
-                    // Agregar información del usuario actual
+                    // Agregar informaci�n del usuario actual
                     const ownUserData = connectedUsersMap.get(userData?.username);
                     if (ownUserData) {
                         usersToSend.push(ownUserData);
                     }
 
-                    console.log(
-                        `    📝 Usuario actual agregado: ${ownUserData?.username || 'none'}`,
-                    );
+                    // console.log(
+                    //     `    ?? Usuario actual agregado: ${ownUserData?.username || 'none'}`,
+                    // );
 
                     //  CORREGIDO: Obtener conversaciones del usuario actual
                     // IMPORTANTE: Las conversaciones guardan participantes con NOMBRE COMPLETO, no username
@@ -2091,9 +2082,9 @@ export class SocketGateway
                             conv.participants?.includes(currentUserFullName),
                         );
 
-                        console.log(
-                            `📋 Usuario ${currentUserFullName} tiene ${userConversations.length} conversaciones asignadas`,
-                        );
+                        // console.log(
+                        //     `?? Usuario ${currentUserFullName} tiene ${userConversations.length} conversaciones asignadas`,
+                        // );
                     } else {
                         // Buscar en BD si no se pasaron conversaciones
                         try {
@@ -2103,14 +2094,14 @@ export class SocketGateway
                                 );
                         } catch (error) {
                             console.error(
-                                `❌ Error al obtener conversaciones de ${userData?.username}:`,
+                                `? Error al obtener conversaciones de ${userData?.username}:`,
                                 error,
                             );
                             userConversations = [];
                         }
                     }
 
-                    // Si tiene conversaciones asignadas, agregar información de los otros usuarios
+                    // Si tiene conversaciones asignadas, agregar informaci�n de los otros usuarios
                     if (userConversations && userConversations.length > 0) {
                         // Calcular nombre completo del usuario actual (de nuevo, para usarlo en comparaciones)
                         const currentUserFullName =
@@ -2123,7 +2114,7 @@ export class SocketGateway
                                 for (const participantName of conv.participants) {
                                     // No agregar al usuario actual (comparar por nombre completo)
                                     if (participantName !== currentUserFullName) {
-                                        // Verificar si ya está en la lista
+                                        // Verificar si ya est� en la lista
                                         if (
                                             usersToSend.some((u) => u.username === participantName)
                                         ) {
@@ -2135,10 +2126,10 @@ export class SocketGateway
                                             connectedUsersMap.get(participantName);
 
                                         if (participantData) {
-                                            // Usuario está conectado
+                                            // Usuario est� conectado
                                             usersToSend.push(participantData);
                                         } else {
-                                            // Usuario NO está conectado, buscar en la base de datos
+                                            // Usuario NO est� conectado, buscar en la base de datos
                                             try {
                                                 // Buscar por nombre completo (participantName puede ser "Nombre Apellido")
                                                 const dbUser = await this.userRepository
@@ -2158,12 +2149,12 @@ export class SocketGateway
                                                             ? `${dbUser.nombre} ${dbUser.apellido}`
                                                             : dbUser.username;
 
-                                                    // 🔥 CORREGIDO: Verificar si el usuario está conectado
+                                                    // ?? CORREGIDO: Verificar si el usuario est� conectado
                                                     const isUserConnected =
                                                         this.users.has(fullName) ||
                                                         this.users.has(dbUser.username);
 
-                                                    // Agregar usuario de la BD con estado de conexión correcto
+                                                    // Agregar usuario de la BD con estado de conexi�n correcto
                                                     usersToSend.push({
                                                         id: dbUser.id || null,
                                                         username: fullName,
@@ -2175,12 +2166,12 @@ export class SocketGateway
                                                         sede: null,
                                                         sede_id: null,
                                                         numeroAgente: dbUser.numeroAgente || null, // Obtener numeroAgente de la BD
-                                                        isOnline: isUserConnected, // CORREGIDO: Estado de conexión real
+                                                        isOnline: isUserConnected, // CORREGIDO: Estado de conexi�n real
                                                     });
                                                 }
                                             } catch (error) {
                                                 console.error(
-                                                    `❌ Error al buscar usuario ${participantName} en BD:`,
+                                                    `? Error al buscar usuario ${participantName} en BD:`,
                                                     error,
                                                 );
                                             }
@@ -2191,7 +2182,7 @@ export class SocketGateway
                         }
                     }
 
-                    // console.log(`👤 Enviando información a usuario: ${userData?.username}`, usersToSend);
+                    // console.log(`?? Enviando informaci�n a usuario: ${userData?.username}`, usersToSend);
                     socket.emit('userList', { users: usersToSend });
                 }
             }
@@ -2218,14 +2209,14 @@ export class SocketGateway
             this.roomUsers.get(roomCode) || [],
         );
 
-        // Obtener TODOS los usuarios añadidos a la sala (historial)
+        // Obtener TODOS los usuarios a�adidos a la sala (historial)
         let allUsernames: string[] = [];
         let memberCount: number = 0;
         try {
             const room = await this.temporaryRoomsService.findByRoomCode(roomCode);
-            // MODIFICADO: Usar TODOS los usuarios añadidos (members) para mostrar en la lista
+            // MODIFICADO: Usar TODOS los usuarios a�adidos (members) para mostrar en la lista
             allUsernames = room.members || [];
-            // El contador debe ser el total de usuarios añadidos a la sala
+            // El contador debe ser el total de usuarios a�adidos a la sala
             memberCount = room.members?.length || 0;
         } catch (error) {
             // Si hay error, usar solo los usuarios conectados
@@ -2233,10 +2224,10 @@ export class SocketGateway
             memberCount = connectedUsernamesList.length;
         }
 
-        // Crear lista con TODOS los usuarios añadidos a la sala y su estado de conexión
+        // Crear lista con TODOS los usuarios a�adidos a la sala y su estado de conexi�n
         const roomUsersList = allUsernames.map((username) => {
             const user = this.users.get(username);
-            // CORREGIDO: Determinar isOnline basándose en si el usuario está conectado globalmente
+            // CORREGIDO: Determinar isOnline bas�ndose en si el usuario est� conectado globalmente
             const isOnline = this.users.has(username) && user?.socket?.connected;
             return {
                 id: user?.userData?.id || null,
@@ -2263,13 +2254,13 @@ export class SocketGateway
             }
         });
 
-        // 🔥 MODIFICADO: Usar members.length para el contador (total de usuarios añadidos a la sala)
+        // ?? MODIFICADO: Usar members.length para el contador (total de usuarios a�adidos a la sala)
         // Notificar a todos los ADMIN y JEFEPISO sobre el cambio en el contador de usuarios
         this.broadcastRoomCountUpdate(roomCode, memberCount);
     }
 
     private broadcastRoomCountUpdate(roomCode: string, currentMembers: number) {
-        // Enviar actualización del contador a todos los ADMIN y JEFEPISO
+        // Enviar actualizaci�n del contador a todos los ADMIN y JEFEPISO
         this.users.forEach(({ socket, userData }) => {
             const role = userData?.role?.toString().toUpperCase().trim();
             if (socket.connected && (role === 'ADMIN' || role === 'JEFEPISO')) {
@@ -2294,9 +2285,9 @@ export class SocketGateway
             callType: string;
         },
     ) {
-        console.log(
-            `📞 WS: callUser - De: ${data.from}, Para: ${data.userToCall}, Tipo: ${data.callType}`,
-        );
+        // console.log(
+        //     `?? WS: callUser - De: ${data.from}, Para: ${data.userToCall}, Tipo: ${data.callType}`,
+        // );
 
         const targetUser = this.users.get(data.userToCall);
         if (targetUser && targetUser.socket.connected) {
@@ -2315,7 +2306,7 @@ export class SocketGateway
         @ConnectedSocket() client: Socket,
         @MessageBody() data: { signal: any; to: string },
     ) {
-        console.log(`📞 WS: answerCall - Para: ${data.to}`);
+        // console.log(`?? WS: answerCall - Para: ${data.to}`);
 
         const targetUser = this.users.get(data.to);
         if (targetUser && targetUser.socket.connected) {
@@ -2330,7 +2321,7 @@ export class SocketGateway
         @ConnectedSocket() client: Socket,
         @MessageBody() data: { to: string; from: string },
     ) {
-        console.log(`❌ WS: callRejected - De: ${data.from}`);
+        // console.log(`? WS: callRejected - De: ${data.from}`);
 
         const targetUser = this.users.get(data.to);
         if (targetUser && targetUser.socket.connected) {
@@ -2340,13 +2331,13 @@ export class SocketGateway
         }
     }
 
-    // 🔥 NUEVO: Manejar candidatos ICE para trickling
+    // ?? NUEVO: Manejar candidatos ICE para trickling
     @SubscribeMessage('iceCandidate')
     handleIceCandidate(
         @ConnectedSocket() client: Socket,
         @MessageBody() data: { candidate: any; to: string },
     ) {
-        console.log(`🧊 WS: iceCandidate - Para: ${data.to}`);
+        // console.log(`?? WS: iceCandidate - Para: ${data.to}`);
 
         const targetUser = this.users.get(data.to);
         if (targetUser && targetUser.socket.connected) {
@@ -2361,7 +2352,7 @@ export class SocketGateway
         @ConnectedSocket() client: Socket,
         @MessageBody() data: { to: string },
     ) {
-        console.log(`📴 WS: callEnded - Para: ${data.to}`);
+        // console.log(`?? WS: callEnded - Para: ${data.to}`);
 
         const targetUser = this.users.get(data.to);
         if (targetUser && targetUser.socket.connected) {
@@ -2376,16 +2367,16 @@ export class SocketGateway
         @ConnectedSocket() client: Socket,
         @MessageBody() data: { roomID: string; username: string },
     ) {
-        console.log(
-            `📹 WS: joinVideoRoom - Usuario: ${data.username} uniéndose a sala de video: ${data.roomID}`,
-        );
+        // console.log(
+        //     `?? WS: joinVideoRoom - Usuario: ${data.username} uni�ndose a sala de video: ${data.roomID}`,
+        // );
 
         // Unir el socket a la sala de video
         client.join(data.roomID);
 
-        console.log(
-            `✅ Usuario ${data.username} unido a sala de video ${data.roomID}`,
-        );
+        // console.log(
+        //     `? Usuario ${data.username} unido a sala de video ${data.roomID}`,
+        // );
     }
 
     @SubscribeMessage('startVideoCall')
@@ -2401,9 +2392,9 @@ export class SocketGateway
             participants: string[];
         },
     ) {
-        console.log(
-            `📹 WS: startVideoCall - Iniciador: ${data.initiator}, Tipo: ${data.callType}, Sala: ${data.roomID}`,
-        );
+        // console.log(
+        //     `?? WS: startVideoCall - Iniciador: ${data.initiator}, Tipo: ${data.callType}, Sala: ${data.roomID}`,
+        // );
 
         // Notificar a todos los participantes
         if (data.callType === 'group' && data.participants) {
@@ -2446,7 +2437,7 @@ export class SocketGateway
         },
     ) {
         // console.log(
-        //   `📴 WS: endVideoCall - Sala: ${data.roomID}, RoomCode: ${data.roomCode}, Cerrada por: ${data.closedBy}`,
+        //   `?? WS: endVideoCall - Sala: ${data.roomID}, RoomCode: ${data.roomCode}, Cerrada por: ${data.closedBy}`,
         // );
 
         // NUEVO: Marcar la videollamada como inactiva en la BD
@@ -2464,7 +2455,7 @@ export class SocketGateway
                     );
                 // if (videoCallMessage) {
                 //   console.log(
-                //     `⚠️ Videollamada encontrada por roomCode (sin videoRoomID): ${videoCallMessage.id}`,
+                //     `?? Videollamada encontrada por roomCode (sin videoRoomID): ${videoCallMessage.id}`,
                 //   );
                 // }
             }
@@ -2480,7 +2471,7 @@ export class SocketGateway
                     metadata,
                 };
 
-                // 🔥 Si el mensaje no tenía videoRoomID, guardarlo ahora para futuras búsquedas
+                // ?? Si el mensaje no ten�a videoRoomID, guardarlo ahora para futuras b�squedas
                 if (!videoCallMessage.videoRoomID && data.roomID) {
                     updatePayload.videoRoomID = data.roomID;
                 }
@@ -2488,66 +2479,66 @@ export class SocketGateway
                 await this.messagesService.update(videoCallMessage.id, updatePayload);
 
                 // console.log(
-                //   `✅ Videollamada marcada como inactiva en BD: ${videoCallMessage.id}`,
+                //   `? Videollamada marcada como inactiva en BD: ${videoCallMessage.id}`,
                 // );
             } else {
                 // console.warn(
-                //   `⚠️ No se encontró mensaje de videollamada para roomID=${data.roomID} / roomCode=${data.roomCode}`,
+                //   `?? No se encontr� mensaje de videollamada para roomID=${data.roomID} / roomCode=${data.roomCode}`,
                 // );
             }
         } catch (error) {
-            console.error('❌ Error al marcar videollamada como inactiva:', error);
+            console.error('? Error al marcar videollamada como inactiva:', error);
         }
 
-        // 🔥 CRÍTICO: Obtener TODOS los miembros del grupo desde la BD
+        // ?? CR�TICO: Obtener TODOS los miembros del grupo desde la BD
         let groupMembers: string[] = [];
 
         if (data.roomCode) {
             try {
-                // 🔥 PRIMERO: Buscar en la base de datos para obtener TODOS los miembros
+                // ?? PRIMERO: Buscar en la base de datos para obtener TODOS los miembros
                 const room = await this.temporaryRoomsService.findByRoomCode(
                     data.roomCode,
                 );
                 if (room && room.members && room.members.length > 0) {
                     groupMembers = room.members;
-                    console.log(
-                        `👥 Miembros de la sala ${data.roomCode} desde BD:`,
-                        groupMembers,
-                    );
+                    // console.log(
+                    //     `?? Miembros de la sala ${data.roomCode} desde BD:`,
+                    //     groupMembers,
+                    // );
                 } else {
-                    console.warn(
-                        `⚠️ No se encontraron miembros en BD para sala ${data.roomCode}`,
-                    );
+                    // console.warn(
+                    //     `?? No se encontraron miembros en BD para sala ${data.roomCode}`,
+                    // );
                 }
             } catch (error) {
                 console.error(
-                    `❌ Error al obtener sala ${data.roomCode} desde BD:`,
+                    `? Error al obtener sala ${data.roomCode} desde BD:`,
                     error,
                 );
             }
 
-            // 🔥 FALLBACK: Si no se encontraron miembros en BD, intentar desde memoria
+            // ?? FALLBACK: Si no se encontraron miembros en BD, intentar desde memoria
             if (groupMembers.length === 0) {
                 const roomUsersSet = this.roomUsers.get(data.roomCode);
                 if (roomUsersSet && roomUsersSet.size > 0) {
                     groupMembers = Array.from(roomUsersSet);
-                    console.log(
-                        `👥 Miembros activos en sala ${data.roomCode} desde memoria:`,
-                        groupMembers,
-                    );
+                    // console.log(
+                    //     `?? Miembros activos en sala ${data.roomCode} desde memoria:`,
+                    //     groupMembers,
+                    // );
                 }
             }
         }
 
         // Notificar a todos los miembros del grupo
         if (groupMembers.length > 0) {
-            console.log(
-                `📢 Notificando cierre de videollamada a ${groupMembers.length} miembros`,
-            );
+            // console.log(
+            //     `?? Notificando cierre de videollamada a ${groupMembers.length} miembros`,
+            // );
             groupMembers.forEach((member) => {
                 const targetUser = this.users.get(member);
                 if (targetUser && targetUser.socket.connected) {
-                    console.log(`   ✅ Notificando a: ${member}`);
+                    // console.log(`   ? Notificando a: ${member}`);
                     targetUser.socket.emit('videoCallEnded', {
                         roomID: data.roomID,
                         roomCode: data.roomCode,
@@ -2555,14 +2546,14 @@ export class SocketGateway
                         message: `La videollamada fue cerrada por ${data.closedBy}`,
                     });
                 } else {
-                    console.log(`   ❌ Usuario no conectado: ${member}`);
+                    // console.log(`   ? Usuario no conectado: ${member}`);
                 }
             });
         }
 
-        // 🔥 NUEVO: Si es grupo, emitir a toda la sala por roomCode (por si acaso)
+        // ?? NUEVO: Si es grupo, emitir a toda la sala por roomCode (por si acaso)
         if (data.isGroup && data.roomCode) {
-            console.log(`📡 Emitiendo a sala ${data.roomCode} via broadcast`);
+            // console.log(`?? Emitiendo a sala ${data.roomCode} via broadcast`);
             this.server.to(data.roomCode).emit('videoCallEnded', {
                 roomID: data.roomID,
                 roomCode: data.roomCode,
@@ -2571,8 +2562,8 @@ export class SocketGateway
             });
         }
 
-        // También emitir a toda la sala de video por si acaso
-        console.log(`📡 Emitiendo a sala de video ${data.roomID} via broadcast`);
+        // Tambi�n emitir a toda la sala de video por si acaso
+        // console.log(`?? Emitiendo a sala de video ${data.roomID} via broadcast`);
         this.server.to(data.roomID).emit('videoCallEnded', {
             roomID: data.roomID,
             roomCode: data.roomCode,
@@ -2581,26 +2572,26 @@ export class SocketGateway
         });
     }
 
-    // ==================== MENSAJES LEÍDOS ====================
+    // ==================== MENSAJES LE�DOS ====================
 
     @SubscribeMessage('markAsRead')
     async handleMarkAsRead(
         @ConnectedSocket() client: Socket,
         @MessageBody() data: { messageId: number; username: string; from: string },
     ) {
-        console.log(
-            `✅ WS: markAsRead - Mensaje ${data.messageId} leído por ${data.username}`,
-        );
+        // console.log(
+        //     `? WS: markAsRead - Mensaje ${data.messageId} le�do por ${data.username}`,
+        // );
 
         try {
-            // Marcar el mensaje como leído en la base de datos
+            // Marcar el mensaje como le�do en la base de datos
             const message = await this.messagesService.markAsRead(
                 data.messageId,
                 data.username,
             );
 
             if (message) {
-                // Notificar al remitente que su mensaje fue leído
+                // Notificar al remitente que su mensaje fue le�do
                 const senderUser = this.users.get(data.from);
                 if (senderUser && senderUser.socket.connected) {
                     senderUser.socket.emit('messageRead', {
@@ -2617,8 +2608,8 @@ export class SocketGateway
                 });
             }
         } catch (error) {
-            console.error('Error al marcar mensaje como leído:', error);
-            client.emit('error', { message: 'Error al marcar mensaje como leído' });
+            console.error('Error al marcar mensaje como le�do:', error);
+            client.emit('error', { message: 'Error al marcar mensaje como le�do' });
         }
     }
 
@@ -2627,19 +2618,19 @@ export class SocketGateway
         @ConnectedSocket() client: Socket,
         @MessageBody() data: { from: string; to: string },
     ) {
-        console.log(
-            `✅ WS: markConversationAsRead - Conversación de ${data.from} a ${data.to} marcada como leída`,
-        );
+        // console.log(
+        //     `? WS: markConversationAsRead - Conversaci�n de ${data.from} a ${data.to} marcada como le�da`,
+        // );
 
         try {
-            // Marcar todos los mensajes de la conversación como leídos
+            // Marcar todos los mensajes de la conversaci�n como le�dos
             const messages = await this.messagesService.markConversationAsRead(
                 data.from,
                 data.to,
             );
 
             if (messages.length > 0) {
-                // 🔥 Búsqueda case-insensitive del remitente
+                // ?? B�squeda case-insensitive del remitente
                 let senderUser = this.users.get(data.from);
 
                 if (!senderUser) {
@@ -2649,26 +2640,26 @@ export class SocketGateway
                     );
                     if (foundUsername) {
                         senderUser = this.users.get(foundUsername);
-                        console.log(
-                            `✅ Remitente encontrado con búsqueda case-insensitive: ${foundUsername}`,
-                        );
+                        // console.log(
+                        //     `? Remitente encontrado con b�squeda case-insensitive: ${foundUsername}`,
+                        // );
                     }
                 }
 
-                // Notificar al remitente que sus mensajes fueron leídos
+                // Notificar al remitente que sus mensajes fueron le�dos
                 if (senderUser && senderUser.socket.connected) {
-                    console.log(
-                        `📨 Notificando a ${data.from} que sus mensajes fueron leídos por ${data.to}`,
-                    );
+                    // console.log(
+                    //     `?? Notificando a ${data.from} que sus mensajes fueron le�dos por ${data.to}`,
+                    // );
                     senderUser.socket.emit('conversationRead', {
                         readBy: data.to,
                         messageIds: messages.map((m) => m.id),
                         readAt: getPeruDate(),
                     });
                 } else {
-                    console.log(
-                        `❌ No se pudo notificar a ${data.from} (usuario no conectado o no encontrado)`,
-                    );
+                    // console.log(
+                    //     `? No se pudo notificar a ${data.from} (usuario no conectado o no encontrado)`,
+                    // );
                 }
 
                 // Confirmar al lector
@@ -2678,9 +2669,9 @@ export class SocketGateway
                 });
             }
         } catch (error) {
-            console.error('Error al marcar conversación como leída:', error);
+            console.error('Error al marcar conversaci�n como le�da:', error);
             client.emit('error', {
-                message: 'Error al marcar conversación como leída',
+                message: 'Error al marcar conversaci�n como le�da',
             });
         }
     }
@@ -2691,19 +2682,19 @@ export class SocketGateway
         @MessageBody()
         data: { messageId: number; username: string; roomCode: string },
     ) {
-        console.log(
-            `✅ WS: markRoomMessageAsRead - Mensaje ${data.messageId} en sala ${data.roomCode} leído por ${data.username}`,
-        );
+        // console.log(
+        //     `? WS: markRoomMessageAsRead - Mensaje ${data.messageId} en sala ${data.roomCode} le�do por ${data.username}`,
+        // );
 
         try {
-            // Marcar el mensaje como leído en la base de datos
+            // Marcar el mensaje como le�do en la base de datos
             const message = await this.messagesService.markAsRead(
                 data.messageId,
                 data.username,
             );
 
             if (message) {
-                // Notificar a todos los usuarios de la sala que el mensaje fue leído
+                // Notificar a todos los usuarios de la sala que el mensaje fue le�do
                 const roomUsers = this.roomUsers.get(data.roomCode);
                 if (roomUsers) {
                     roomUsers.forEach((member) => {
@@ -2720,9 +2711,9 @@ export class SocketGateway
                 }
             }
         } catch (error) {
-            console.error('Error al marcar mensaje de sala como leído:', error);
+            console.error('Error al marcar mensaje de sala como le�do:', error);
             client.emit('error', {
-                message: 'Error al marcar mensaje de sala como leído',
+                message: 'Error al marcar mensaje de sala como le�do',
             });
         }
     }
@@ -2732,37 +2723,37 @@ export class SocketGateway
         @ConnectedSocket() client: Socket,
         @MessageBody() data: { roomCode: string; username: string },
     ) {
-        console.log(
-            `✅ WS: markRoomMessagesAsRead - Sala ${data.roomCode} leída por ${data.username}`,
-        );
+        // console.log(
+        //     `? WS: markRoomMessagesAsRead - Sala ${data.roomCode} le�da por ${data.username}`,
+        // );
 
         try {
-            // Marcar todos los mensajes de la sala como leídos en la base de datos
+            // Marcar todos los mensajes de la sala como le�dos en la base de datos
             const updatedCount = await this.messagesService.markAllMessagesAsReadInRoom(
                 data.roomCode,
                 data.username,
             );
 
-            console.log(
-                `✅ ${updatedCount} mensajes marcados como leídos en sala ${data.roomCode}`,
-            );
+            // console.log(
+            //     `? ${updatedCount} mensajes marcados como le�dos en sala ${data.roomCode}`,
+            // );
 
-            // Confirmar al usuario que la acción fue exitosa
+            // Confirmar al usuario que la acci�n fue exitosa
             client.emit('roomMessagesReadConfirmed', {
                 roomCode: data.roomCode,
                 updatedCount,
             });
 
-            // 🔥 Emitir reset de contador para asegurar que el frontend se actualice
+            // ?? Emitir reset de contador para asegurar que el frontend se actualice
             this.emitUnreadCountReset(data.roomCode, data.username);
 
-            // 🔥 También emitir actualización de contador a 0 explícitamente
+            // ?? Tambi�n emitir actualizaci�n de contador a 0 expl�citamente
             this.emitUnreadCountUpdateForUser(data.roomCode, data.username, 0);
 
         } catch (error) {
-            console.error('Error al marcar mensajes de sala como leídos:', error);
+            console.error('Error al marcar mensajes de sala como le�dos:', error);
             client.emit('error', {
-                message: 'Error al marcar mensajes de sala como leídos',
+                message: 'Error al marcar mensajes de sala como le�dos',
             });
         }
     }
@@ -2772,9 +2763,9 @@ export class SocketGateway
         @ConnectedSocket() _client: Socket,
         @MessageBody() data: any,
     ) {
-        console.log(
-            `🧵 WS: threadMessage - De: ${data.from}, threadId: ${data.threadId}`,
-        );
+        // console.log(
+        //     `?? WS: threadMessage - De: ${data.from}, threadId: ${data.threadId}`,
+        // );
 
         try {
             // El mensaje ya debe estar guardado en BD por el frontend antes de emitir este evento
@@ -2786,9 +2777,9 @@ export class SocketGateway
                 const roomUsers = this.roomUsers.get(data.roomCode);
 
                 if (roomUsers && roomUsers.size > 0) {
-                    console.log(
-                        `📋 Enviando threadMessage a ${roomUsers.size} usuarios en sala ${data.roomCode}`,
-                    );
+                    // console.log(
+                    //     `?? Enviando threadMessage a ${roomUsers.size} usuarios en sala ${data.roomCode}`,
+                    // );
 
                     roomUsers.forEach((member) => {
                         const user = this.users.get(member);
@@ -2811,9 +2802,9 @@ export class SocketGateway
                 }
             }
 
-            console.log('✅ threadMessage reenviado exitosamente');
+            // console.log('? threadMessage reenviado exitosamente');
         } catch (error) {
-            console.error('❌ Error al manejar threadMessage:', error);
+            console.error('? Error al manejar threadMessage:', error);
         }
     }
 
@@ -2823,13 +2814,13 @@ export class SocketGateway
         @MessageBody() data: any,
     ) {
         // console.log(
-        //   `🔢 WS: threadCountUpdated - MessageID: ${data.messageId}, LastReply: ${data.lastReplyFrom}, From: ${data.from}, To: ${data.to}`,
+        //   `?? WS: threadCountUpdated - MessageID: ${data.messageId}, LastReply: ${data.lastReplyFrom}, From: ${data.from}, To: ${data.to}`,
         // );
 
         try {
             const { messageId, lastReplyFrom, isGroup, roomCode, to, from } = data;
 
-            // 🔥 Preparar el payload completo con toda la información necesaria
+            // ?? Preparar el payload completo con toda la informaci�n necesaria
             const updatePayload = {
                 messageId,
                 lastReplyFrom,
@@ -2840,7 +2831,7 @@ export class SocketGateway
             };
 
             if (isGroup && roomCode) {
-                // Actualización en grupo/sala - enviar a todos los miembros de la sala
+                // Actualizaci�n en grupo/sala - enviar a todos los miembros de la sala
                 const roomUsers = this.roomUsers.get(roomCode);
                 if (roomUsers) {
                     roomUsers.forEach((member) => {
@@ -2851,8 +2842,8 @@ export class SocketGateway
                     });
                 }
             } else {
-                // Actualización en conversación 1-a-1
-                // 🔥 Búsqueda case-insensitive del destinatario
+                // Actualizaci�n en conversaci�n 1-a-1
+                // ?? B�squeda case-insensitive del destinatario
                 let recipientUser = this.users.get(to);
                 if (!recipientUser && to) {
                     const toNormalized = to.toLowerCase().trim();
@@ -2861,20 +2852,20 @@ export class SocketGateway
                     );
                     if (foundUsername) {
                         recipientUser = this.users.get(foundUsername);
-                        console.log(
-                            `✅ Destinatario encontrado con búsqueda case-insensitive: ${foundUsername}`,
-                        );
+                        // console.log(
+                        //     `? Destinatario encontrado con b�squeda case-insensitive: ${foundUsername}`,
+                        // );
                     }
                 }
 
                 if (recipientUser && recipientUser.socket.connected) {
-                    // console.log(`✅ Enviando threadCountUpdated al destinatario: ${to}`);
+                    // console.log(`? Enviando threadCountUpdated al destinatario: ${to}`);
                     recipientUser.socket.emit('threadCountUpdated', updatePayload);
                 } else {
-                    console.log(`⚠️ Destinatario no encontrado o no conectado: ${to}`);
+                    // console.log(`?? Destinatario no encontrado o no conectado: ${to}`);
                 }
 
-                // 🔥 Búsqueda case-insensitive del remitente
+                // ?? B�squeda case-insensitive del remitente
                 let senderUser = this.users.get(from);
                 if (!senderUser && from) {
                     const fromNormalized = from.toLowerCase().trim();
@@ -2883,27 +2874,27 @@ export class SocketGateway
                     );
                     if (foundUsername) {
                         senderUser = this.users.get(foundUsername);
-                        console.log(
-                            `✅ Remitente encontrado con búsqueda case-insensitive: ${foundUsername}`,
-                        );
+                        // console.log(
+                        //     `? Remitente encontrado con b�squeda case-insensitive: ${foundUsername}`,
+                        // );
                     }
                 }
 
                 if (senderUser && senderUser.socket.connected && from !== to) {
-                    // console.log(`✅ Enviando threadCountUpdated al remitente: ${from}`);
+                    // console.log(`? Enviando threadCountUpdated al remitente: ${from}`);
                     senderUser.socket.emit('threadCountUpdated', updatePayload);
                 } else if (from === to) {
                     // console.log(
-                    //   `ℹ️ Remitente y destinatario son el mismo usuario, no se envía duplicado`,
+                    //   `?? Remitente y destinatario son el mismo usuario, no se env�a duplicado`,
                     // );
                 } else {
-                    console.log(`⚠️ Remitente no encontrado o no conectado: ${from}`);
+                    // console.log(`?? Remitente no encontrado o no conectado: ${from}`);
                 }
             }
 
-            // console.log(`✅ Contador de hilo actualizado correctamente`);
+            // console.log(`? Contador de hilo actualizado correctamente`);
         } catch (error) {
-            console.error('❌ Error al actualizar contador de hilo:', error);
+            console.error('? Error al actualizar contador de hilo:', error);
             client.emit('error', { message: 'Error al actualizar contador de hilo' });
         }
     }
@@ -2921,12 +2912,12 @@ export class SocketGateway
             to?: string;
         },
     ) {
-        console.log(
-            `😊 WS: toggleReaction - Mensaje ${data.messageId}, Usuario: ${data.username}, Emoji: ${data.emoji}`,
-        );
-        console.log(
-            `📍 toggleReaction - roomCode: ${data.roomCode}, to: ${data.to}`,
-        );
+        // console.log(
+        //     `?? WS: toggleReaction - Mensaje ${data.messageId}, Usuario: ${data.username}, Emoji: ${data.emoji}`,
+        // );
+        // console.log(
+        //     `?? toggleReaction - roomCode: ${data.roomCode}, to: ${data.to}`,
+        // );
 
         try {
             const message = await this.messagesService.toggleReaction(
@@ -2936,20 +2927,20 @@ export class SocketGateway
             );
 
             if (message) {
-                console.log(
-                    `✅ Reacción guardada, emitiendo evento reactionUpdated...`,
-                );
+                // console.log(
+                //     `? Reacci�n guardada, emitiendo evento reactionUpdated...`,
+                // );
 
-                // Emitir la actualización a todos los usuarios relevantes
+                // Emitir la actualizaci�n a todos los usuarios relevantes
                 if (data.roomCode) {
-                    console.log(
-                        `📢 Es mensaje de sala (${data.roomCode}), notificando a miembros...`,
-                    );
+                    // console.log(
+                    //     `?? Es mensaje de sala (${data.roomCode}), notificando a miembros...`,
+                    // );
                     const roomUsers = this.roomUsers.get(data.roomCode);
-                    console.log(
-                        `👥 Usuarios en sala:`,
-                        roomUsers ? Array.from(roomUsers) : 'No hay usuarios',
-                    );
+                    // console.log(
+                    //     `?? Usuarios en sala:`,
+                    //     roomUsers ? Array.from(roomUsers) : 'No hay usuarios',
+                    // );
 
                     if (roomUsers) {
                         let notifiedCount = 0;
@@ -2964,16 +2955,16 @@ export class SocketGateway
                                 notifiedCount++;
                             }
                         });
-                        console.log(
-                            `✅ Notificados ${notifiedCount} usuarios en sala ${data.roomCode}`,
-                        );
+                        // console.log(
+                        //     `? Notificados ${notifiedCount} usuarios en sala ${data.roomCode}`,
+                        // );
                     } else {
-                        console.log(
-                            `⚠️ No se encontraron usuarios en la sala ${data.roomCode}`,
-                        );
+                        // console.log(
+                        //     `?? No se encontraron usuarios en la sala ${data.roomCode}`,
+                        // );
                     }
                 } else if (data.to) {
-                    console.log(`📢 Es mensaje 1-a-1, notificando a ${data.to}...`);
+                    // console.log(`?? Es mensaje 1-a-1, notificando a ${data.to}...`);
 
                     // Si es un mensaje 1-a-1, notificar al otro usuario
                     const otherUser = this.users.get(data.to);
@@ -2983,34 +2974,34 @@ export class SocketGateway
                             reactions: message.reactions,
                             to: data.to,
                         });
-                        console.log(`✅ Notificado usuario ${data.to}`);
+                        // console.log(`? Notificado usuario ${data.to}`);
                     } else {
-                        console.log(`⚠️ Usuario ${data.to} no encontrado o desconectado`);
+                        // console.log(`?? Usuario ${data.to} no encontrado o desconectado`);
                     }
 
-                    // También notificar al usuario que reaccionó
+                    // Tambi�n notificar al usuario que reaccion�
                     client.emit('reactionUpdated', {
                         messageId: data.messageId,
                         reactions: message.reactions,
                         to: data.to,
                     });
-                    console.log(`✅ Notificado usuario que reaccionó (${data.username})`);
+                    // console.log(`? Notificado usuario que reaccion� (${data.username})`);
                 } else {
-                    console.log(`⚠️ No hay roomCode ni to, no se puede notificar`);
+                    // console.log(`?? No hay roomCode ni to, no se puede notificar`);
                 }
             } else {
-                console.log(
-                    `❌ No se pudo guardar la reacción (mensaje no encontrado)`,
-                );
+                // console.log(
+                //     `? No se pudo guardar la reacci�n (mensaje no encontrado)`,
+                // );
             }
         } catch (error) {
-            console.error('❌ Error al alternar reacción:', error);
-            client.emit('error', { message: 'Error al alternar reacción' });
+            console.error('? Error al alternar reacci�n:', error);
+            client.emit('error', { message: 'Error al alternar reacci�n' });
         }
     }
 
     /**
-     * 🚀 OPTIMIZADO: Notificar solo a usuarios ADMIN/JEFEPISO usando adminUsers Map
+     * ?? OPTIMIZADO: Notificar solo a usuarios ADMIN/JEFEPISO usando adminUsers Map
      * En lugar de iterar sobre todos los 400 usuarios, iteramos solo sobre los ~5 admins
      */
     broadcastRoomCreated(room: any) {
@@ -3031,7 +3022,7 @@ export class SocketGateway
     }
 
     /**
-     * 🚀 OPTIMIZADO: Notificar solo a admins + miembros de la sala
+     * ?? OPTIMIZADO: Notificar solo a admins + miembros de la sala
      */
     broadcastRoomDeleted(roomCode: string, roomId: number) {
         // Usar adminUsers Map para O(k) en lugar de O(n)
@@ -3044,19 +3035,19 @@ export class SocketGateway
             }
         });
 
-        // 🔥 NUEVO: Notificar a todos los miembros de la sala que fue desactivada
+        // ?? NUEVO: Notificar a todos los miembros de la sala que fue desactivada
         const roomMembers = this.roomUsers.get(roomCode);
         if (roomMembers) {
-            console.log(
-                `📢 Notificando a ${roomMembers.size} miembros de la sala ${roomCode}`,
-            );
+            // console.log(
+            //     `?? Notificando a ${roomMembers.size} miembros de la sala ${roomCode}`,
+            // );
 
             roomMembers.forEach((username) => {
                 const userConnection = this.users.get(username);
                 if (userConnection && userConnection.socket.connected) {
-                    console.log(
-                        `✅ Notificando a ${username} que la sala fue desactivada`,
-                    );
+                    // console.log(
+                    //     `? Notificando a ${username} que la sala fue desactivada`,
+                    // );
                     userConnection.socket.emit('roomDeactivated', {
                         roomCode,
                         roomId,
@@ -3071,28 +3062,28 @@ export class SocketGateway
     }
 
     /**
-     * Notificar a un usuario específico que fue agregado a una sala
+     * Notificar a un usuario espec�fico que fue agregado a una sala
      */
     notifyUserAddedToRoom(username: string, roomCode: string, roomName: string) {
-        console.log(
-            `➕ Notificando a ${username} que fue agregado a la sala ${roomCode}`,
-        );
+        // console.log(
+        //     `? Notificando a ${username} que fue agregado a la sala ${roomCode}`,
+        // );
 
         const userConnection = this.users.get(username);
         if (userConnection && userConnection.socket.connected) {
-            console.log(
-                `✅ Usuario ${username} está conectado, enviando notificación`,
-            );
+            // console.log(
+            //     `? Usuario ${username} est� conectado, enviando notificaci�n`,
+            // );
             userConnection.socket.emit('addedToRoom', {
                 roomCode,
                 roomName,
                 message: `Has sido agregado a la sala: ${roomName}`,
             });
         } else {
-            console.log(
-                `❌ Usuario ${username} NO está conectado o no existe en el mapa de usuarios`,
-            );
-            console.log(`📋 Usuarios conectados:`, Array.from(this.users.keys()));
+            // console.log(
+            //     `? Usuario ${username} NO est� conectado o no existe en el mapa de usuarios`,
+            // );
+            // console.log(`?? Usuarios conectados:`, Array.from(this.users.keys()));
         }
     }
 
@@ -3100,7 +3091,7 @@ export class SocketGateway
      * Notificar cuando un usuario es eliminado de una sala
      */
     async handleUserRemovedFromRoom(roomCode: string, username: string) {
-        console.log(`🚫 Usuario ${username} eliminado de la sala ${roomCode}`);
+        // console.log(`?? Usuario ${username} eliminado de la sala ${roomCode}`);
 
         // Remover el usuario del mapa de usuarios de la sala
         const roomUserSet = this.roomUsers.get(roomCode);
@@ -3125,7 +3116,7 @@ export class SocketGateway
             }
         }
 
-        // Notificar a todos los usuarios de la sala sobre la actualización
+        // Notificar a todos los usuarios de la sala sobre la actualizaci�n
         await this.broadcastRoomUsers(roomCode);
 
         // Reenviar lista general de usuarios
@@ -3134,12 +3125,12 @@ export class SocketGateway
 
     /**
      *  NUEVO: Emitir evento de monitoreo a todos los ADMIN/JEFEPISO
-     * Cuando se envía un mensaje entre dos usuarios, notificar a los monitores
+     * Cuando se env�a un mensaje entre dos usuarios, notificar a los monitores
      */
     private broadcastMonitoringMessage(messageData: any) {
-        console.log(
-            `📡 Broadcasting monitoringMessage a ADMIN/JEFEPISO - De: ${messageData.from}, Para: ${messageData.to}`,
-        );
+        // console.log(
+        //     `?? Broadcasting monitoringMessage a ADMIN/JEFEPISO - De: ${messageData.from}, Para: ${messageData.to}`,
+        // );
 
         this.users.forEach(({ socket, userData }) => {
             const role = userData?.role?.toString().toUpperCase().trim();
@@ -3149,7 +3140,7 @@ export class SocketGateway
         });
     }
 
-    //  NUEVO: Emitir actualización de contador de mensajes no leídos para un usuario específico
+    //  NUEVO: Emitir actualizaci�n de contador de mensajes no le�dos para un usuario espec�fico
     public emitUnreadCountUpdateForUser(
         roomCode: string,
         username: string,
@@ -3176,9 +3167,9 @@ export class SocketGateway
 
     //  NUEVO: Emitir reset de contador cuando usuario entra a sala
     public emitUnreadCountReset(roomCode: string, username: string) {
-        console.log(
-            `📊 Emitiendo reset de contador no leído - Sala: ${roomCode}, Usuario: ${username}`,
-        );
+        // console.log(
+        //     `?? Emitiendo reset de contador no le�do - Sala: ${roomCode}, Usuario: ${username}`,
+        // );
 
         const userConnection = this.users.get(username);
         if (userConnection && userConnection.socket.connected) {
@@ -3189,13 +3180,13 @@ export class SocketGateway
     }
 
     /**
-     *  NUEVO: Método público para emitir evento de monitoreo desde el controller HTTP
-     * Se usa cuando se crea un mensaje a través del endpoint POST /api/messages
+     *  NUEVO: M�todo p�blico para emitir evento de monitoreo desde el controller HTTP
+     * Se usa cuando se crea un mensaje a trav�s del endpoint POST /api/messages
      */
     public broadcastMonitoringMessagePublic(messageData: any) {
-        console.log(
-            `📡 Broadcasting monitoringMessage (PUBLIC) a ADMIN/JEFEPISO - De: ${messageData.from}, Para: ${messageData.to}`,
-        );
+        // console.log(
+        //     `?? Broadcasting monitoringMessage (PUBLIC) a ADMIN/JEFEPISO - De: ${messageData.from}, Para: ${messageData.to}`,
+        // );
 
         this.users.forEach(({ socket, userData }) => {
             const role = userData?.role?.toString().toUpperCase().trim();
@@ -3205,13 +3196,13 @@ export class SocketGateway
         });
     }
 
-    // Generar hash de mensaje para detección de duplicados
+    // Generar hash de mensaje para detecci�n de duplicados
     private createMessageHash(data: any): string {
         const hashContent = `${data.from}-${data.to}-${data.message || ''}-${data.isGroup}`;
         return crypto.createHash('sha256').update(hashContent).digest('hex');
     }
 
-    // Limpiar caché de mensajes antiguos (más de 5 segundos)
+    // Limpiar cach� de mensajes antiguos (m�s de 5 segundos)
     private cleanRecentMessagesCache() {
         const now = Date.now();
         const CACHE_EXPIRY = 5000; // 5 segundos
@@ -3230,14 +3221,14 @@ export class SocketGateway
         const lastSent = this.recentMessages.get(messageHash);
         const DUPLICATE_WINDOW = 2000; // 2 segundos
 
-        // Si el mismo mensaje se envió en los últimos 2 segundos, es duplicado
+        // Si el mismo mensaje se envi� en los �ltimos 2 segundos, es duplicado
         if (lastSent && (now - lastSent) < DUPLICATE_WINDOW) {
-            console.log('⚠️ Mensaje duplicado detectado en backend:', {
-                hash: messageHash.substring(0, 8) + '...',
-                timeSinceLastSend: now - lastSent,
-                from: data.from,
-                to: data.to,
-            });
+            // console.log('?? Mensaje duplicado detectado en backend:', {
+            //     hash: messageHash.substring(0, 8) + '...',
+            //     timeSinceLastSend: now - lastSent,
+            //     from: data.from,
+            //     to: data.to,
+            // });
             return true;
         }
 
@@ -3260,30 +3251,30 @@ export class SocketGateway
             to?: string;
         },
     ) {
-        console.log(
-            `📊 WS: pollVote - Usuario: ${data.username}, MessageID: ${data.messageId}, Opción: ${data.optionIndex}`,
-        );
+        // console.log(
+        //     `?? WS: pollVote - Usuario: ${data.username}, MessageID: ${data.messageId}, Opci�n: ${data.optionIndex}`,
+        // );
 
         try {
             // Obtener la encuesta asociada al mensaje
             const poll = await this.pollsService.getPollByMessageId(data.messageId);
 
             if (!poll) {
-                console.error(`❌ Encuesta no encontrada para mensaje ${data.messageId}`);
+                console.error(`? Encuesta no encontrada para mensaje ${data.messageId}`);
                 client.emit('error', { message: 'Encuesta no encontrada' });
                 return;
             }
 
-            // Validar que el índice de opción sea válido
+            // Validar que el �ndice de opci�n sea v�lido
             if (data.optionIndex < 0 || data.optionIndex >= poll.options.length) {
-                console.error(`❌ Índice de opción inválido: ${data.optionIndex}`);
-                client.emit('error', { message: 'Opción inválida' });
+                console.error(`? �ndice de opci�n inv�lido: ${data.optionIndex}`);
+                client.emit('error', { message: 'Opci�n inv�lida' });
                 return;
             }
 
             // Registrar o actualizar el voto
             await this.pollsService.vote(poll.id, data.username, data.optionIndex);
-            console.log(`✅ Voto registrado: ${data.username} votó por opción ${data.optionIndex}`);
+            // console.log(`? Voto registrado: ${data.username} vot� por opci�n ${data.optionIndex}`);
 
             // Obtener la encuesta actualizada con todos los votos
             const updatedPoll = await this.pollsService.getPollWithVotes(poll.id);
@@ -3298,7 +3289,7 @@ export class SocketGateway
                 })),
             };
 
-            // Emitir actualización en tiempo real
+            // Emitir actualizaci�n en tiempo real
             if (data.roomCode) {
                 // Es una sala de grupo
                 const roomUsers = this.roomUsers.get(data.roomCode);
@@ -3323,7 +3314,7 @@ export class SocketGateway
                     });
                 }
 
-                // También emitir al remitente
+                // Tambi�n emitir al remitente
                 const senderConnection = this.users.get(data.username);
                 if (senderConnection && senderConnection.socket.connected) {
                     senderConnection.socket.emit('pollUpdated', {
@@ -3333,7 +3324,7 @@ export class SocketGateway
                 }
             }
         } catch (error) {
-            console.error('❌ Error al procesar voto de encuesta:', error);
+            console.error('? Error al procesar voto de encuesta:', error);
             client.emit('error', { message: 'Error al procesar voto' });
         }
     }
@@ -3342,26 +3333,26 @@ export class SocketGateway
 
     /**
      * Modificar joinVideoRoom para trackear participantes
-     * Este método se llamará cuando un usuario se una una videollamada
+     * Este m�todo se llamar� cuando un usuario se una una videollamada
      */
     @SubscribeMessage('joinVideoRoomList')
     handleJoinVideoRoomList(
         @ConnectedSocket() client: Socket,
         @MessageBody() data: { roomID: string; username: string },
     ) {
-        console.log(
-            `📹 WS: joinVideoRoom - Usuario: ${data.username} uniéndose a sala de video: ${data.roomID}`,
-        );
+        // console.log(
+        //     `?? WS: joinVideoRoom - Usuario: ${data.username} uni�ndose a sala de video: ${data.roomID}`,
+        // );
 
         // Unir el socket a la sala de video
         client.join(data.roomID);
 
-        // 🔥 NUEVO: Agregar participante al tracking
+        // ?? NUEVO: Agregar participante al tracking
         if (!this.videoRoomParticipants.has(data.roomID)) {
             this.videoRoomParticipants.set(data.roomID, new Set());
         }
 
-        // Obtener información completa del usuario
+        // Obtener informaci�n completa del usuario
         const userInfo = this.users.get(data.username);
         const participantInfo = {
             username: data.username,
@@ -3381,9 +3372,9 @@ export class SocketGateway
         }
         participants.add(participantInfo);
 
-        console.log(
-            `✅ Usuario ${data.username} unido a sala de video ${data.roomID} - Total: ${participants.size}`,
-        );
+        // console.log(
+        //     `? Usuario ${data.username} unido a sala de video ${data.roomID} - Total: ${participants.size}`,
+        // );
 
         // Emitir lista actualizada de participantes
         this.broadcastVideoRoomParticipants(data.roomID);
@@ -3397,14 +3388,14 @@ export class SocketGateway
         @ConnectedSocket() client: Socket,
         @MessageBody() data: { roomID: string; username: string },
     ) {
-        console.log(
-            `📹 WS: leaveVideoRoom - Usuario: ${data.username} saliendo de sala de video: ${data.roomID}`,
-        );
+        // console.log(
+        //     `?? WS: leaveVideoRoom - Usuario: ${data.username} saliendo de sala de video: ${data.roomID}`,
+        // );
 
         // Remover del socket room
         client.leave(data.roomID);
 
-        // 🔥 Remover del tracking
+        // ?? Remover del tracking
         const participants = this.videoRoomParticipants.get(data.roomID);
         if (participants) {
             const participantToRemove = Array.from(participants).find(
@@ -3412,14 +3403,14 @@ export class SocketGateway
             );
             if (participantToRemove) {
                 participants.delete(participantToRemove);
-                console.log(
-                    `✅ Usuario ${data.username} removido de sala ${data.roomID} - Quedan: ${participants.size}`,
-                );
+                // console.log(
+                //     `? Usuario ${data.username} removido de sala ${data.roomID} - Quedan: ${participants.size}`,
+                // );
 
                 // Si no quedan participantes, limpiar el Set
                 if (participants.size === 0) {
                     this.videoRoomParticipants.delete(data.roomID);
-                    console.log(`🧹 Sala ${data.roomID} eliminada (sin participantes)`);
+                    // console.log(`?? Sala ${data.roomID} eliminada (sin participantes)`);
                 }
             }
         }
@@ -3429,7 +3420,7 @@ export class SocketGateway
     }
 
     /**
-     * NUEVO: Método helper para broadcast de participantes
+     * NUEVO: M�todo helper para broadcast de participantes
      */
     private broadcastVideoRoomParticipants(roomID: string) {
         const participants = this.videoRoomParticipants.get(roomID) || new Set();
@@ -3448,8 +3439,8 @@ export class SocketGateway
             participants: participantsList,
         });
 
-        // Si es un grupo, también emitir a todos los miembros del grupo
-        // (incluso si no están en la videollamada, para que vean el banner actualizado)
+        // Si es un grupo, tambi�n emitir a todos los miembros del grupo
+        // (incluso si no est�n en la videollamada, para que vean el banner actualizado)
         if (roomCode) {
             const roomUsers = this.roomUsers.get(roomCode);
             if (roomUsers) {
@@ -3466,13 +3457,13 @@ export class SocketGateway
             }
         }
 
-        console.log(
-            `📢 Broadcast participantes de ${roomID}: ${participantsList.length} usuarios`,
-        );
+        // console.log(
+        //     `?? Broadcast participantes de ${roomID}: ${participantsList.length} usuarios`,
+        // );
     }
 
     /**
-     * 🔥 NUEVO: Handler para fijar/desfijar mensajes en salas grupales
+     * ?? NUEVO: Handler para fijar/desfijar mensajes en salas grupales
      */
     @SubscribeMessage('pinMessage')
     async handlePinMessage(
@@ -3486,19 +3477,19 @@ export class SocketGateway
             pinnedBy: string;
         },
     ) {
-        console.log(
-            `📌 WS: pinMessage - RoomCode: ${data.roomCode}, MessageId: ${data.messageId}, PinnedBy: ${data.pinnedBy}`,
-        );
+        // console.log(
+        //     `?? WS: pinMessage - RoomCode: ${data.roomCode}, MessageId: ${data.messageId}, PinnedBy: ${data.pinnedBy}`,
+        // );
 
         const { roomCode, messageId, pinnedBy, isGroup } = data;
 
         if (!isGroup) {
-            console.warn('⚠️ Pin message solo está disponible para grupos');
+            // console.warn('?? Pin message solo est� disponible para grupos');
             return;
         }
 
         if (!roomCode) {
-            console.warn('⚠️ roomCode es requerido para fijar mensajes');
+            // console.warn('?? roomCode es requerido para fijar mensajes');
             return;
         }
 
@@ -3521,11 +3512,11 @@ export class SocketGateway
                 });
             }
 
-            console.log(
-                `✅ Mensaje ${messageId ? 'fijado' : 'desfijado'} en sala ${roomCode} por ${pinnedBy}`,
-            );
+            // console.log(
+            //     `? Mensaje ${messageId ? 'fijado' : 'desfijado'} en sala ${roomCode} por ${pinnedBy}`,
+            // );
         } catch (error) {
-            console.error('❌ Error al fijar mensaje:', error);
+            console.error('? Error al fijar mensaje:', error);
             // Notificar al cliente que hubo un error
             const userConnection = this.users.get(pinnedBy);
             if (userConnection && userConnection.socket.connected) {
@@ -3536,22 +3527,22 @@ export class SocketGateway
         }
     }
 
-    // 🔥 NUEVO: Método para limpiar conexiones huérfanas
+    // ?? NUEVO: M�todo para limpiar conexiones hu�rfanas
     private cleanOrphanedConnections() {
         let cleaned = 0;
         for (const [username, user] of this.users.entries()) {
             if (!user.socket.connected) {
                 this.users.delete(username);
                 cleaned++;
-                console.log(`🧹 Limpiando conexión huérfana: ${username}`);
+                // console.log(`?? Limpiando conexi�n hu�rfana: ${username}`);
             }
         }
         if (cleaned > 0) {
-            console.log(`✅ Limpiadas ${cleaned} conexiones huérfanas en total`);
+            // console.log(`? Limpiadas ${cleaned} conexiones hu�rfanas en total`);
         }
     }
 
-    // Método para limpiar caché de usuarios expirado
+    // M�todo para limpiar cach� de usuarios expirado
     private cleanUserCache() {
         const now = Date.now();
         let cleaned = 0;
@@ -3562,13 +3553,13 @@ export class SocketGateway
             }
         }
         if (cleaned > 0) {
-            console.log(
-                `🧹 Limpiadas ${cleaned} entradas del caché de usuarios (${this.userCache.size} restantes)`,
-            );
+            // console.log(
+            //     `?? Limpiadas ${cleaned} entradas del cach� de usuarios (${this.userCache.size} restantes)`,
+            // );
         }
     }
 
-    // Método para monitorear estadísticas del sistema
+    // M�todo para monitorear estad�sticas del sistema
     private logSystemStats() {
         const stats = {
             timestamp: new Date().toISOString(),
@@ -3590,16 +3581,16 @@ export class SocketGateway
             },
         };
 
-        console.log('📊 ==================== SYSTEM STATS ====================');
-        console.log(`⏰ Timestamp: ${stats.timestamp}`);
-        console.log(`👥 Conexiones: ${stats.connections.total} total (${stats.connections.admins} admins, ${stats.connections.regular} regulares)`);
-        console.log(`💾 Caché: ${stats.cache.userCacheSize} usuarios cacheados (TTL: ${stats.cache.userCacheLimit})`);
-        console.log(`🏠 Grupos: ${stats.groups.total} grupos, ${stats.groups.activeRooms} salas activas`);
-        console.log(`📈 Memoria estimada del caché: ~${stats.memory.estimatedCacheKB}KB`);
-        console.log('=======================================================');
+        // console.log('?? ==================== SYSTEM STATS ====================');
+        // console.log(`? Timestamp: ${stats.timestamp}`);
+        // console.log(`?? Conexiones: ${stats.connections.total} total (${stats.connections.admins} admins, ${stats.connections.regular} regulares)`);
+        // console.log(`?? Cach�: ${stats.cache.userCacheSize} usuarios cacheados (TTL: ${stats.cache.userCacheLimit})`);
+        // console.log(`?? Grupos: ${stats.groups.total} grupos, ${stats.groups.activeRooms} salas activas`);
+        // console.log(`?? Memoria estimada del cach�: ~${stats.memory.estimatedCacheKB}KB`);
+        // console.log('=======================================================');
     }
 
-    // Método público para obtener estadísticas (útil para endpoints de admin)
+    // M�todo p�blico para obtener estad�sticas (�til para endpoints de admin)
     public getSystemStats() {
         return {
             timestamp: new Date().toISOString(),
