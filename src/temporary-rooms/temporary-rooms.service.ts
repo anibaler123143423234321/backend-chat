@@ -1,4 +1,4 @@
-﻿import {
+import {
   Injectable,
   NotFoundException,
   BadRequestException,
@@ -40,7 +40,7 @@ export class TemporaryRoomsService {
     private roomFavoritesService: RoomFavoritesService,
   ) { }
 
-  // MÃ©todo para inyectar el gateway de WebSocket (evita dependencia circular)
+  // Método para inyectar el gateway de WebSocket (evita dependencia circular)
   setSocketGateway(gateway: any) {
     this.socketGateway = gateway;
   }
@@ -54,7 +54,7 @@ export class TemporaryRoomsService {
     // console.log('Usuario ID:', userId);
     // console.log('Nombre del creador:', creatorUsername);
 
-    // ðŸ”¥ VALIDAR: Verificar si ya existe una sala activa con el mismo nombre
+    // 🔥 VALIDAR: Verificar si ya existe una sala activa con el mismo nombre
     const existingRoom = await this.temporaryRoomRepository.findOne({
       where: { name: createDto.name, isActive: true },
     });
@@ -67,7 +67,7 @@ export class TemporaryRoomsService {
 
     const roomCode = this.generateRoomCode();
 
-    // console.log('CÃ³digo de sala generado:', roomCode);
+    // console.log('Código de sala generado:', roomCode);
 
     // Inicializar con el creador como primer miembro
     const members = creatorUsername ? [creatorUsername] : []; // Historial
@@ -106,7 +106,7 @@ export class TemporaryRoomsService {
       isActive: savedRoom.isActive,
     };
 
-    // ðŸ”¥ Notificar a todos los ADMIN y JEFEPISO que se creÃ³ una nueva sala
+    // 🔥 Notificar a todos los ADMIN y JEFEPISO que se creó una nueva sala
     if (this.socketGateway) {
       this.socketGateway.broadcastRoomCreated(savedRoom);
     }
@@ -163,20 +163,20 @@ export class TemporaryRoomsService {
       return members.includes(displayName);
     });
 
-    // Aplicar paginación
+    // Aplicar paginaci�n
     const total = userRooms.length;
     const offset = (page - 1) * limit;
     const paginatedRooms = userRooms.slice(offset, offset + limit);
     const totalPages = Math.ceil(total / limit);
     const hasMore = page < totalPages;
 
-    // Enriquecer cada sala con información adicional (último mensaje, etc.)
+    // Enriquecer cada sala con informaci�n adicional (�ltimo mensaje, etc.)
     const enrichedRooms = await Promise.all(
       paginatedRooms.map(async (room) => {
         let lastMessage = null;
 
         try {
-          // Obtener el último mensaje de la sala
+          // Obtener el �ltimo mensaje de la sala
           const messages = await this.messageRepository.find({
             where: { roomCode: room.roomCode, isDeleted: false },
             order: { sentAt: 'DESC' },
@@ -190,12 +190,12 @@ export class TemporaryRoomsService {
             let messageText = msg.message;
             if (!messageText && msg.mediaType) {
               const mediaTypeMap = {
-                image: '📷 Imagen',
-                video: '🎥 Video',
-                audio: '🎵 Audio',
-                document: '📄 Documento',
+                image: '?? Imagen',
+                video: '?? Video',
+                audio: '?? Audio',
+                document: '?? Documento',
               };
-              messageText = mediaTypeMap[msg.mediaType] || '📎 Archivo';
+              messageText = mediaTypeMap[msg.mediaType] || '?? Archivo';
             }
 
             lastMessage = {
@@ -208,12 +208,12 @@ export class TemporaryRoomsService {
           }
         } catch (error) {
           console.error(
-            `Error al obtener último mensaje de sala ${room.roomCode}:`,
+            `Error al obtener �ltimo mensaje de sala ${room.roomCode}:`,
             error,
           );
         }
 
-        // 🔥 OPTIMIZACIÓN: Excluir arrays pesados (members, connectedMembers, assignedMembers)
+        // ?? OPTIMIZACI�N: Excluir arrays pesados (members, connectedMembers, assignedMembers)
         const { members, connectedMembers, assignedMembers, ...roomWithoutMembers } = room;
 
         return {
@@ -224,7 +224,7 @@ export class TemporaryRoomsService {
       }),
     );
 
-    // 🔥 ORDENAR por lastMessage.sentAt (más reciente primero)
+    // ?? ORDENAR por lastMessage.sentAt (m�s reciente primero)
     const sortedEnrichedRooms = enrichedRooms.sort((a, b) => {
       const aDate = a.lastMessage?.sentAt || a.createdAt;
       const bDate = b.lastMessage?.sentAt || b.createdAt;
@@ -232,7 +232,7 @@ export class TemporaryRoomsService {
     });
 
     return {
-      rooms: sortedEnrichedRooms, // 🔥 Usar sortedEnrichedRooms
+      rooms: sortedEnrichedRooms, // ?? Usar sortedEnrichedRooms
       total,
       page,
       totalPages,
@@ -258,11 +258,11 @@ export class TemporaryRoomsService {
     });
 
     if (!room) {
-      throw new NotFoundException('CÃ³digo de sala no vÃ¡lido');
+      throw new NotFoundException('Código de sala no válido');
     }
 
     if (!room.isActive) {
-      throw new BadRequestException('La sala estÃ¡ inactiva');
+      throw new BadRequestException('La sala está inactiva');
     }
 
     return room;
@@ -272,11 +272,11 @@ export class TemporaryRoomsService {
     joinDto: JoinRoomDto,
     username: string,
   ): Promise<TemporaryRoom> {
-    // console.log('ðŸ” Buscando sala con cÃ³digo:', joinDto.roomCode);
-    // console.log('ðŸ‘¤ Usuario que se une:', username);
+    // console.log('🔍 Buscando sala con código:', joinDto.roomCode);
+    // console.log('👤 Usuario que se une:', username);
 
     const room = await this.findByRoomCode(joinDto.roomCode);
-    // console.log('ðŸ  Sala encontrada:', room);
+    // console.log('🏠 Sala encontrada:', room);
 
     if (!room.members) {
       room.members = [];
@@ -285,78 +285,78 @@ export class TemporaryRoomsService {
       room.connectedMembers = [];
     }
 
-    // 🔥 MODIFICADO: Verificar si el usuario ya estaba en la sala ANTES (en members)
+    // ?? MODIFICADO: Verificar si el usuario ya estaba en la sala ANTES (en members)
     const wasAlreadyMember = room.members.includes(username);
 
-    // console.log(`🔄 joinRoom - Usuario: ${username}, Sala: ${room.name}, Ya era miembro: ${wasAlreadyMember}, Capacidad: ${room.members.length}/${room.maxCapacity}`);
+    // console.log(`?? joinRoom - Usuario: ${username}, Sala: ${room.name}, Ya era miembro: ${wasAlreadyMember}, Capacidad: ${room.members.length}/${room.maxCapacity}`);
 
-    // 🔥 IMPORTANTE: Verificar capacidad ANTES de agregar
+    // ?? IMPORTANTE: Verificar capacidad ANTES de agregar
     // Solo contar si el usuario NO era miembro antes
     if (!wasAlreadyMember && room.members.length >= room.maxCapacity) {
       console.error(
-        `❌ Sala llena: ${room.members.length}/${room.maxCapacity} - No se puede agregar a ${username}`,
+        `? Sala llena: ${room.members.length}/${room.maxCapacity} - No se puede agregar a ${username}`,
       );
       throw new BadRequestException(
-        `La sala ha alcanzado su capacidad máxima (${room.maxCapacity} usuarios)`,
+        `La sala ha alcanzado su capacidad m�xima (${room.maxCapacity} usuarios)`,
       );
     }
 
-    // Agregar al historial si no estÃ¡
+    // Agregar al historial si no está
     if (!wasAlreadyMember) {
       room.members.push(username);
-      console.log(
-        `➕ Usuario ${username} agregado a members. Total: ${room.members.length}/${room.maxCapacity}`,
-      );
+      // console.log(
+      //   `? Usuario ${username} agregado a members. Total: ${room.members.length}/${room.maxCapacity}`,
+      // );
     }
 
     // Verificar si el usuario ya estaba conectado
     const wasAlreadyConnected = room.connectedMembers.includes(username);
 
-    // Si el usuario ya estÃ¡ conectado, no hacer nada
+    // Si el usuario ya está conectado, no hacer nada
     if (wasAlreadyConnected) {
-      // console.log('ðŸ‘¤ Usuario ya estÃ¡ conectado en la sala');
+      // console.log('👤 Usuario ya está conectado en la sala');
       return room;
     }
 
-    // Si hay un "Usuario" genÃ©rico en connectedMembers, reemplazarlo
+    // Si hay un "Usuario" genérico en connectedMembers, reemplazarlo
     const genericUserIndex = room.connectedMembers.indexOf('Usuario');
     if (genericUserIndex !== -1) {
       room.connectedMembers[genericUserIndex] = username;
-      // console.log('ðŸ”„ Reemplazando "Usuario" genÃ©rico con:', username);
+      // console.log('🔄 Reemplazando "Usuario" genérico con:', username);
     } else {
       // Agregar a usuarios conectados
       room.connectedMembers.push(username);
     }
 
-    // 🔥 MODIFICADO: currentMembers debe ser el total de usuarios AÑADIDOS (members), no solo conectados
+    // ?? MODIFICADO: currentMembers debe ser el total de usuarios A�ADIDOS (members), no solo conectados
     room.currentMembers = room.members.length;
-    // console.log(`💾 Guardando sala - Members: ${room.members.length}, Connected: ${room.connectedMembers.length}`);
-    // console.log('ðŸ‘¥ Usuarios conectados en la sala:', room.connectedMembers);
-    // console.log('ðŸ“œ Historial de usuarios:', room.members);
+    // console.log(`?? Guardando sala - Members: ${room.members.length}, Connected: ${room.connectedMembers.length}`);
+    // console.log('👥 Usuarios conectados en la sala:', room.connectedMembers);
+    // console.log('📜 Historial de usuarios:', room.members);
     await this.temporaryRoomRepository.save(room);
 
-    // 🔥 MODIFICADO: Solo notificar si el usuario fue REALMENTE AGREGADO (no estaba en members antes)
+    // ?? MODIFICADO: Solo notificar si el usuario fue REALMENTE AGREGADO (no estaba en members antes)
     if (!wasAlreadyMember && this.socketGateway) {
       this.socketGateway.notifyUserAddedToRoom(
         username,
         room.roomCode,
         room.name,
       );
-      console.log(`📢 Notificación enviada para ${username}`);
+      // console.log(`?? Notificaci�n enviada para ${username}`);
     }
 
-    // console.log(`✅ Usuario ${username} unido exitosamente a la sala ${room.name}`);
+    // console.log(`? Usuario ${username} unido exitosamente a la sala ${room.name}`);
 
-    // console.log('âœ… Usuario unido exitosamente a la sala');
+    // console.log('✅ Usuario unido exitosamente a la sala');
     return room;
   }
 
   async leaveRoom(roomCode: string, username: string): Promise<TemporaryRoom> {
-    // console.log('ðŸšª Usuario saliendo de la sala:', username, 'de', roomCode);
+    // console.log('🚪 Usuario saliendo de la sala:', username, 'de', roomCode);
 
     const room = await this.findByRoomCode(roomCode);
 
-    // ðŸ”¥ NUEVO: Validar si el usuario estÃ¡ asignado por un admin
+    // 🔥 NUEVO: Validar si el usuario está asignado por un admin
     if (
       room.isAssignedByAdmin &&
       room.assignedMembers &&
@@ -375,15 +375,15 @@ export class TemporaryRoomsService {
     const userIndex = room.connectedMembers.indexOf(username);
     if (userIndex !== -1) {
       room.connectedMembers.splice(userIndex, 1);
-      // 🔥 MODIFICADO: currentMembers debe ser el total de usuarios AÑADIDOS (members), no solo conectados
+      // ?? MODIFICADO: currentMembers debe ser el total de usuarios A�ADIDOS (members), no solo conectados
       room.currentMembers = room.members.length;
 
-      // console.log('ðŸ‘¥ Usuarios conectados despuÃ©s de salir:', room.connectedMembers);
-      // console.log('ðŸ“œ Historial de usuarios (sin cambios):', room.members);
+      // console.log('👥 Usuarios conectados después de salir:', room.connectedMembers);
+      // console.log('📜 Historial de usuarios (sin cambios):', room.members);
       await this.temporaryRoomRepository.save(room);
-      // console.log('âœ… Usuario desconectado de la sala en BD');
+      // console.log('✅ Usuario desconectado de la sala en BD');
     } else {
-      // console.log('âŒ Usuario no encontrado en connectedMembers');
+      // console.log('❌ Usuario no encontrado en connectedMembers');
     }
 
     // Limpiar la sala actual del usuario en la base de datos
@@ -392,10 +392,10 @@ export class TemporaryRoomsService {
       if (user && user.currentRoomCode === roomCode) {
         user.currentRoomCode = null;
         await this.userRepository.save(user);
-        // console.log('âœ… Sala actual del usuario limpiada en BD');
+        // console.log('✅ Sala actual del usuario limpiada en BD');
       }
     } catch (error) {
-      // console.error('âŒ Error al limpiar sala actual del usuario:', error);
+      // console.error('❌ Error al limpiar sala actual del usuario:', error);
     }
 
     return room;
@@ -413,7 +413,7 @@ export class TemporaryRoomsService {
       room.connectedMembers = room.connectedMembers.filter(
         (u) => u !== username,
       );
-      // 🔥 MODIFICADO: currentMembers debe ser el total de usuarios AÑADIDOS (members), no solo conectados
+      // ?? MODIFICADO: currentMembers debe ser el total de usuarios A�ADIDOS (members), no solo conectados
       room.currentMembers = room.members.length;
     }
 
@@ -422,7 +422,7 @@ export class TemporaryRoomsService {
       room.members = room.members.filter((u) => u !== username);
     }
 
-    // Remover el usuario de assignedMembers si estÃ¡ asignado
+    // Remover el usuario de assignedMembers si está asignado
     if (room.assignedMembers && room.assignedMembers.includes(username)) {
       room.assignedMembers = room.assignedMembers.filter((u) => u !== username);
     }
@@ -437,10 +437,10 @@ export class TemporaryRoomsService {
         await this.userRepository.save(user);
       }
     } catch (error) {
-      console.error('âŒ Error al limpiar sala actual del usuario:', error);
+      console.error('❌ Error al limpiar sala actual del usuario:', error);
     }
 
-    // Notificar a travÃ©s del socket gateway
+    // Notificar a través del socket gateway
     if (this.socketGateway) {
       this.socketGateway.handleUserRemovedFromRoom(roomCode, username);
     }
@@ -467,7 +467,7 @@ export class TemporaryRoomsService {
 
   async delete(id: number, userId: number): Promise<void> {
     // console.log(
-    //   'ðŸ—‘ï¸ Eliminando permanentemente sala:',
+    //   '🗑️ Eliminando permanentemente sala:',
     //   id,
     //   'por usuario:',
     //   userId,
@@ -476,7 +476,7 @@ export class TemporaryRoomsService {
       where: { id, createdBy: userId },
     });
     if (!room) {
-      // console.log('âŒ Sala no encontrada o no pertenece al usuario');
+      // console.log('❌ Sala no encontrada o no pertenece al usuario');
       throw new NotFoundException(
         'Sala no encontrada o no tienes permisos para eliminarla',
       );
@@ -484,11 +484,11 @@ export class TemporaryRoomsService {
 
     const roomCode = room.roomCode; // Guardar antes de eliminar
 
-    // console.log('âœ… Sala encontrada, eliminando permanentemente:', room.name);
+    // console.log('✅ Sala encontrada, eliminando permanentemente:', room.name);
     await this.temporaryRoomRepository.remove(room);
-    // console.log('âœ… Sala eliminada permanentemente');
+    // console.log('✅ Sala eliminada permanentemente');
 
-    // ðŸ”¥ Notificar a todos los usuarios conectados que la sala fue eliminada
+    // 🔥 Notificar a todos los usuarios conectados que la sala fue eliminada
     if (this.socketGateway) {
       this.socketGateway.broadcastRoomDeleted(roomCode, id);
     }
@@ -499,22 +499,22 @@ export class TemporaryRoomsService {
     limit: number = 10,
     search?: string,
     displayName?: string,
-    role?: string, // 👈 Recibir el rol
+    role?: string, // ?? Recibir el rol
   ): Promise<any> {
-    console.log('👤 Usuario:', { displayName, role });
+    // Log eliminado para optimizaci�n
 
-    // Obtener códigos de salas favoritas del usuario
+    // Obtener c�digos de salas favoritas del usuario
     let favoriteRoomCodes: string[] = [];
     if (displayName) {
       try {
         favoriteRoomCodes = await this.roomFavoritesService.getUserFavoriteRoomCodes(displayName);
-        console.log('⭐ Salas favoritas del usuario:', favoriteRoomCodes);
+        // Log eliminado para optimizaci�n
       } catch (error) {
         console.error('Error al obtener favoritos:', error);
       }
     }
 
-    // Construir condiciones de búsqueda
+    // Construir condiciones de b�squeda
     let whereConditions: any = { isActive: true };
 
     if (search && search.trim()) {
@@ -524,10 +524,10 @@ export class TemporaryRoomsService {
       ];
     }
 
-    // 🔥 NOTA: El filtrado por rol se hace en memoria después del JOIN (líneas 631-639)
+    // ?? NOTA: El filtrado por rol se hace en memoria despu�s del JOIN (l�neas 631-639)
     // para evitar problemas de compatibilidad SQL
 
-    // 🔥 QUERY OPTIMIZADA: Una sola consulta SQL con JOIN y ordenamiento
+    // ?? QUERY OPTIMIZADA: Una sola consulta SQL con JOIN y ordenamiento
     const queryBuilder = this.temporaryRoomRepository
       .createQueryBuilder('room')
       .leftJoin(
@@ -560,7 +560,7 @@ export class TemporaryRoomsService {
       ])
       .where('room.isActive = :isActive', { isActive: true });
 
-    // Aplicar búsqueda si existe
+    // Aplicar b�squeda si existe
     if (search && search.trim()) {
       queryBuilder.andWhere(
         '(room.name LIKE :search OR room.roomCode LIKE :search)',
@@ -568,15 +568,15 @@ export class TemporaryRoomsService {
       );
     }
 
-    // FILTRADO POR ROL (Movido a lógica en memoria para evitar problemas de compatibilidad SQL)
+    // FILTRADO POR ROL (Movido a l�gica en memoria para evitar problemas de compatibilidad SQL)
     // if (['ADMIN', 'JEFEPISO'].includes(role)) { ... }
 
-    // Obtener todas las salas con su último mensaje
+    // Obtener todas las salas con su �ltimo mensaje
     const { entities, raw } = await queryBuilder.getRawAndEntities();
 
     // Mapear resultados y agregar lastMessage desde raw
     const allRoomsWithLastMessage = entities.map((room, index) => {
-      // 🔒 FILTRADO POR ROL EN MEMORIA
+      // ?? FILTRADO POR ROL EN MEMORIA
       if (['ADMIN', 'JEFEPISO'].includes(role)) {
         const userFullName = displayName || '';
         const members = room.members || [];
@@ -598,7 +598,7 @@ export class TemporaryRoomsService {
         }
         : null;
 
-      // 🔥 OPTIMIZACIÓN: NO devolver arrays pesados de members/connectedMembers
+      // ?? OPTIMIZACI�N: NO devolver arrays pesados de members/connectedMembers
       // Solo devolver contadores para reducir payload ~83%
       return {
         id: room.id,
@@ -606,7 +606,7 @@ export class TemporaryRoomsService {
         description: room.description,
         roomCode: room.roomCode,
         maxCapacity: room.maxCapacity,
-        currentMembers: room.currentMembers, // ✅ Solo contador
+        currentMembers: room.currentMembers, // ? Solo contador
         isActive: room.isActive,
         isAssignedByAdmin: room.isAssignedByAdmin,
         settings: room.settings,
@@ -614,7 +614,7 @@ export class TemporaryRoomsService {
         createdAt: room.createdAt,
         updatedAt: room.updatedAt,
         lastMessage,
-        // ❌ NO incluir: createdBy, members, connectedMembers, assignedMembers
+        // ? NO incluir: createdBy, members, connectedMembers, assignedMembers
       };
     }).filter(room => room !== null); // Eliminar nulos del filtrado
 
@@ -626,7 +626,7 @@ export class TemporaryRoomsService {
       (room) => !favoriteRoomCodes.includes(room.roomCode),
     );
 
-    // Función de ordenamiento: CON mensajes primero, SIN mensajes después
+    // Funci�n de ordenamiento: CON mensajes primero, SIN mensajes despu�s
     const sortByLastMessage = (rooms) => {
       const roomsWithMessages = rooms.filter((r) => r.lastMessage?.sentAt);
       const roomsWithoutMessages = rooms.filter((r) => !r.lastMessage?.sentAt);
@@ -652,22 +652,22 @@ export class TemporaryRoomsService {
     // Combinar: favoritas primero, luego no-favoritas
     const finalSortedRooms = [...sortedFavorites, ...sortedNonFavorites];
 
-    // Aplicar paginación
+    // Aplicar paginaci�n
     const pageNum = Number(page);
     const limitNum = Number(limit);
     const skip = (pageNum - 1) * limitNum;
     const paginatedRooms = finalSortedRooms.slice(skip, skip + limitNum);
 
     return {
-      data: paginatedRooms, // 🔥 Devolver solo la página solicitada
+      data: paginatedRooms, // ?? Devolver solo la p�gina solicitada
       total: allRoomsWithLastMessage.length,
-      page: Number(page),    // 🔥 Asegurar tipo numérico
-      limit: Number(limit),  // 🔥 Asegurar tipo numérico
+      page: Number(page),    // ?? Asegurar tipo num�rico
+      limit: Number(limit),  // ?? Asegurar tipo num�rico
       totalPages: Math.ceil(allRoomsWithLastMessage.length / limit),
     };
   }
 
-  // 🔥 NUEVO: Endpoint para obtener miembros de una sala específica
+  // ?? NUEVO: Endpoint para obtener miembros de una sala espec�fica
   async getRoomMembers(roomCode: string): Promise<any> {
     const room = await this.temporaryRoomRepository.findOne({
       where: { roomCode, isActive: true },
@@ -688,7 +688,7 @@ export class TemporaryRoomsService {
   }
 
   async deactivateRoom(id: number, userId: number): Promise<TemporaryRoom> {
-    // console.log('â¸ï¸ Desactivando sala:', id, 'por usuario:', userId);
+    // console.log('⏸️ Desactivando sala:', id, 'por usuario:', userId);
     const room = await this.temporaryRoomRepository.findOne({
       where: { id, createdBy: userId },
     });
@@ -700,9 +700,9 @@ export class TemporaryRoomsService {
 
     room.isActive = false;
     const updatedRoom = await this.temporaryRoomRepository.save(room);
-    // console.log('âœ… Sala desactivada:', updatedRoom.name);
+    // console.log('✅ Sala desactivada:', updatedRoom.name);
 
-    // ðŸ”¥ Notificar a todos los usuarios conectados que la sala fue desactivada
+    // 🔥 Notificar a todos los usuarios conectados que la sala fue desactivada
     if (this.socketGateway) {
       this.socketGateway.broadcastRoomDeleted(roomCode, id);
     }
@@ -739,7 +739,7 @@ export class TemporaryRoomsService {
       );
     }
 
-    // Actualizar capacidad máxima
+    // Actualizar capacidad m�xima
     if (updateData.maxCapacity !== undefined) {
       if (updateData.maxCapacity < 1 || updateData.maxCapacity > 500) {
         throw new BadRequestException('La capacidad debe estar entre 1 y 500');
@@ -747,7 +747,7 @@ export class TemporaryRoomsService {
       room.maxCapacity = updateData.maxCapacity;
     }
 
-    // Actualizar descripción (usada para almacenar URL de imagen)
+    // Actualizar descripci�n (usada para almacenar URL de imagen)
     if (updateData.description !== undefined) {
       room.description = updateData.description;
     }
@@ -807,9 +807,9 @@ export class TemporaryRoomsService {
         },
       };
     } catch (error) {
-      console.error('âŒ Error de conexiÃ³n a la base de datos:', error);
-      // En caso de error de BD, devolver que no estÃ¡ en ninguna sala
-      // para que la aplicaciÃ³n pueda continuar funcionando
+      console.error('❌ Error de conexión a la base de datos:', error);
+      // En caso de error de BD, devolver que no está en ninguna sala
+      // para que la aplicación pueda continuar funcionando
       return {
         inRoom: false,
         room: null,
@@ -853,13 +853,13 @@ export class TemporaryRoomsService {
         },
       };
     } catch (error) {
-      console.error('âŒ Error al buscar sala del usuario:', error);
+      console.error('❌ Error al buscar sala del usuario:', error);
       return { inRoom: false, room: null };
     }
   }
 
   async getRoomUsers(roomCode: string): Promise<any> {
-    // console.log('👥 Obteniendo usuarios de la sala:', roomCode);
+    // console.log('?? Obteniendo usuarios de la sala:', roomCode);
 
     const room = await this.temporaryRoomRepository.findOne({
       where: { roomCode, isActive: true },
@@ -869,7 +869,7 @@ export class TemporaryRoomsService {
       throw new NotFoundException('Sala no encontrada o inactiva');
     }
 
-    // 🔥 MODIFICADO: Usar TODOS los usuarios añadidos a la sala (members)
+    // ?? MODIFICADO: Usar TODOS los usuarios a�adidos a la sala (members)
     const allUsernames = room.members || [];
     let userList = [];
 
@@ -898,7 +898,7 @@ export class TemporaryRoomsService {
                 ? `${dbUser.nombre} ${dbUser.apellido} `
                 : dbUser.username,
               isOnline: isOnline,
-              // 🔥 CAMPOS ENRIQUECIDOS
+              // ?? CAMPOS ENRIQUECIDOS
               role: dbUser.role,
               numeroAgente: dbUser.numeroAgente,
               picture: null, // No tenemos picture en la entidad User por ahora
@@ -907,7 +907,7 @@ export class TemporaryRoomsService {
               email: dbUser.email
             };
           } else {
-            // Fallback para usuarios que no están en la BD (ej. usuarios temporales antiguos)
+            // Fallback para usuarios que no est�n en la BD (ej. usuarios temporales antiguos)
             return {
               id: index + 1, // ID temporal
               username: username,
@@ -919,7 +919,7 @@ export class TemporaryRoomsService {
           }
         });
       } catch (error) {
-        console.error('❌ Error al enriquecer usuarios de sala:', error);
+        console.error('? Error al enriquecer usuarios de sala:', error);
         // Fallback en caso de error de BD
         userList = allUsernames.map((username, index) => ({
           id: index + 1,
@@ -930,7 +930,7 @@ export class TemporaryRoomsService {
       }
     }
 
-    // console.log('✅ Usuarios en la sala (enriquecidos):', userList.length);
+    // console.log('? Usuarios en la sala (enriquecidos):', userList.length);
 
     return {
       roomCode: room.roomCode,
@@ -941,7 +941,7 @@ export class TemporaryRoomsService {
     };
   }
 
-  // 🔥 NUEVO: Buscar sala por nombre (para grupos)
+  // ?? NUEVO: Buscar sala por nombre (para grupos)
   async findByName(name: string): Promise<TemporaryRoom | null> {
     try {
       const room = await this.temporaryRoomRepository.findOne({
@@ -954,7 +954,7 @@ export class TemporaryRoomsService {
     }
   }
 
-  // 🔥 NUEVO: Actualizar miembros de sala (para sincronizar cambios de grupos)
+  // ?? NUEVO: Actualizar miembros de sala (para sincronizar cambios de grupos)
   async updateRoomMembers(
     id: number,
     updateData: Partial<TemporaryRoom>,
@@ -990,7 +990,7 @@ export class TemporaryRoomsService {
     return randomBytes(4).toString('hex').toUpperCase();
   }
 
-  // 🔥 NUEVO: Métodos para mensajes fijados
+  // ?? NUEVO: M�todos para mensajes fijados
   async updatePinnedMessage(
     roomCode: string,
     pinnedMessageId: number | null,
@@ -1000,7 +1000,7 @@ export class TemporaryRoomsService {
     });
 
     if (!room) {
-      throw new NotFoundException(`Sala con código ${roomCode} no encontrada`);
+      throw new NotFoundException(`Sala con c�digo ${roomCode} no encontrada`);
     }
 
     room.pinnedMessageId = pinnedMessageId;

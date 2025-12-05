@@ -84,17 +84,7 @@ export class MessagesService {
     });
 
     if (recentDuplicate) {
-      console.log(
-        `⚠️ Duplicado detectado - Retornando mensaje existente ID: ${recentDuplicate.id}`,
-        {
-          from,
-          to,
-          roomCode,
-          isGroup,
-          threadId,
-          message: messageText?.substring(0, 30),
-        },
-      );
+      // Log eliminado para optimización - duplicado detectado
       return recentDuplicate;
     }
 
@@ -102,12 +92,7 @@ export class MessagesService {
     // NO aceptar sentAt del frontend para evitar problemas de zona horaria y duplicados
     const peruDate = getPeruDate();
 
-    // 🔥 DEBUG: Verificar que senderNumeroAgente esté en restDto
-    console.log('🔍 DEBUG create message - restDto:', {
-      senderRole: restDto.senderRole,
-      senderNumeroAgente: restDto.senderNumeroAgente,
-      fromId: restDto.fromId,
-    });
+    // Log eliminado para optimización
 
     // 🔥 NO incluir 'id' - dejar que la BD auto-genere
     const message = this.messageRepository.create({
@@ -126,14 +111,14 @@ export class MessagesService {
     const savedMessage = await this.messageRepository.save(message);
 
     // 🔥 DEBUG: Verificar que se guardó correctamente
-    console.log('✅ DEBUG mensaje guardado:', {
-      id: savedMessage.id,
-      from: savedMessage.from,
-      fromId: savedMessage.fromId,
-      conversationId: savedMessage.conversationId, // 🔥 Verificar conversationId
-      senderRole: savedMessage.senderRole,
-      senderNumeroAgente: savedMessage.senderNumeroAgente,
-    });
+    // console.log('✅ DEBUG mensaje guardado:', {
+    //   id: savedMessage.id,
+    //   from: savedMessage.from,
+    //   fromId: savedMessage.fromId,
+    //   conversationId: savedMessage.conversationId, // 🔥 Verificar conversationId
+    //   senderRole: savedMessage.senderRole,
+    //   senderNumeroAgente: savedMessage.senderNumeroAgente,
+    // });
 
     // 🔥 NOTA: La actualización de contadores y último mensaje ahora se maneja
     // directamente en socket.gateway.ts cuando se distribuyen los mensajes
@@ -241,29 +226,52 @@ export class MessagesService {
       skip: offset,
     });
 
-    // Calcular el threadCount real para cada mensaje y el último usuario que respondió
-    for (const message of messages) {
-      const threadCount = await this.messageRepository.count({
-        where: { threadId: message.id, isDeleted: false },
+    // 🔥 OPTIMIZACIÓN: Obtener threadCounts en un solo query en lugar de N queries
+    const messageIds = messages.map((m) => m.id);
+    const threadCountMap: Record<number, number> = {};
+    const lastReplyMap: Record<number, string> = {};
+
+    if (messageIds.length > 0) {
+      // Query 1: Obtener conteo de threads para todos los mensajes
+      const threadCounts = await this.messageRepository
+        .createQueryBuilder('message')
+        .select('message.threadId', 'threadId')
+        .addSelect('COUNT(*)', 'count')
+        .where('message.threadId IN (:...messageIds)', { messageIds })
+        .andWhere('message.isDeleted = false')
+        .groupBy('message.threadId')
+        .getRawMany();
+
+      threadCounts.forEach((row) => {
+        threadCountMap[row.threadId] = parseInt(row.count, 10);
       });
-      message.threadCount = threadCount;
 
-      // Obtener el último mensaje del hilo (si existe)
-      if (threadCount > 0) {
-        const lastThreadMessage = await this.messageRepository.findOne({
-          where: { threadId: message.id, isDeleted: false },
-          order: { sentAt: 'DESC' },
-        });
-        if (lastThreadMessage) {
-          message.lastReplyFrom = lastThreadMessage.from;
+      // Query 2: Obtener último mensaje de cada hilo
+      const lastReplies = await this.messageRepository
+        .createQueryBuilder('message')
+        .select(['message.threadId', 'message.from', 'message.sentAt'])
+        .where('message.threadId IN (:...messageIds)', { messageIds })
+        .andWhere('message.isDeleted = false')
+        .orderBy('message.sentAt', 'DESC')
+        .getMany();
+
+      // Agrupar por threadId (solo el primero de cada grupo es el más reciente)
+      const seenThreadIds = new Set<number>();
+      lastReplies.forEach((reply) => {
+        if (!seenThreadIds.has(reply.threadId)) {
+          lastReplyMap[reply.threadId] = reply.from;
+          seenThreadIds.add(reply.threadId);
         }
-      }
+      });
+    }
 
-      // 🔥 NUEVO: Agregar displayDate calculado en el backend
+    // Asignar valores a cada mensaje
+    for (const message of messages) {
+      message.threadCount = threadCountMap[message.id] || 0;
+      message.lastReplyFrom = lastReplyMap[message.id] || null;
       (message as any).displayDate = formatDisplayDate(message.sentAt);
     }
 
-    // Los mensajes ya están en orden cronológico por ID
     return messages;
   }
 
@@ -356,24 +364,48 @@ export class MessagesService {
       .getMany();
 
     // Calcular el threadCount real para cada mensaje y el último usuario que respondió
-    for (const message of messages) {
-      const threadCount = await this.messageRepository.count({
-        where: { threadId: message.id, isDeleted: false },
+    // 🔥 OPTIMIZACIÓN: Usar consultas agregadas en lugar de N queries
+    const messageIds = messages.map((m) => m.id);
+    const threadCountMap: Record<number, number> = {};
+    const lastReplyMap: Record<number, string> = {};
+
+    if (messageIds.length > 0) {
+      // Query 1: Obtener conteo de threads para todos los mensajes
+      const threadCounts = await this.messageRepository
+        .createQueryBuilder('message')
+        .select('message.threadId', 'threadId')
+        .addSelect('COUNT(*)', 'count')
+        .where('message.threadId IN (:...messageIds)', { messageIds })
+        .andWhere('message.isDeleted = false')
+        .groupBy('message.threadId')
+        .getRawMany();
+
+      threadCounts.forEach((row) => {
+        threadCountMap[row.threadId] = parseInt(row.count, 10);
       });
-      message.threadCount = threadCount;
 
-      // Obtener el último mensaje del hilo (si existe)
-      if (threadCount > 0) {
-        const lastThreadMessage = await this.messageRepository.findOne({
-          where: { threadId: message.id, isDeleted: false },
-          order: { sentAt: 'DESC' },
-        });
-        if (lastThreadMessage) {
-          message.lastReplyFrom = lastThreadMessage.from;
+      // Query 2: Obtener último mensaje de cada hilo
+      const lastReplies = await this.messageRepository
+        .createQueryBuilder('message')
+        .select(['message.threadId', 'message.from', 'message.sentAt'])
+        .where('message.threadId IN (:...messageIds)', { messageIds })
+        .andWhere('message.isDeleted = false')
+        .orderBy('message.sentAt', 'DESC')
+        .getMany();
+
+      const seenThreadIds = new Set<number>();
+      lastReplies.forEach((reply) => {
+        if (!seenThreadIds.has(reply.threadId)) {
+          lastReplyMap[reply.threadId] = reply.from;
+          seenThreadIds.add(reply.threadId);
         }
-      }
+      });
+    }
 
-      // 🔥 NUEVO: Agregar displayDate calculado en el backend
+    // Asignar valores a cada mensaje
+    for (const message of messages) {
+      message.threadCount = threadCountMap[message.id] || 0;
+      message.lastReplyFrom = lastReplyMap[message.id] || null;
       (message as any).displayDate = formatDisplayDate(message.sentAt);
     }
 
@@ -600,24 +632,24 @@ export class MessagesService {
     username: string,
     emoji: string,
   ): Promise<Message | null> {
-    console.log(`🔍 toggleReaction - Buscando mensaje ID: ${messageId}`);
+    // console.log(`🔍 toggleReaction - Buscando mensaje ID: ${messageId}`);
 
     const message = await this.messageRepository.findOne({
       where: { id: messageId },
     });
 
     if (!message) {
-      console.log(`❌ toggleReaction - Mensaje ${messageId} NO encontrado`);
+      // console.log(`❌ toggleReaction - Mensaje ${messageId} NO encontrado`);
       return null;
     }
 
-    console.log(`✅ toggleReaction - Mensaje ${messageId} encontrado`);
-    console.log(`📝 Reacciones actuales:`, JSON.stringify(message.reactions));
+    // console.log(`✅ toggleReaction - Mensaje ${messageId} encontrado`);
+    // console.log(`📝 Reacciones actuales:`, JSON.stringify(message.reactions));
 
     // Inicializar reactions si no existe
     if (!message.reactions) {
       message.reactions = [];
-      console.log(`🆕 Inicializando array de reacciones vacío`);
+      // console.log(`🆕 Inicializando array de reacciones vacío`);
     }
 
     // Buscar si el usuario ya reaccionó con este emoji
@@ -627,9 +659,9 @@ export class MessagesService {
 
     if (existingReactionIndex !== -1) {
       // Si ya existe, quitarla
-      console.log(
-        `🗑️ Quitando reacción existente de ${username} con emoji ${emoji}`,
-      );
+      // console.log(
+      //   `🗑️ Quitando reacción existente de ${username} con emoji ${emoji}`,
+      // );
       message.reactions.splice(existingReactionIndex, 1);
     } else {
       // Quitar cualquier otra reacción del usuario (solo una reacción por usuario)
@@ -637,10 +669,10 @@ export class MessagesService {
         (r) => r.username === username,
       );
       if (previousReactions.length > 0) {
-        console.log(
-          `🔄 Usuario ${username} ya tenía reacciones, quitándolas:`,
-          previousReactions,
-        );
+        // console.log(
+        //   `🔄 Usuario ${username} ya tenía reacciones, quitándolas:`,
+        //   previousReactions,
+        // );
       }
 
       message.reactions = message.reactions.filter(
@@ -648,9 +680,9 @@ export class MessagesService {
       );
 
       // Agregar la nueva reacción
-      console.log(
-        `➕ Agregando nueva reacción de ${username} con emoji ${emoji}`,
-      );
+      // console.log(
+      //   `➕ Agregando nueva reacción de ${username} con emoji ${emoji}`,
+      // );
 
       // 🔥 Crear timestamp en hora de Perú (UTC-5)
       const now = new Date();
@@ -663,15 +695,15 @@ export class MessagesService {
       });
     }
 
-    console.log(
-      `📝 Reacciones después del cambio:`,
-      JSON.stringify(message.reactions),
-    );
-    console.log(`💾 Guardando mensaje en BD...`);
+    // console.log(
+    //   `📝 Reacciones después del cambio:`,
+    //   JSON.stringify(message.reactions),
+    // );
+    // console.log(`💾 Guardando mensaje en BD...`);
 
     const savedMessage = await this.messageRepository.save(message);
 
-    console.log(`✅ Mensaje guardado exitosamente con reacciones actualizadas`);
+    // console.log(`✅ Mensaje guardado exitosamente con reacciones actualizadas`);
     return savedMessage;
   }
 
@@ -730,9 +762,9 @@ export class MessagesService {
     fileName?: string,
     fileSize?: number,
   ): Promise<Message | null> {
-    console.log(
-      `✏️ Intentando editar mensaje ID ${messageId} por usuario "${username}"`,
-    );
+    // console.log(
+    //   `✏️ Intentando editar mensaje ID ${messageId} por usuario "${username}"`,
+    // );
 
     // 🔥 Primero intentar búsqueda exacta
     let message = await this.messageRepository.findOne({
@@ -741,25 +773,25 @@ export class MessagesService {
 
     // 🔥 Si no se encuentra, intentar búsqueda case-insensitive
     if (!message) {
-      console.log(
-        `⚠️ No se encontró con búsqueda exacta, intentando case-insensitive...`,
-      );
+      // console.log(
+      //   `⚠️ No se encontró con búsqueda exacta, intentando case-insensitive...`,
+      // );
       const allMessages = await this.messageRepository.find({
         where: { id: messageId },
       });
 
       if (allMessages.length === 0) {
-        console.log(`❌ No existe ningún mensaje con ID ${messageId}`);
+        // console.log(`❌ No existe ningún mensaje con ID ${messageId}`);
         return null;
       }
 
-      console.log(`🔍 Mensaje encontrado en BD. Comparando usuarios:`);
-      console.log(
-        `   - Usuario solicitante: "${username}" (normalizado: "${username?.toLowerCase().trim()}")`,
-      );
-      console.log(
-        `   - Usuario del mensaje: "${allMessages[0].from}" (normalizado: "${allMessages[0].from?.toLowerCase().trim()}")`,
-      );
+      // console.log(`🔍 Mensaje encontrado en BD. Comparando usuarios:`);
+      // console.log(
+      //   `   - Usuario solicitante: "${username}" (normalizado: "${username?.toLowerCase().trim()}")`,
+      // );
+      // console.log(
+      //   `   - Usuario del mensaje: "${allMessages[0].from}" (normalizado: "${allMessages[0].from?.toLowerCase().trim()}")`,
+      // );
 
       // Buscar el mensaje con coincidencia case-insensitive
       message = allMessages.find(
@@ -768,13 +800,13 @@ export class MessagesService {
       );
 
       if (message) {
-        console.log(
-          `✅ Mensaje encontrado con búsqueda case-insensitive: "${message.from}" vs "${username}"`,
-        );
+        // console.log(
+        //   `✅ Mensaje encontrado con búsqueda case-insensitive: "${message.from}" vs "${username}"`,
+        // );
       } else {
-        console.log(
-          `❌ El mensaje pertenece a otro usuario. No se puede editar.`,
-        );
+        // console.log(
+        //   `❌ El mensaje pertenece a otro usuario. No se puede editar.`,
+        // );
         return null;
       }
     }
@@ -792,13 +824,13 @@ export class MessagesService {
       message.isEdited = true;
       message.editedAt = new Date();
       await this.messageRepository.save(message);
-      console.log(`✅ Mensaje ${messageId} editado exitosamente`);
+      // console.log(`✅ Mensaje ${messageId} editado exitosamente`);
       return message;
     }
 
-    console.log(
-      `⚠️ No se encontró mensaje con ID ${messageId} del usuario "${username}"`,
-    );
+    // console.log(
+    //   `⚠️ No se encontró mensaje con ID ${messageId} del usuario "${username}"`,
+    // );
     return null;
   }
 
@@ -915,11 +947,11 @@ export class MessagesService {
     searchTerm: string,
     limit: number = 20,
   ): Promise<any[]> {
-    console.log('🔍 searchMessages llamado con:', {
-      username,
-      searchTerm,
-      limit,
-    });
+    // console.log('🔍 searchMessages llamado con:', {
+    //   username,
+    //   searchTerm,
+    //   limit,
+    // });
 
     if (!searchTerm || searchTerm.trim().length === 0) {
       return [];
@@ -948,12 +980,12 @@ export class MessagesService {
 
     // console.log('📊 Mensajes del usuario encontrados:', userMessages.length);
     if (userMessages.length > 0) {
-      console.log('📝 Primer mensaje del usuario:', {
-        from: userMessages[0].from,
-        message: userMessages[0].message,
-        to: userMessages[0].to,
-        isGroup: userMessages[0].isGroup,
-      });
+      // console.log('📝 Primer mensaje del usuario:', {
+      //   from: userMessages[0].from,
+      //   message: userMessages[0].message,
+      //   to: userMessages[0].to,
+      //   isGroup: userMessages[0].isGroup,
+      // });
     }
 
     // Filtrar por búsqueda en mensaje o nombre de archivo
@@ -966,7 +998,7 @@ export class MessagesService {
       );
     });
 
-    console.log('✅ Mensajes filtrados por búsqueda:', filteredMessages.length);
+    // console.log('✅ Mensajes filtrados por búsqueda:', filteredMessages.length);
 
     // Limitar resultados al límite especificado
     const limitedResults = filteredMessages.slice(0, limit);
@@ -997,11 +1029,11 @@ export class MessagesService {
     searchTerm: string,
     limit: number = 20,
   ): Promise<any[]> {
-    console.log('🔍 searchMessagesByUserId llamado con:', {
-      userId,
-      searchTerm,
-      limit,
-    });
+    // console.log('🔍 searchMessagesByUserId llamado con:', {
+    //   userId,
+    //   searchTerm,
+    //   limit,
+    // });
 
     if (!searchTerm || searchTerm.trim().length === 0) {
       return [];
@@ -1020,13 +1052,13 @@ export class MessagesService {
 
     // console.log('📊 Mensajes del usuario encontrados:', messages.length);
     if (messages.length > 0) {
-      console.log('📝 Primer mensaje del usuario:', {
-        from: messages[0].from,
-        fromId: messages[0].fromId,
-        message: messages[0].message,
-        to: messages[0].to,
-        isGroup: messages[0].isGroup,
-      });
+      // console.log('📝 Primer mensaje del usuario:', {
+      //   from: messages[0].from,
+      //   fromId: messages[0].fromId,
+      //   message: messages[0].message,
+      //   to: messages[0].to,
+      //   isGroup: messages[0].isGroup,
+      // });
     }
 
     // Filtrar por búsqueda en mensaje o nombre de archivo

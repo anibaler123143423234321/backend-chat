@@ -67,14 +67,7 @@ export function formatDisplayDate(sentAt: Date): string {
   // Extraer fecha del mensaje
   const messageDate = sentAt.toISOString().split('T')[0]; // YYYY-MM-DD
 
-  console.log("🔍 DEBUG formatDisplayDate:", {
-    sentAt: sentAt.toISOString(),
-    messageDate,
-    todayInPeru,
-    yesterdayDateStr,
-    isToday: messageDate === todayInPeru,
-    isYesterday: messageDate === yesterdayDateStr,
-  });
+  // Log eliminado para optimización - se ejecutaba por cada mensaje
 
   if (messageDate === todayInPeru) {
     return "Hoy";

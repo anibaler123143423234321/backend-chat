@@ -40,9 +40,9 @@ export class MessagesController {
           if (!createMessageDto.senderNumeroAgente) {
             createMessageDto.senderNumeroAgente = dbUser.numeroAgente;
           }
-          console.log(
-            `Controller - Info del remitente de BD: role=${createMessageDto.senderRole}, numeroAgente=${createMessageDto.senderNumeroAgente}`,
-          );
+          // console.log(
+          //   `Controller - Info del remitente de BD: role=${createMessageDto.senderRole}, numeroAgente=${createMessageDto.senderNumeroAgente}`,
+          // );
         }
       } catch (error) {
         console.error(`Controller - Error al buscar usuario en BD:`, error);
@@ -165,7 +165,7 @@ export class MessagesController {
     @Body('fileName') fileName?: string,
     @Body('fileSize') fileSize?: number,
   ) {
-    console.log(`Editando mensaje ${id} por usuario: ${username}`);
+    // console.log(`Editando mensaje ${id} por usuario: ${username}`);
     // console.log(`âœï¸ Editando mensaje ${id} por ${username}`);
     const edited = await this.messagesService.editMessage(
       parseInt(id),
@@ -186,9 +186,9 @@ export class MessagesController {
     @Body('isAdmin') isAdmin?: boolean,
     @Body('deletedBy') deletedBy?: string,
   ) {
-    console.log(
-      `ðŸ—‘ï¸ Eliminando mensaje ${id} por ${username}${isAdmin ? ' (ADMIN)' : ''}`,
-    );
+    // console.log(
+    //   `ðŸ—‘ï¸ Eliminando mensaje ${id} por ${username}${isAdmin ? ' (ADMIN)' : ''}`,
+    // );
     const deleted = await this.messagesService.deleteMessage(
       parseInt(id),
       username,
