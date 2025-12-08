@@ -1146,7 +1146,177 @@ export class MessagesService {
     await this.messageRepository.update(messageId, updateData);
   }
 
+  // 🔥 NUEVO: Obtener mensajes alrededor de un messageId específico (para jump-to-message)
+  async findAroundMessage(
+    roomCode: string,
+    targetMessageId: number,
+    limit: number = 30,
+  ): Promise<{ messages: any[]; targetIndex: number; hasMoreBefore: boolean; hasMoreAfter: boolean }> {
+    const halfLimit = Math.floor(limit / 2);
+
+    // 1. Verificar que el mensaje existe y pertenece a esta sala
+    const targetMessage = await this.messageRepository.findOne({
+      where: { id: targetMessageId, roomCode, isDeleted: false },
+    });
+
+    if (!targetMessage) {
+      return { messages: [], targetIndex: -1, hasMoreBefore: false, hasMoreAfter: false };
+    }
+
+    // 2. Obtener mensajes ANTES del target (IDs menores, ordenados DESC para tomar los más cercanos)
+    const messagesBefore = await this.messageRepository.find({
+      where: { roomCode, threadId: IsNull(), isDeleted: false },
+      order: { id: 'DESC' },
+      take: halfLimit,
+      skip: 0,
+    });
+
+    // Filtrar solo los que tienen ID menor que el target
+    const beforeFiltered = messagesBefore
+      .filter(m => m.id < targetMessageId)
+      .slice(0, halfLimit)
+      .reverse(); // Ordenar cronológicamente
+
+    // 3. Obtener mensajes DESPUÉS del target (IDs mayores, ordenados ASC)
+    const messagesAfter = await this.messageRepository.find({
+      where: { roomCode, threadId: IsNull(), isDeleted: false },
+      order: { id: 'ASC' },
+      take: halfLimit + 1, // +1 para verificar si hay más
+    });
+
+    // Filtrar solo los que tienen ID mayor que el target
+    const afterFiltered = messagesAfter.filter(m => m.id > targetMessageId);
+    const hasMoreAfter = afterFiltered.length > halfLimit;
+    const afterSliced = afterFiltered.slice(0, halfLimit);
+
+    // 4. Verificar si hay más mensajes antes
+    const countBefore = await this.messageRepository.count({
+      where: { roomCode, threadId: IsNull(), isDeleted: false },
+    });
+    const hasMoreBefore = beforeFiltered.length > 0 &&
+      await this.messageRepository.count({
+        where: { roomCode, threadId: IsNull(), isDeleted: false },
+      }) > beforeFiltered.length + 1 + afterSliced.length;
+
+    // 5. Combinar: before + target + after
+    const allMessages = [...beforeFiltered, targetMessage, ...afterSliced];
+
+    // 6. Agregar threadCount y displayDate
+    const messageIds = allMessages.map(m => m.id);
+    const threadCountMap = {};
+    const lastReplyMap = {};
+
+    if (messageIds.length > 0) {
+      const threadCounts = await this.messageRepository
+        .createQueryBuilder('message')
+        .select('message.threadId', 'threadId')
+        .addSelect('COUNT(*)', 'count')
+        .where('message.threadId IN (:...messageIds)', { messageIds })
+        .andWhere('message.isDeleted = false')
+        .groupBy('message.threadId')
+        .getRawMany();
+
+      threadCounts.forEach(tc => {
+        threadCountMap[tc.threadId] = parseInt(tc.count);
+      });
+
+      const lastReplies = await this.messageRepository
+        .createQueryBuilder('message')
+        .where('message.threadId IN (:...messageIds)', { messageIds })
+        .andWhere('message.isDeleted = false')
+        .orderBy('message.sentAt', 'DESC')
+        .getMany();
+
+      const seenThreadIds = new Set();
+      lastReplies.forEach(reply => {
+        if (!seenThreadIds.has(reply.threadId)) {
+          lastReplyMap[reply.threadId] = reply.from;
+          seenThreadIds.add(reply.threadId);
+        }
+      });
+    }
+
+    const messagesWithMetadata = allMessages.map((msg, index) => ({
+      ...msg,
+      numberInList: index + 1,
+      threadCount: threadCountMap[msg.id] || 0,
+      lastReplyFrom: lastReplyMap[msg.id] || null,
+      displayDate: formatDisplayDate(msg.sentAt),
+    }));
+
+    return {
+      messages: messagesWithMetadata,
+      targetIndex: beforeFiltered.length, // Índice del mensaje target en el array
+      hasMoreBefore: beforeFiltered.length >= halfLimit,
+      hasMoreAfter,
+    };
+  }
+
+  // 🔥 NUEVO: Obtener mensajes alrededor de un messageId para chats individuales
+  async findAroundMessageForUser(
+    from: string,
+    to: string,
+    targetMessageId: number,
+    limit: number = 30,
+  ): Promise<{ messages: any[]; targetIndex: number; hasMoreBefore: boolean; hasMoreAfter: boolean }> {
+    const halfLimit = Math.floor(limit / 2);
+
+    // 1. Verificar que el mensaje existe
+    const targetMessage = await this.messageRepository.findOne({
+      where: { id: targetMessageId, isDeleted: false },
+    });
+
+    if (!targetMessage) {
+      return { messages: [], targetIndex: -1, hasMoreBefore: false, hasMoreAfter: false };
+    }
+
+    // 2. Obtener mensajes ANTES del target
+    const messagesBefore = await this.messageRepository
+      .createQueryBuilder('message')
+      .where(
+        '((LOWER(message.from) = LOWER(:from) AND LOWER(message.to) = LOWER(:to)) OR (LOWER(message.from) = LOWER(:to) AND LOWER(message.to) = LOWER(:from))) AND message.threadId IS NULL AND message.isGroup = false AND message.isDeleted = false AND message.id < :targetId',
+        { from, to, targetId: targetMessageId }
+      )
+      .orderBy('message.id', 'DESC')
+      .take(halfLimit)
+      .getMany();
+
+    const beforeFiltered = messagesBefore.reverse();
+
+    // 3. Obtener mensajes DESPUÉS del target
+    const messagesAfter = await this.messageRepository
+      .createQueryBuilder('message')
+      .where(
+        '((LOWER(message.from) = LOWER(:from) AND LOWER(message.to) = LOWER(:to)) OR (LOWER(message.from) = LOWER(:to) AND LOWER(message.to) = LOWER(:from))) AND message.threadId IS NULL AND message.isGroup = false AND message.isDeleted = false AND message.id > :targetId',
+        { from, to, targetId: targetMessageId }
+      )
+      .orderBy('message.id', 'ASC')
+      .take(halfLimit + 1)
+      .getMany();
+
+    const hasMoreAfter = messagesAfter.length > halfLimit;
+    const afterSliced = messagesAfter.slice(0, halfLimit);
+
+    // 4. Combinar
+    const allMessages = [...beforeFiltered, targetMessage, ...afterSliced];
+
+    // 5. Agregar metadata
+    const messagesWithMetadata = allMessages.map((msg, index) => ({
+      ...msg,
+      numberInList: index + 1,
+      displayDate: formatDisplayDate(msg.sentAt),
+    }));
+
+    return {
+      messages: messagesWithMetadata,
+      targetIndex: beforeFiltered.length,
+      hasMoreBefore: beforeFiltered.length >= halfLimit,
+      hasMoreAfter,
+    };
+  }
+
   async findOne(id: number): Promise<Message | null> {
+
     return await this.messageRepository.findOne({
       where: { id },
       relations: ['room'] // Opcional: si necesitas datos de la sala

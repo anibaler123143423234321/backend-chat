@@ -79,6 +79,21 @@ export class MessagesController {
     );
   }
 
+  // 🔥 NUEVO: Obtener mensajes alrededor de un messageId específico (para jump-to-message)
+  @Get('room/:roomCode/around/:messageId')
+  async findAroundMessage(
+    @Param('roomCode') roomCode: string,
+    @Param('messageId') messageId: string,
+    @Query('limit') limit: string = '30',
+  ) {
+    return await this.messagesService.findAroundMessage(
+      roomCode,
+      parseInt(messageId),
+      parseInt(limit),
+    );
+  }
+
+
   @Get('user/:from/:to')
   async findByUser(
     @Param('from') from: string,
@@ -109,6 +124,23 @@ export class MessagesController {
       parseInt(offset),
     );
   }
+
+  // 🔥 NUEVO: Obtener mensajes alrededor de un messageId para chats individuales
+  @Get('user/:from/:to/around/:messageId')
+  async findAroundMessageForUser(
+    @Param('from') from: string,
+    @Param('to') to: string,
+    @Param('messageId') messageId: string,
+    @Query('limit') limit: string = '30',
+  ) {
+    return await this.messagesService.findAroundMessageForUser(
+      from,
+      to,
+      parseInt(messageId),
+      parseInt(limit),
+    );
+  }
+
 
   @Get('recent')
   async findRecent(@Query('limit') limit: string = '20') {
