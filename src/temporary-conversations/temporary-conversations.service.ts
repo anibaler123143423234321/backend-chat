@@ -43,43 +43,75 @@ export class TemporaryConversationsService {
     return await this.temporaryConversationRepository.save(conversation);
   }
 
-  async findAll(username?: string): Promise<any[]> {
+  async findAll(
+    username?: string,
+    role?: string,
+    search?: string,
+    page: number = 1,
+    limit: number = 20,
+  ): Promise<{
+    data: any[];
+    total: number;
+    page: number;
+    totalPages: number;
+  }> {
     const allConversations = await this.temporaryConversationRepository.find({
       where: { isActive: true },
       order: { createdAt: 'DESC' },
     });
 
-    // Normalizar username para comparaci�n (remover acentos y convertir a min�sculas)
+    // Normalizar username para comparación (remover acentos y convertir a minúsculas)
     const usernameNormalized = this.normalizeUsername(username);
-    // Logs eliminados para optimizaci�n
 
-    // ?? FILTRAR: Si hay username, solo devolver conversaciones donde el usuario es participante
+    // 🔥 ROLES que pueden ver TODAS las conversaciones (sin filtrar por participante)
+    const adminRoles = ['SUPERADMIN', 'ADMIN', 'PROGRAMADOR', 'DESARROLLADOR', 'JEFEPISO'];
+    const isAdminRole = role && adminRoles.includes(role.toUpperCase());
+
+    // Filtrar conversaciones: Si es admin, mostrar todas. Si no, solo las del usuario
     let conversationsToEnrich = allConversations;
-    if (username && usernameNormalized) {
+    if (!isAdminRole && username && usernameNormalized) {
+      // Solo filtrar si NO es admin
       conversationsToEnrich = allConversations.filter((conv) => {
         const participants = conv.participants || [];
         const isParticipant = participants.some(
           (p) => this.normalizeUsername(p) === usernameNormalized,
         );
-        // Log eliminado para optimizaci�n
         return isParticipant;
       });
-      // Log eliminado para optimizaci�n
     }
 
-    // Enriquecer cada conversaci�n con el �ltimo mensaje y contador de no le�dos
+    // 🔥 BÚSQUEDA: Filtrar por nombre o participantes si hay término de búsqueda
+    if (search && search.trim()) {
+      const searchNormalized = this.normalizeUsername(search);
+      conversationsToEnrich = conversationsToEnrich.filter((conv) => {
+        // Buscar en nombre de conversación
+        const nameMatch = this.normalizeUsername(conv.name || '').includes(searchNormalized);
+        // Buscar en participantes
+        const participantMatch = (conv.participants || []).some((p) =>
+          this.normalizeUsername(p).includes(searchNormalized),
+        );
+        return nameMatch || participantMatch;
+      });
+    }
+
+    // 🔥 PAGINACIÓN: Calcular total antes de paginar
+    const total = conversationsToEnrich.length;
+    const totalPages = Math.ceil(total / limit);
+    const offset = (page - 1) * limit;
+
+    // Aplicar paginación
+    const paginatedConversations = conversationsToEnrich.slice(offset, offset + limit);
+
+    // Enriquecer cada conversación con el último mensaje y contador de no leídos
     const enrichedConversations = await Promise.all(
-      conversationsToEnrich.map(async (conv) => {
+      paginatedConversations.map(async (conv) => {
         const participants = conv.participants || [];
 
         let lastMessage = null;
         let unreadCount = 0;
 
         if (participants.length >= 2) {
-          // ?? NUEVO ENFOQUE: Buscar mensajes por conversationId para evitar solapamiento
-          // Esto previene que mensajes de un chat asignado aparezcan en otros
-
-          // Obtener el �ltimo mensaje usando conversationId
+          // Obtener el último mensaje usando conversationId
           const messages = await this.messageRepository.find({
             where: {
               conversationId: conv.id,
@@ -92,12 +124,12 @@ export class TemporaryConversationsService {
           });
 
           if (messages.length > 0) {
-            // Calcular el threadCount del �ltimo mensaje
+            // Calcular el threadCount del último mensaje
             const threadCount = await this.messageRepository.count({
               where: { threadId: messages[0].id, isDeleted: false },
             });
 
-            // Obtener el �ltimo mensaje del hilo (si existe)
+            // Obtener el último mensaje del hilo (si existe)
             let lastReplyFrom = null;
             if (threadCount > 0) {
               const lastThreadMessage = await this.messageRepository.findOne({
@@ -109,17 +141,17 @@ export class TemporaryConversationsService {
               }
             }
 
-            // ?? Si es un archivo multimedia sin texto, mostrar el tipo de archivo
+            // Si es un archivo multimedia sin texto, mostrar el tipo de archivo
             let messageText = messages[0].message;
             if (!messageText && messages[0].mediaType) {
               const mediaTypeMap = {
-                image: '?? Imagen',
-                video: '?? Video',
-                audio: '?? Audio',
-                document: '?? Documento',
+                image: '📷 Imagen',
+                video: '🎬 Video',
+                audio: '🎵 Audio',
+                document: '📄 Documento',
               };
               messageText =
-                mediaTypeMap[messages[0].mediaType] || '?? Archivo';
+                mediaTypeMap[messages[0].mediaType] || '📎 Archivo';
             }
 
             lastMessage = {
@@ -134,15 +166,13 @@ export class TemporaryConversationsService {
             };
           }
 
-          // ?? NUEVO: Contar solo mensajes no le�dos usando conversationId
+          // Contar solo mensajes no leídos usando conversationId
           if (username && usernameNormalized) {
-            // Verificar si el usuario es participante de la conversacion
             const isUserParticipant = participants.some(
               (p) => this.normalizeUsername(p) === usernameNormalized,
             );
 
             if (isUserParticipant) {
-              // Si es participante, buscar mensajes de esta conversaci�n espec�fica
               const allMessages = await this.messageRepository.find({
                 where: {
                   conversationId: conv.id,
@@ -152,19 +182,13 @@ export class TemporaryConversationsService {
                 },
               });
 
-              // Filtrar solo mensajes no enviados por el usuario y no le�dos por �l
               unreadCount = allMessages.filter((msg) => {
-                // Excluir mensajes enviados por el usuario mismo
                 if (this.normalizeUsername(msg.from) === usernameNormalized) {
                   return false;
                 }
-
-                // Verificar si el mensaje no ha sido le�do
                 if (!msg.readBy || msg.readBy.length === 0) {
-                  return true; // No ha sido le�do por nadie
+                  return true;
                 }
-
-                // Verificar si el usuario actual est� en readBy (normalizado)
                 const isReadByUser = msg.readBy.some(
                   (reader) =>
                     this.normalizeUsername(reader) === usernameNormalized,
@@ -172,11 +196,9 @@ export class TemporaryConversationsService {
                 return !isReadByUser;
               }).length;
             } else {
-              // Si NO es participante (monitoreo), el contador siempre es 0
               unreadCount = 0;
             }
           } else {
-            // Si no hay username, contar todos los mensajes no le�dos de esta conversaci�n
             const allMessages = await this.messageRepository.find({
               where: {
                 conversationId: conv.id,
@@ -185,18 +207,15 @@ export class TemporaryConversationsService {
                 isGroup: false,
               },
             });
-
             unreadCount = allMessages.filter((msg) => !msg.isRead).length;
           }
         }
 
-        // ?? Obtener informaci�n de los participantes (role y numeroAgente)
-        // Para conversaciones de monitoreo, obtener info del primer participante que no sea el admin
+        // Obtener información de los participantes
         let participantRole = null;
         let participantNumeroAgente = null;
 
         if (participants.length > 0) {
-          // Buscar el primer participante en la tabla chat_users
           const participantName = participants[0];
           const participantUser = await this.userRepository.findOne({
             where: { username: participantName },
@@ -210,7 +229,7 @@ export class TemporaryConversationsService {
 
         return {
           ...conv,
-          _lastMessageSentAt: lastMessage?.sentAt, // Campo temporal para ordenar
+          _lastMessageSentAt: lastMessage?.sentAt,
           unreadCount,
           role: participantRole,
           numeroAgente: participantNumeroAgente,
@@ -218,8 +237,7 @@ export class TemporaryConversationsService {
       }),
     );
 
-    // Ordenar por �ltimo mensaje (m�s reciente primero)
-    // Ordenar por último mensaje (más reciente primero) usando el campo interno _lastMessageSentAt
+    // Ordenar por último mensaje (más reciente primero)
     enrichedConversations.sort((a, b) => {
       const aTime = (a as any)._lastMessageSentAt;
       const bTime = (b as any)._lastMessageSentAt;
@@ -230,7 +248,14 @@ export class TemporaryConversationsService {
     });
 
     // Eliminar campo temporal antes de devolver
-    return enrichedConversations.map(({ _lastMessageSentAt, ...rest }: any) => rest);
+    const data = enrichedConversations.map(({ _lastMessageSentAt, ...rest }: any) => rest);
+
+    return {
+      data,
+      total,
+      page,
+      totalPages,
+    };
   }
 
   // ?? NUEVO: M�todo con paginaci�n para conversaciones asignadas

@@ -29,8 +29,16 @@ export class TemporaryConversationsController {
   }
 
   @Get('all')
-  findAll(@Query('username') username?: string) {
-    return this.temporaryConversationsService.findAll(username);
+  findAll(
+    @Query('username') username?: string,
+    @Query('role') role?: string,
+    @Query('search') search?: string,
+    @Query('page') page: string = '1',
+    @Query('limit') limit: string = '20',
+  ) {
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.max(1, Math.min(50, parseInt(limit) || 20)); // Máximo 50 por página
+    return this.temporaryConversationsService.findAll(username, role, search, pageNum, limitNum);
   }
 
   @Get('assigned/list')
