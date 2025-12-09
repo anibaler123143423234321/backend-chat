@@ -51,6 +51,7 @@ export class SocketGateway
     private roomUsers = new Map<string, Set<string>>(); // roomCode -> Set<usernames>
     // ?? NUEVO: Cach� de mensajes recientes para detecci�n de duplicados
     private recentMessages = new Map<string, number>(); // messageHash -> timestamp
+    private typingThrottle: Map<string, number> = new Map();
 
     // ?? NUEVO: Tracking de participantes en videollamadas
     private videoRoomParticipants = new Map<
@@ -728,17 +729,36 @@ export class SocketGateway
         });
     }
 
-    @SubscribeMessage('typing')
+ @SubscribeMessage('typing')
     handleTyping(
         @ConnectedSocket() client: Socket,
         @MessageBody()
         data: { from: string; to: string; isTyping: boolean; roomCode?: string },
     ) {
-        // Si es un mensaje de sala (roomCode presente)
+        const now = Date.now();
+
+        // Clave única por usuario y sala o chat
+        const throttleKey = data.roomCode
+            ? `${data.from}:${data.roomCode}`
+            : `${data.from}:${data.to}`;
+
+        const lastSent = this.typingThrottle.get(throttleKey) || 0;
+
+        // ⛔️ Si han pasado menos de 500 ms desde el último envío → IGNORAR
+        if (now - lastSent < 500) {
+            return;
+        }
+
+        // Actualizar momento del último envío
+        this.typingThrottle.set(throttleKey, now);
+
+        // ----------------------------------------
+        // Lógica original
+        // ----------------------------------------
+
         if (data.roomCode) {
             const roomUsers = this.roomUsers.get(data.roomCode);
             if (roomUsers) {
-                // Emitir a todos los usuarios de la sala excepto al que est� escribiendo
                 roomUsers.forEach((member) => {
                     if (member !== data.from) {
                         const memberUser = this.users.get(member);
@@ -753,9 +773,7 @@ export class SocketGateway
                 });
             }
         } else {
-            // Mensaje directo (1 a 1)
             const recipientConnection = this.users.get(data.to);
-
             if (recipientConnection && recipientConnection.socket.connected) {
                 recipientConnection.socket.emit('userTyping', {
                     from: data.from,
@@ -764,6 +782,7 @@ export class SocketGateway
             }
         }
     }
+
 
     @SubscribeMessage('message')
     async handleMessage(
