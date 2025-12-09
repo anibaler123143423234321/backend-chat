@@ -48,13 +48,14 @@ export class TemporaryRoomsController {
     @Query('username') username: string,
     @Query('page') page: string = '1',
     @Query('limit') limit: string = '10',
+    @Query('search') search?: string, // 🔥 NUEVO: Parámetro de búsqueda
   ) {
     if (!username) {
       throw new Error('Username es requerido');
     }
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.max(1, Math.min(50, parseInt(limit) || 10)); // Máximo 50 por página
-    return this.temporaryRoomsService.findUserRooms(username, pageNum, limitNum);
+    return this.temporaryRoomsService.findUserRooms(username, pageNum, limitNum, search);
   }
 
   @Get('admin/rooms')

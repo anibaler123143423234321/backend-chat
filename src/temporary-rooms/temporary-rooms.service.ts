@@ -126,6 +126,7 @@ export class TemporaryRoomsService {
     username: string,
     page: number = 1,
     limit: number = 10,
+    search?: string, // 🔥 NUEVO: Parámetro de búsqueda
   ): Promise<{
     rooms: any[];
     total: number;
@@ -158,10 +159,19 @@ export class TemporaryRoomsService {
     });
 
     // Filtrar salas donde el usuario es miembro
-    const userRooms = allRooms.filter((room) => {
+    let userRooms = allRooms.filter((room) => {
       const members = room.members || [];
       return members.includes(displayName);
     });
+
+    // 🔥 NUEVO: Aplicar filtro de búsqueda por nombre o roomCode
+    if (search && search.trim()) {
+      const searchLower = search.toLowerCase().trim();
+      userRooms = userRooms.filter((room) =>
+        room.name?.toLowerCase().includes(searchLower) ||
+        room.roomCode?.toLowerCase().includes(searchLower)
+      );
+    }
 
     // Aplicar paginaci�n
     const total = userRooms.length;

@@ -46,6 +46,7 @@ export class TemporaryConversationsController {
     @Query('username') username?: string,
     @Query('page') page: string = '1',
     @Query('limit') limit: string = '10',
+    @Query('search') search?: string, // 🔥 NUEVO: Parámetro de búsqueda
   ) {
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.max(1, Math.min(10, parseInt(limit) || 10)); // Máximo 10 por página
@@ -53,6 +54,7 @@ export class TemporaryConversationsController {
       username,
       pageNum,
       limitNum,
+      search, // 🔥 Pasar parámetro de búsqueda
     );
   }
 

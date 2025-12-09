@@ -258,11 +258,12 @@ export class TemporaryConversationsService {
     };
   }
 
-  // ?? NUEVO: M�todo con paginaci�n para conversaciones asignadas
+  // 🔥 NUEVO: Método con paginación para conversaciones asignadas
   async findAssignedConversations(
     username?: string,
     page: number = 1,
     limit: number = 10,
+    search?: string, // 🔥 NUEVO: Parámetro de búsqueda
   ): Promise<{
     conversations: any[];
     total: number;
@@ -270,9 +271,9 @@ export class TemporaryConversationsService {
     totalPages: number;
     hasMore: boolean;
   }> {
-    // Normalizar username para comparaci�n
+    // Normalizar username para comparación
     const usernameNormalized = this.normalizeUsername(username);
-    // Log eliminado para optimizaci�n
+    // Log eliminado para optimización
 
     // Obtener todas las conversaciones activas primero para filtrar
     const allConversations = await this.temporaryConversationRepository.find({
@@ -288,6 +289,20 @@ export class TemporaryConversationsService {
         return participants.some(
           (p) => this.normalizeUsername(p) === usernameNormalized,
         );
+      });
+    }
+
+    // 🔥 NUEVO: Aplicar filtro de búsqueda por nombre o participantes
+    if (search && search.trim()) {
+      const searchNormalized = this.normalizeUsername(search);
+      filteredConversations = filteredConversations.filter((conv) => {
+        // Buscar en nombre de conversación
+        const nameMatch = this.normalizeUsername(conv.name || '').includes(searchNormalized);
+        // Buscar en participantes
+        const participantMatch = (conv.participants || []).some((p) =>
+          this.normalizeUsername(p).includes(searchNormalized),
+        );
+        return nameMatch || participantMatch;
       });
     }
 
