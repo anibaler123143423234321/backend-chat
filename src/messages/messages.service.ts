@@ -279,7 +279,15 @@ export class MessagesService {
     roomCode: string,
     limit: number = 20,
     offset: number = 0,
-  ): Promise<any[]> {
+  ): Promise<{ data: any[]; total: number; hasMore: boolean; page: number; totalPages: number }> {
+    // 🔥 PRIMERO: Obtener el total de mensajes para calcular paginación
+    const total = await this.messageRepository
+      .createQueryBuilder('message')
+      .where('message.roomCode = :roomCode', { roomCode })
+      .andWhere('message.threadId IS NULL')
+      .andWhere('message.isDeleted = :isDeleted', { isDeleted: false })
+      .getCount();
+
     // 🚀 OPTIMIZADO: Usar QueryBuilder para seleccionar solo campos necesarios
     // Esto reduce significativamente el tiempo de transferencia de datos
     const messages = await this.messageRepository
@@ -372,14 +380,27 @@ export class MessagesService {
     // 🔥 Invertir el orden para que se muestren cronológicamente (más antiguos primero)
     const reversedMessages = messages.reverse();
 
-    // Retornar con numeración por ID y threadCount
-    return reversedMessages.map((msg, index) => ({
+    // 🔥 Calcular información de paginación
+    const page = Math.floor(offset / limit) + 1;
+    const totalPages = Math.ceil(total / limit);
+    const hasMore = offset + messages.length < total;
+
+    // Retornar con numeración por ID, threadCount y metadata de paginación
+    const data = reversedMessages.map((msg, index) => ({
       ...msg,
       numberInList: index + 1 + offset,
       threadCount: threadCountMap[msg.id] || 0,
       lastReplyFrom: lastReplyMap[msg.id] || null,
       displayDate: formatDisplayDate(msg.sentAt),
     }));
+
+    return {
+      data,
+      total,
+      hasMore,
+      page,
+      totalPages,
+    };
   }
 
   async findByUser(
