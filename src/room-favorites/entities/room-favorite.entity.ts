@@ -5,10 +5,16 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   Unique,
+  Index,
 } from 'typeorm';
 
+// 🚀 ÍNDICES PARA OPTIMIZAR CONSULTAS DE FAVORITOS DE SALAS
 @Entity('room_favorites')
-@Unique(['username', 'roomCode']) // Un usuario solo puede tener una sala favorita una vez
+@Unique(['username', 'roomCode'])
+@Index('IDX_room_favorites_username', ['username'])
+@Index('IDX_room_favorites_roomCode', ['roomCode'])
+@Index('IDX_room_favorites_roomId', ['roomId'])
+@Index('IDX_room_favorites_isPinned', ['isPinned'])
 export class RoomFavorite {
   @PrimaryGeneratedColumn()
   id: number;

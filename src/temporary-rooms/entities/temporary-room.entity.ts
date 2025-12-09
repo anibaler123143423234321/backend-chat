@@ -4,9 +4,16 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  Index,
 } from 'typeorm';
 
+// 🚀 ÍNDICES PARA OPTIMIZAR CONSULTAS DE SALAS TEMPORALES
 @Entity('temporary_rooms')
+@Index('IDX_temp_rooms_roomCode', ['roomCode'])
+@Index('IDX_temp_rooms_isActive', ['isActive'])
+@Index('IDX_temp_rooms_isAssignedByAdmin', ['isAssignedByAdmin'])
+@Index('IDX_temp_rooms_createdBy', ['createdBy'])
+@Index('IDX_temp_rooms_active_assigned', ['isActive', 'isAssignedByAdmin'])
 export class TemporaryRoom {
   @PrimaryGeneratedColumn()
   id: number;

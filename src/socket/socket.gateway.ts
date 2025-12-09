@@ -184,8 +184,12 @@ export class SocketGateway
                             ? `${userData.nombre} ${userData.apellido}`
                             : username;
 
-                    const allAssignedConversations =
+                    const allAssignedConversationsResult =
                         await this.temporaryConversationsService.findAll(displayName);
+                    // 🔥 FIX: findAll devuelve { data, total, page, totalPages }, extraer .data
+                    const allAssignedConversations: any[] = Array.isArray(allAssignedConversationsResult)
+                        ? allAssignedConversationsResult
+                        : (allAssignedConversationsResult?.data || []);
                     await this.broadcastUserList(allAssignedConversations);
                 } catch (error) {
                     console.error(
@@ -305,8 +309,12 @@ export class SocketGateway
                     ? `${userData.nombre} ${userData.apellido}`
                     : username;
 
-            const allAssignedConversations =
+            const allAssignedConversationsResult =
                 await this.temporaryConversationsService.findAll(displayName);
+            // 🔥 FIX: findAll devuelve { data, total, page, totalPages }, extraer .data
+            const allAssignedConversations: any[] = Array.isArray(allAssignedConversationsResult)
+                ? allAssignedConversationsResult
+                : (allAssignedConversationsResult?.data || []);
             await this.broadcastUserList(allAssignedConversations);
         } catch (error) {
             console.error(
@@ -2088,10 +2096,14 @@ export class SocketGateway
                     } else {
                         // Buscar en BD si no se pasaron conversaciones
                         try {
-                            userConversations =
+                            const userConversationsResult =
                                 await this.temporaryConversationsService.findAll(
                                     userData?.username,
                                 );
+                            // 🔥 FIX: findAll devuelve { data, total, page, totalPages }, extraer .data
+                            userConversations = Array.isArray(userConversationsResult)
+                                ? userConversationsResult
+                                : (userConversationsResult?.data || []);
                         } catch (error) {
                             console.error(
                                 `? Error al obtener conversaciones de ${userData?.username}:`,

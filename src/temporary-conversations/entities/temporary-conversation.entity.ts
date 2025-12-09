@@ -4,9 +4,16 @@ import {
   Column,
   CreateDateColumn,
   UpdateDateColumn,
+  Index,
 } from 'typeorm';
 
+// 🚀 ÍNDICES PARA OPTIMIZAR CONSULTAS DE CONVERSACIONES TEMPORALES
 @Entity('temporary_conversations')
+@Index('IDX_temp_conv_linkId', ['linkId'])
+@Index('IDX_temp_conv_isActive', ['isActive'])
+@Index('IDX_temp_conv_isAssignedByAdmin', ['isAssignedByAdmin'])
+@Index('IDX_temp_conv_createdBy', ['createdBy'])
+@Index('IDX_temp_conv_active_assigned', ['isActive', 'isAssignedByAdmin'])
 export class TemporaryConversation {
   @PrimaryGeneratedColumn()
   id: number;

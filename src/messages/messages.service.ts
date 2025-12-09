@@ -280,21 +280,63 @@ export class MessagesService {
     limit: number = 20,
     offset: number = 0,
   ): Promise<any[]> {
-    // 🔥 Obtener mensajes más recientes primero (DESC), luego invertir para mostrar cronológicamente
-    const messages = await this.messageRepository.find({
-      where: { roomCode, threadId: IsNull(), isDeleted: false },
-      order: { id: 'DESC' },
-      take: limit,
-      skip: offset,
-    });
+    // 🚀 OPTIMIZADO: Usar QueryBuilder para seleccionar solo campos necesarios
+    // Esto reduce significativamente el tiempo de transferencia de datos
+    const messages = await this.messageRepository
+      .createQueryBuilder('message')
+      .select([
+        'message.id',
+        'message.from',
+        'message.fromId',
+        'message.senderRole',
+        'message.senderNumeroAgente',
+        'message.to',
+        'message.message',
+        'message.isGroup',
+        'message.groupName',
+        'message.roomCode',
+        'message.mediaType',
+        'message.mediaData', // Incluir porque el frontend lo necesita para mostrar preview
+        'message.fileName',
+        'message.fileSize',
+        'message.sentAt',
+        'message.isRead',
+        'message.readBy',
+        'message.isDeleted',
+        'message.deletedAt',
+        'message.deletedBy',
+        'message.isEdited',
+        'message.editedAt',
+        'message.time',
+        'message.replyToMessageId',
+        'message.replyToSender',
+        'message.replyToText',
+        'message.replyToSenderNumeroAgente',
+        'message.threadId',
+        'message.threadCount',
+        'message.lastReplyFrom',
+        'message.reactions',
+        'message.type',
+        'message.videoCallUrl',
+        'message.videoRoomID',
+        'message.conversationId',
+        'message.isForwarded',
+      ])
+      .where('message.roomCode = :roomCode', { roomCode })
+      .andWhere('message.threadId IS NULL')
+      .andWhere('message.isDeleted = :isDeleted', { isDeleted: false })
+      .orderBy('message.id', 'DESC')
+      .take(limit)
+      .skip(offset)
+      .getMany();
 
-    // 🔥 OPTIMIZACIÓN: Obtener threadCounts en un solo query en lugar de uno por mensaje
+    // 🚀 OPTIMIZACIÓN: Obtener threadCounts en un solo query
     const messageIds = messages.map((m) => m.id);
-    const threadCountMap = {};
-    const lastReplyMap = {};
+    const threadCountMap: Record<number, number> = {};
+    const lastReplyMap: Record<number, string> = {};
 
     if (messageIds.length > 0) {
-      // Obtener conteo de threads para todos los mensajes
+      // Obtener conteo de threads para todos los mensajes en una sola consulta
       const threadCounts = await this.messageRepository
         .createQueryBuilder('message')
         .select('message.threadId', 'threadId')
@@ -308,16 +350,17 @@ export class MessagesService {
         threadCountMap[tc.threadId] = parseInt(tc.count);
       });
 
-      // Obtener último mensaje de cada hilo
+      // Obtener último mensaje de cada hilo (solo campos necesarios)
       const lastReplies = await this.messageRepository
         .createQueryBuilder('message')
+        .select(['message.threadId', 'message.from'])
         .where('message.threadId IN (:...messageIds)', { messageIds })
         .andWhere('message.isDeleted = false')
-        .orderBy('message.sentAt', 'DESC')
+        .orderBy('message.id', 'DESC')
         .getMany();
 
       // Agrupar por threadId y tomar el primero (más reciente)
-      const seenThreadIds = new Set();
+      const seenThreadIds = new Set<number>();
       lastReplies.forEach((reply) => {
         if (!seenThreadIds.has(reply.threadId)) {
           lastReplyMap[reply.threadId] = reply.from;
@@ -335,7 +378,7 @@ export class MessagesService {
       numberInList: index + 1 + offset,
       threadCount: threadCountMap[msg.id] || 0,
       lastReplyFrom: lastReplyMap[msg.id] || null,
-      displayDate: formatDisplayDate(msg.sentAt), // 🔥 NUEVO: Agregar displayDate
+      displayDate: formatDisplayDate(msg.sentAt),
     }));
   }
 
@@ -412,33 +455,67 @@ export class MessagesService {
     return messages;
   }
 
-  // 🔥 NUEVO: Obtener mensajes entre usuarios ordenados por ID (para evitar problemas con sentAt corrupto)
+  // � OPTIMIZADO: Obtener mensajes entre usuarios ordenados por ID
   async findByUserOrderedById(
     from: string,
     to: string,
     limit: number = 20,
     offset: number = 0,
   ): Promise<any[]> {
-    // 🔥 Obtener mensajes más recientes primero (DESC), luego invertir para mostrar cronológicamente
+    // � OPTIMIZADO: Usar QueryBuilder con campos específicos
     const messages = await this.messageRepository
       .createQueryBuilder('message')
+      .select([
+        'message.id',
+        'message.from',
+        'message.fromId',
+        'message.senderRole',
+        'message.senderNumeroAgente',
+        'message.to',
+        'message.message',
+        'message.isGroup',
+        'message.roomCode',
+        'message.mediaType',
+        'message.mediaData',
+        'message.fileName',
+        'message.fileSize',
+        'message.sentAt',
+        'message.isRead',
+        'message.readBy',
+        'message.isDeleted',
+        'message.deletedAt',
+        'message.deletedBy',
+        'message.isEdited',
+        'message.editedAt',
+        'message.time',
+        'message.replyToMessageId',
+        'message.replyToSender',
+        'message.replyToText',
+        'message.replyToSenderNumeroAgente',
+        'message.threadId',
+        'message.threadCount',
+        'message.lastReplyFrom',
+        'message.reactions',
+        'message.type',
+        'message.conversationId',
+        'message.isForwarded',
+      ])
       .where(
-        'LOWER(message.from) = LOWER(:from) AND LOWER(message.to) = LOWER(:to) AND message.threadId IS NULL AND message.isGroup = false AND message.isDeleted = false',
+        '(LOWER(message.from) = LOWER(:from) AND LOWER(message.to) = LOWER(:to)) OR (LOWER(message.from) = LOWER(:to) AND LOWER(message.to) = LOWER(:from))',
         { from, to },
       )
-      .orWhere(
-        'LOWER(message.from) = LOWER(:to) AND LOWER(message.to) = LOWER(:from) AND message.threadId IS NULL AND message.isGroup = false AND message.isDeleted = false',
-        { from, to },
-      )
+      .andWhere('message.threadId IS NULL')
+      .andWhere('message.isGroup = :isGroup', { isGroup: false })
+      .andWhere('message.isDeleted = :isDeleted', { isDeleted: false })
       .orderBy('message.id', 'DESC')
       .take(limit)
       .skip(offset)
       .getMany();
 
-    // 🔥 OPTIMIZACIÓN: Obtener threadCounts en un solo query en lugar de uno por mensaje
+    // � OPTIMIZACIÓN: Obtener threadCounts en un solo query
     const messageIds = messages.map((m) => m.id);
-    const threadCountMap = {};
-    const lastReplyMap = {};
+    const threadCountMap: Record<number, number> = {};
+    const lastReplyMap: Record<number, string> = {};
 
     if (messageIds.length > 0) {
       // Obtener conteo de threads para todos los mensajes
@@ -455,16 +532,17 @@ export class MessagesService {
         threadCountMap[tc.threadId] = parseInt(tc.count);
       });
 
-      // Obtener último mensaje de cada hilo
+      // Obtener último mensaje de cada hilo (solo campos necesarios, usar ID para orden)
       const lastReplies = await this.messageRepository
         .createQueryBuilder('message')
+        .select(['message.threadId', 'message.from'])
         .where('message.threadId IN (:...messageIds)', { messageIds })
         .andWhere('message.isDeleted = false')
-        .orderBy('message.sentAt', 'DESC')
+        .orderBy('message.id', 'DESC')
         .getMany();
 
       // Agrupar por threadId y tomar el primero (más reciente)
-      const seenThreadIds = new Set();
+      const seenThreadIds = new Set<number>();
       lastReplies.forEach((reply) => {
         if (!seenThreadIds.has(reply.threadId)) {
           lastReplyMap[reply.threadId] = reply.from;
@@ -477,15 +555,13 @@ export class MessagesService {
     const reversedMessages = messages.reverse();
 
     // Agregar numeración secuencial y threadCount
-    const messagesWithNumber = reversedMessages.map((msg, index) => ({
+    return reversedMessages.map((msg, index) => ({
       ...msg,
       numberInList: index + 1 + offset,
       threadCount: threadCountMap[msg.id] || 0,
       lastReplyFrom: lastReplyMap[msg.id] || null,
-      displayDate: formatDisplayDate(msg.sentAt), // 🔥 NUEVO: Agregar displayDate
+      displayDate: formatDisplayDate(msg.sentAt),
     }));
-
-    return messagesWithNumber;
   }
 
   async findRecentMessages(limit: number = 20): Promise<Message[]> {

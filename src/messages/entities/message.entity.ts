@@ -6,10 +6,23 @@ import {
   UpdateDateColumn,
   ManyToOne,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { TemporaryRoom } from '../../temporary-rooms/entities/temporary-room.entity';
 
+// 🚀 ÍNDICES PARA OPTIMIZAR CONSULTAS FRECUENTES
+// Estos índices mejoran significativamente el rendimiento de las consultas de mensajes
 @Entity('messages')
+@Index('IDX_messages_roomCode', ['roomCode'])
+@Index('IDX_messages_conversationId', ['conversationId'])
+@Index('IDX_messages_threadId', ['threadId'])
+@Index('IDX_messages_isGroup', ['isGroup'])
+@Index('IDX_messages_isDeleted', ['isDeleted'])
+@Index('IDX_messages_sentAt', ['sentAt'])
+// Índices compuestos para consultas más comunes
+@Index('IDX_messages_room_thread_deleted', ['roomCode', 'threadId', 'isDeleted'])
+@Index('IDX_messages_conv_thread_deleted', ['conversationId', 'threadId', 'isDeleted'])
+@Index('IDX_messages_from_to_group', ['from', 'to', 'isGroup'])
 export class Message {
   @PrimaryGeneratedColumn()
   id: number;

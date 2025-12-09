@@ -5,10 +5,15 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   Unique,
+  Index,
 } from 'typeorm';
 
+// 🚀 ÍNDICES PARA OPTIMIZAR CONSULTAS DE FAVORITOS
 @Entity('conversation_favorites')
-@Unique(['username', 'conversationId']) // Un usuario solo puede tener una conversación favorita una vez
+@Unique(['username', 'conversationId'])
+@Index('IDX_conv_favorites_username', ['username'])
+@Index('IDX_conv_favorites_conversationId', ['conversationId'])
+@Index('IDX_conv_favorites_isPinned', ['isPinned'])
 export class ConversationFavorite {
   @PrimaryGeneratedColumn()
   id: number;
