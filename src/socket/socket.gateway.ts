@@ -174,21 +174,20 @@ export class SocketGateway
     /**
      * 🚀 OPTIMIZACIÓN: Broadcast ligero de cambio de estado de usuario
      * En lugar de enviar toda la lista, solo envía el cambio de estado
+     * 🔥 CLUSTER FIX: Usar server.emit() para broadcast a TODAS las instancias
      */
-    private broadcastUserStatusChange(username: string, isOnline: boolean, userData?: any): void {
+    private broadcastUserStatusChange(username: string, isOnline: boolean, userData?: any, originalUsername?: string): void {
         const statusUpdate = {
-            username,
+            username,  // displayName (ej: "Juan Pérez")
+            originalUsername: originalUsername || username,  // 🔥 username original para match
             isOnline,
             nombre: userData?.nombre || null,
             apellido: userData?.apellido || null,
         };
 
-        // Enviar solo a usuarios que necesitan saber (eficiente)
-        this.users.forEach(({ socket }) => {
-            if (socket.connected) {
-                socket.emit('userStatusChanged', statusUpdate);
-            }
-        });
+        // 🔥 CLUSTER FIX: Usar server.emit() para broadcast global
+        // Esto funciona con Redis adapter y también sin él (single instance)
+        this.server.emit('userStatusChanged', statusUpdate);
     }
 
     constructor(
@@ -223,30 +222,158 @@ export class SocketGateway
         setInterval(() => this.logSystemStats(), 60 * 60 * 1000);
     }
 
-    // ?? NUEVO: Cargar grupos al iniciar el servidor
-    async afterInit(_server: Server) {
-        // console.log('?? Inicializando Socket Gateway...');
+    // 🔥 NUEVO: Cargar grupos al iniciar el servidor y configurar Redis Adapter
+    // 🔥 Cliente Redis para tracking global de usuarios online
+    private redisClient: any = null;
+    private readonly REDIS_ONLINE_USERS_KEY = 'chat:online_users';
+
+    async afterInit(server: Server) {
+        // 🔥 CLUSTER FIX: Configurar Redis Adapter para sincronizar entre instancias
         try {
-            // Cargar todas las salas temporales como grupos
+            const { createClient } = await import('redis');
+            const { createAdapter } = await import('@socket.io/redis-adapter');
+
+            const pubClient = createClient({
+                url: `redis://:${process.env.REDIS_PASSWORD || 'Midas*2025'}@${process.env.REDIS_HOST || '198.46.186.2'}:${process.env.REDIS_PORT || 6379}`
+            });
+            const subClient = pubClient.duplicate();
+
+            // 🔥 Guardar referencia para tracking de usuarios online
+            this.redisClient = pubClient;
+
+            await Promise.all([pubClient.connect(), subClient.connect()]);
+
+            server.adapter(createAdapter(pubClient, subClient));
+            console.log('✅ Redis Adapter configurado para Socket.IO (Cluster Mode)');
+        } catch (error) {
+            console.error('⚠️ Redis Adapter no disponible, modo single-instance:', error.message);
+            // Continuar sin Redis adapter (modo desarrollo o single instance)
+        }
+
+        // Cargar grupos desde BD
+        try {
             const rooms = await this.temporaryRoomsService.findAll();
-            // console.log(` Cargando ${rooms.length} salas/grupos desde BD...`);
 
             let totalMembers = 0;
             rooms.forEach((room) => {
                 const members = new Set(room.members || []);
                 this.groups.set(room.name, members);
                 totalMembers += members.size;
-                // ?? Solo mostrar log detallado en modo desarrollo
                 if (process.env.NODE_ENV === 'development') {
-                    // console.log(`   ? "${room.name}" (${members.size} miembros)`);
+                    // console.log(`   ✓ "${room.name}" (${members.size} miembros)`);
                 }
             });
 
             // console.log(
-            //    `? Socket Gateway inicializado: ${this.groups.size} salas, ${totalMembers} miembros totales`,
+            //    `✅ Socket Gateway inicializado: ${this.groups.size} salas, ${totalMembers} miembros totales`,
             //);
         } catch (error) {
-            console.error('? Error al cargar grupos en afterInit:', error);
+            console.error('❌ Error al cargar grupos en afterInit:', error);
+        }
+    }
+
+    // 🔥 CLUSTER FIX: Funciones para gestionar usuarios online en Redis
+    private async addOnlineUserToRedis(username: string, userData: any): Promise<void> {
+        if (!this.redisClient) return;
+        try {
+            const userInfo = JSON.stringify({
+                username,
+                nombre: userData?.nombre || null,
+                apellido: userData?.apellido || null,
+                picture: userData?.picture || null,
+            });
+            await this.redisClient.hSet(this.REDIS_ONLINE_USERS_KEY, username, userInfo);
+        } catch (error) {
+            console.error('❌ Error agregando usuario a Redis:', error.message);
+        }
+    }
+
+    private async removeOnlineUserFromRedis(username: string): Promise<void> {
+        if (!this.redisClient) return;
+        try {
+            await this.redisClient.hDel(this.REDIS_ONLINE_USERS_KEY, username);
+        } catch (error) {
+            console.error('❌ Error removiendo usuario de Redis:', error.message);
+        }
+    }
+
+    private async getOnlineUsersFromRedis(): Promise<any[]> {
+        if (!this.redisClient) return [];
+        try {
+            const usersHash = await this.redisClient.hGetAll(this.REDIS_ONLINE_USERS_KEY);
+            const users = [];
+            for (const [username, jsonData] of Object.entries(usersHash)) {
+                try {
+                    const userData = JSON.parse(jsonData as string);
+                    users.push({ ...userData, isOnline: true });
+                } catch {
+                    users.push({ username, isOnline: true });
+                }
+            }
+            return users;
+        } catch (error) {
+            console.error('❌ Error obteniendo usuarios online de Redis:', error.message);
+            return [];
+        }
+    }
+
+    // 🔥 CLUSTER FIX: Enviar estado online (Filtrado por relevancia)
+    private async sendInitialOnlineStatuses(
+        socket: Socket,
+        username: string,
+        assignedConversations: any[] = []
+    ): Promise<void> {
+        if (!this.redisClient) return;
+        try {
+            const onlineUsers = await this.getOnlineUsersFromRedis();
+
+            // 1. Construir conjunto de usuarios relevantes (Whitelist)
+            const relevantUsers = new Set<string>();
+
+            // A. Añadir participantes de conversaciones asignadas
+            if (assignedConversations && assignedConversations.length > 0) {
+                assignedConversations.forEach(conv => {
+                    if (conv.participants && Array.isArray(conv.participants)) {
+                        conv.participants.forEach(p => relevantUsers.add(p.toLowerCase().trim()));
+                    }
+                });
+            }
+
+            // B. Añadir compañeros de salas (Grupos)
+            // Obtener salas donde está el usuario
+            const userRooms = this.users.get(username)?.currentRoom
+                ? [this.users.get(username)?.currentRoom] // Si solo tenemos currentRoom
+                : [];
+
+            // Buscar en todas las salas en memoria donde este usuario es miembro
+            for (const [roomCode, members] of this.roomUsers.entries()) {
+                if (members.has(username)) {
+                    members.forEach(m => relevantUsers.add(m.toLowerCase().trim()));
+                }
+            }
+
+            // Filtrar y enviar
+            let sentCount = 0;
+            for (const user of onlineUsers) {
+                const targetUsername = user.username?.toLowerCase().trim();
+
+                // 🔥 FILTRO: Solo enviar si es relevante o si es el mismo usuario (para confirmación)
+                if (relevantUsers.has(targetUsername) || targetUsername === username.toLowerCase().trim()) {
+                    socket.emit('userStatusChanged', {
+                        username: user.nombre && user.apellido
+                            ? `${user.nombre} ${user.apellido}`
+                            : user.username,
+                        originalUsername: user.username,
+                        isOnline: true,
+                        nombre: user.nombre,
+                        apellido: user.apellido,
+                    });
+                    sentCount++;
+                }
+            }
+            console.log(`📤 Enviados ${sentCount} estados online iniciales (Filtrados de ${onlineUsers.length})`);
+        } catch (error) {
+            console.error('❌ Error enviando estados online iniciales:', error.message);
         }
     }
 
@@ -296,8 +423,14 @@ export class SocketGateway
                         ? `${userData.nombre} ${userData.apellido}`
                         : username;
 
+                // 🔥 LOG: Confirmar desconexión
+                console.log(`👤 handleDisconnect: ${displayName} (${username}) se desconectó`);
+
                 // Broadcast ligero: solo notificar cambio de estado offline
-                this.broadcastUserStatusChange(displayName, false, userData);
+                this.broadcastUserStatusChange(displayName, false, userData, username);
+
+                // 🔥 CLUSTER FIX: Remover usuario de Redis para tracking global
+                await this.removeOnlineUserFromRedis(username);
 
                 break;
             }
@@ -442,7 +575,12 @@ export class SocketGateway
                 : username;
 
         // Broadcast ligero: solo notificar cambio de estado online
-        this.broadcastUserStatusChange(displayName, true, userData);
+        this.broadcastUserStatusChange(displayName, true, userData, username);
+
+        // 🔥 CLUSTER FIX: Agregar usuario a Redis para tracking global
+        await this.addOnlineUserToRedis(username, userData);
+
+        // MOVIDO: await this.sendInitialOnlineStatuses(client); (Ahora se llama en setImmediate con datos)
 
         // 🔥 PERFORMANCE LOGGING - Fin (registro base completado)
         console.timeEnd(perfLabel);
@@ -460,6 +598,9 @@ export class SocketGateway
                 // Enviar lista solo al usuario que se conectó
                 if (client.connected) {
                     await this.sendUserListToSingleUser(client, userData, userAssignedConversations);
+
+                    // 🔥 NUEVO: Enviar estados online filtrados (Ahora que tenemos las conversaciones)
+                    await this.sendInitialOnlineStatuses(client, username, userAssignedConversations);
                 }
             } catch (error) {
                 console.error('❌ Error al enviar lista de usuarios al nuevo usuario:', error);
@@ -1013,12 +1154,13 @@ export class SocketGateway
         console.time(msgPerfLabel);
 
         // ?? NUEVO: Verificar si es un mensaje duplicado
-        if (this.isDuplicateMessage(data)) {
+        // 🚀 FIX: Si viene con ID, confiamos en que es único (del frontend) y saltamos check
+        if (!data.id && this.isDuplicateMessage(data)) {
             console.timeEnd(msgPerfLabel);
             return; // Ignorar el mensaje duplicado
         }
 
-        // Log removido para optimizaci�n - datos del mensaje
+        // Log removido para optimización - datos del mensaje
 
         const {
             to,
@@ -1036,12 +1178,12 @@ export class SocketGateway
             roomCode: messageRoomCode, //  roomCode del mensaje (si viene del frontend)
         } = data;
 
-        //  Obtener informaci�n del remitente (role y numeroAgente)
+        //  Obtener información del remitente (role y numeroAgente)
         const senderUser = this.users.get(from);
         let senderRole = senderUser?.userData?.role || null;
         let senderNumeroAgente = senderUser?.userData?.numeroAgente || null;
 
-        // Log DEBUG removido para optimizaci�n
+        // Log DEBUG removido para optimización
 
         // 🚀 OPTIMIZADO: Usar userCache primero (O(1)) antes de consultar BD
         if (!senderRole || !senderNumeroAgente) {
@@ -1085,40 +1227,56 @@ export class SocketGateway
             }
         }
 
-        //  CR�TICO: Determinar el roomCode ANTES de guardar en BD
+        //  CRÍTICO: Determinar el roomCode ANTES de guardar en BD
         const user = this.users.get(from);
         const finalRoomCode = messageRoomCode || user?.currentRoom;
 
-        //  GUARDAR MENSAJE EN BD PRIMERO para obtener el ID
+        //  GUARDAR MENSAJE EN BD (o usar existente)
         let savedMessage = null;
-        try {
-            savedMessage = await this.saveMessageToDatabase({
-                ...data,
-                roomCode: finalRoomCode, //  Usar roomCode correcto
-                senderRole, //  Incluir role del remitente
-                senderNumeroAgente, //  Incluir numeroAgente del remitente
-            });
 
-            //  NUEVO: Si el mensaje es una encuesta, crear la entidad Poll
-            if (savedMessage && data.isPoll && data.poll) {
-                try {
-                    const poll = await this.pollsService.createPoll(
-                        {
-                            question: data.poll.question,
-                            options: data.poll.options,
-                        },
-                        savedMessage.id,
-                        from,
-                    );
-                    // Encuesta creada exitosamente
-                } catch (pollError) {
-                    console.error('? Error al crear encuesta:', pollError);
+        if (data.id) {
+            // 🚀 FIX: Mensaje ya guardado por frontend (Individual)
+            // Construimos objeto savedMessage simulado con los datos recibidos
+            savedMessage = {
+                ...data,
+                id: data.id,
+                sentAt: data.sentAt || new Date(), // Usar fecha del cliente o actual
+                conversationId: data.conversationId, // Importante para asignados
+                senderRole, // Asegurar que estos campos estén
+                senderNumeroAgente
+            };
+            // console.log(`🚀 SKIP DB: Mensaje ${data.id} ya guardado por frontend.`);
+        } else {
+            // Mensaje de grupo o sin ID: guardar en BD
+            try {
+                savedMessage = await this.saveMessageToDatabase({
+                    ...data,
+                    roomCode: finalRoomCode, //  Usar roomCode correcto
+                    senderRole, //  Incluir role del remitente
+                    senderNumeroAgente, //  Incluir numeroAgente del remitente
+                });
+
+                //  NUEVO: Si el mensaje es una encuesta, crear la entidad Poll
+                if (savedMessage && data.isPoll && data.poll) {
+                    try {
+                        const poll = await this.pollsService.createPoll(
+                            {
+                                question: data.poll.question,
+                                options: data.poll.options,
+                            },
+                            savedMessage.id,
+                            from,
+                        );
+                        // Encuesta creada exitosamente
+                    } catch (pollError) {
+                        console.error('? Error al crear encuesta:', pollError);
+                    }
                 }
+            } catch (error) {
+                console.error(`❌ Error al guardar mensaje en BD:`, error);
+                console.timeEnd(msgPerfLabel);
+                return; // No continuar si falló el guardado
             }
-        } catch (error) {
-            console.error(`❌ Error al guardar mensaje en BD:`, error);
-            console.timeEnd(msgPerfLabel);
-            return; // No continuar si falló el guardado
         }
 
         // 🔥 PERFORMANCE LOGGING - Fin de parte crítica (guardado en BD)
@@ -1330,20 +1488,21 @@ export class SocketGateway
                         }
                     }
                 } else {
-                    // console.log(`?? Procesando mensaje INDIVIDUAL (1-a-1)`);
+                    console.log(`🚀 DEBUG: Procesando mensaje INDIVIDUAL (1-a-1)`);
                     // Mensaje individual
                     let recipientUsername = to;
 
-                    // Si es una conversaci�n asignada, obtener el destinatario real
+                    // Si es una conversación asignada, obtener el destinatario real
                     if (data.isAssignedConversation && data.actualRecipient) {
                         recipientUsername = data.actualRecipient;
-                        // console.log(
-                        //     `?? Conversaci�n asignada detectada. Destinatario real: ${recipientUsername}`,
-                        // );
+                        console.log(
+                            `🚀 DEBUG: Conversación asignada detectada. Destinatario real: ${recipientUsername}`,
+                        );
                     }
 
-                    // ?? OPTIMIZADO: B�squeda case-insensitive usando �ndice (O(1) en lugar de O(n))
+                    // ?? OPTIMIZADO: Búsqueda case-insensitive rápida usando índice (O(1) en lugar de O(n))
                     const recipient = this.getUserCaseInsensitive(recipientUsername);
+                    console.log(`🚀 DEBUG: Destinatario ${recipientUsername} encontrado? ${!!recipient} - Conectado? ${recipient?.socket?.connected}`);
 
                     // Preparar el objeto del mensaje para enviar
                     const messageToSend = {
@@ -1373,27 +1532,28 @@ export class SocketGateway
 
                     //  Enviar mensaje al destinatario
                     if (recipient && recipient.socket.connected) {
-                        // console.log(
-                        //     `? Enviando mensaje a ${recipientUsername} (socket conectado)`,
-                        // );
-                        // console.log(`?? Datos del mensaje:`, {
-                        //     id: savedMessage?.id,
-                        //     from,
-                        //     to: recipientUsername,
-                        //     message: message?.substring(0, 50),
-                        //     isGroup: false,
-                        // });
+                        console.log(
+                            `🚀 DEBUG: Enviando mensaje a ${recipientUsername} (socket conectado)`,
+                        );
+                        console.log(`🚀 DEBUG: Datos del mensaje:`, {
+                            id: savedMessage?.id,
+                            from,
+                            to: recipientUsername,
+                            message: message?.substring(0, 50),
+                            isGroup: false,
+                        });
 
                         recipient.socket.emit('message', messageToSend);
-                        // console.log(`? Mensaje emitido exitosamente a ${recipientUsername}`);
+                        console.log(`🚀 DEBUG: Mensaje emitido exitosamente a ${recipientUsername}`);
                     } else {
-                        // console.log(
-                        //     `? No se pudo enviar mensaje a ${recipientUsername} (usuario no conectado o no encontrado)`,
-                        // );
+                        console.log(
+                            `❌ DEBUG: No se pudo enviar mensaje a ${recipientUsername} (usuario no conectado o no encontrado)`,
+                        );
                         if (recipient) {
-                            // console.log(`   Socket conectado: ${recipient.socket.connected}`);
+                            console.log(`   Socket conectado: ${recipient.socket.connected}`);
                         } else {
-                            // console.log(`   Destinatario no encontrado en el Map de usuarios`);
+                            console.log(`   Destinatario no encontrado en el Map de usuarios`);
+                            console.log(`   Usuarios conectados: ${Array.from(this.users.keys()).join(', ')}`);
                         }
                     }
 
