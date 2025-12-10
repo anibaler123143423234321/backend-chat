@@ -26,14 +26,16 @@ import { getPeruDate, formatPeruTime } from '../utils/date.utils';
     },
     transports: ['websocket', 'polling'],
     path: '/socket.io/',
-    // ?? NUEVO: Configuraciones de optimizaci�n para evitar sobrecarga del servidor
-    pingTimeout: 30000, // 30 segundos - tiempo m�ximo sin respuesta antes de desconectar
-    pingInterval: 25000, // 25 segundos - frecuencia de verificaci�n de conexi�n
+    // ?? OPTIMIZADO: Configuraciones de optimizaci�n para reducir consumo de CPU
+    pingTimeout: 60000, // 60 segundos (antes: 30s) - tiempo m�ximo sin respuesta antes de desconectar
+    pingInterval: 45000, // 45 segundos (antes: 25s) - frecuencia de verificaci�n de conexi�n (menos pings = menos CPU)
     maxHttpBufferSize: 10 * 1024 * 1024, // 10MB - l�mite de tama�o de mensaje
     connectTimeout: 45000, // 45 segundos - timeout de conexi�n inicial
     upgradeTimeout: 10000, // 10 segundos - timeout de upgrade de polling a websocket
     allowEIO3: false, // Deshabilitar compatibilidad con Engine.IO v3 (m�s antiguo)
     perMessageDeflate: false, // Deshabilitar compresi�n para reducir CPU
+    // ?? OPTIMIZADO: Deshabilitar compresi�n HTTP para reducir CPU
+    httpCompression: false,
 })
 @Injectable()
 export class SocketGateway
@@ -52,6 +54,10 @@ export class SocketGateway
     // ?? NUEVO: Cach� de mensajes recientes para detecci�n de duplicados
     private recentMessages = new Map<string, number>(); // messageHash -> timestamp
     private typingThrottle: Map<string, number> = new Map();
+
+    // ?? OPTIMIZACI�N: �ndice normalizado para b�squedas case-insensitive r�pidas O(1)
+    // Mapea username.toLowerCase() -> username original
+    private usernameIndex = new Map<string, string>();
 
     // ?? NUEVO: Tracking de participantes en videollamadas
     private videoRoomParticipants = new Map<
@@ -82,9 +88,51 @@ export class SocketGateway
     // ?? NUEVO: Map de admins para broadcasting eficiente
     private adminUsers = new Map<string, { socket: Socket; userData: any }>();
 
+    // ?? OPTIMIZACI�N: Regex precompilado para menciones (evitar recompilar en cada mensaje)
+    private readonly mentionRegex = /@([a-zA-Z������������][a-zA-Z������������\s]+?)(?=\s{2,}|$|[.,!?;:]|\n)/g;
+
     // ?? NUEVO: M�todo p�blico para verificar si un usuario est� conectado
     public isUserOnline(username: string): boolean {
         return this.users.has(username);
+    }
+
+    /**
+     * ?? OPTIMIZACI�N: B�squeda case-insensitive r�pida usando �ndice
+     * ANTES: O(n) iterando sobre todos los usuarios
+     * AHORA: O(1) lookup en el �ndice
+     */
+    private getUserCaseInsensitive(username: string): { socket: Socket; userData: any; currentRoom?: string } | undefined {
+        // Primero intentar b�squeda exacta (caso m�s com�n)
+        let user = this.users.get(username);
+        if (user) return user;
+
+        // Si no se encuentra, usar �ndice normalizado
+        const normalizedKey = username?.toLowerCase().trim();
+        const actualUsername = this.usernameIndex.get(normalizedKey);
+        if (actualUsername) {
+            return this.users.get(actualUsername);
+        }
+
+        return undefined;
+    }
+
+    /**
+     * ?? OPTIMIZACI�N: Detectar menciones en un mensaje usando regex precompilado
+     * Evita recompilar el regex en cada mensaje
+     */
+    private detectMentions(message: string): string[] {
+        if (!message) return [];
+
+        const mentions: string[] = [];
+        // Resetear el �ndice del regex antes de usarlo
+        this.mentionRegex.lastIndex = 0;
+
+        let match;
+        while ((match = this.mentionRegex.exec(message)) !== null) {
+            mentions.push(match[1].trim());
+        }
+
+        return mentions;
     }
 
     constructor(
@@ -98,20 +146,22 @@ export class SocketGateway
         // Limpiar enlaces expirados cada 5 minutos
         setInterval(() => this.cleanExpiredLinks(), 5 * 60 * 1000);
 
-        //  NUEVO: Limpiar cach� de mensajes cada 10 segundos
-        setInterval(() => this.cleanRecentMessagesCache(), 10 * 1000);
+        // ?? OPTIMIZADO: Limpiar cach� de mensajes cada 30 segundos (antes: 10s)
+        // Reducir frecuencia para disminuir consumo de CPU
+        setInterval(() => this.cleanRecentMessagesCache(), 30 * 1000);
 
         // Inyectar referencia del gateway en el servicio para notificaciones
         this.temporaryRoomsService.setSocketGateway(this);
 
-        //  NUEVO: Limpiar conexiones hu�rfanas cada 5 minutos
-        setInterval(() => this.cleanOrphanedConnections(), 5 * 60 * 1000);
+        // ?? OPTIMIZADO: Limpiar conexiones hu�rfanas cada 10 minutos (antes: 5min)
+        // Reducir frecuencia ya que las desconexiones se manejan en handleDisconnect
+        setInterval(() => this.cleanOrphanedConnections(), 10 * 60 * 1000);
 
-        //  NUEVO: Limpiar cach� de usuarios cada 10 minutos
-        setInterval(() => this.cleanUserCache(), 10 * 60 * 1000);
+        // ?? OPTIMIZADO: Limpiar cach� de usuarios cada 15 minutos (antes: 10min)
+        setInterval(() => this.cleanUserCache(), 15 * 60 * 1000);
 
-        //  NUEVO: Monitorear estad�sticas del sistema cada 30 minutos
-        setInterval(() => this.logSystemStats(), 30 * 60 * 1000);
+        // ?? OPTIMIZADO: Monitorear estad�sticas del sistema cada 60 minutos (antes: 30min)
+        setInterval(() => this.logSystemStats(), 60 * 60 * 1000);
     }
 
     // ?? NUEVO: Cargar grupos al iniciar el servidor
@@ -174,6 +224,8 @@ export class SocketGateway
                 // Remover usuario del mapa de usuarios conectados
                 this.users.delete(username);
                 this.adminUsers.delete(username); //  NUEVO: Limpiar adminUsers
+                // ?? OPTIMIZACI�N: Limpiar �ndice normalizado
+                this.usernameIndex.delete(username.toLowerCase().trim());
                 // console.log(`? Usuario ${username} removido del mapa de usuarios`);
 
                 // ?? Obtener todas las conversaciones asignadas para actualizar correctamente la lista de usuarios
@@ -220,29 +272,71 @@ export class SocketGateway
         const { username, userData, assignedConversations } = data;
         this.users.set(username, { socket: client, userData });
 
-        // ?? Guardar o actualizar usuario en la base de datos con numeroAgente y role
-        try {
-            let dbUser = await this.userRepository.findOne({ where: { username } });
+        // ?? OPTIMIZACI�N: Actualizar �ndice normalizado para b�squedas r�pidas
+        this.usernameIndex.set(username.toLowerCase().trim(), username);
 
-            if (dbUser) {
-                // Actualizar usuario existente
-                dbUser.nombre = userData?.nombre || dbUser.nombre;
-                dbUser.apellido = userData?.apellido || dbUser.apellido;
-                dbUser.email = userData?.email || dbUser.email;
-                dbUser.role = userData?.role || dbUser.role;
-                dbUser.numeroAgente = userData?.numeroAgente || dbUser.numeroAgente;
-                await this.userRepository.save(dbUser);
-            } else {
-                // Crear nuevo usuario
-                dbUser = this.userRepository.create({
-                    username,
-                    nombre: userData?.nombre,
-                    apellido: userData?.apellido,
-                    email: userData?.email,
-                    role: userData?.role,
-                    numeroAgente: userData?.numeroAgente,
+        // ?? OPTIMIZADO: Guardar o actualizar usuario en la base de datos con numeroAgente y role
+        // Solo si hay cambios significativos (evitar escrituras innecesarias)
+        try {
+            // ?? OPTIMIZACI�N: Verificar primero en cach� de usuarios
+            const cachedUser = this.userCache.get(username);
+            const needsDbUpdate = !cachedUser ||
+                cachedUser.role !== userData?.role ||
+                cachedUser.numeroAgente !== userData?.numeroAgente;
+
+            if (needsDbUpdate) {
+                let dbUser = await this.userRepository.findOne({ where: { username } });
+
+                if (dbUser) {
+                    // Actualizar usuario existente solo si hay cambios
+                    let hasChanges = false;
+                    if (userData?.nombre && dbUser.nombre !== userData.nombre) {
+                        dbUser.nombre = userData.nombre;
+                        hasChanges = true;
+                    }
+                    if (userData?.apellido && dbUser.apellido !== userData.apellido) {
+                        dbUser.apellido = userData.apellido;
+                        hasChanges = true;
+                    }
+                    if (userData?.email && dbUser.email !== userData.email) {
+                        dbUser.email = userData.email;
+                        hasChanges = true;
+                    }
+                    if (userData?.role && dbUser.role !== userData.role) {
+                        dbUser.role = userData.role;
+                        hasChanges = true;
+                    }
+                    if (userData?.numeroAgente && dbUser.numeroAgente !== userData.numeroAgente) {
+                        dbUser.numeroAgente = userData.numeroAgente;
+                        hasChanges = true;
+                    }
+
+                    if (hasChanges) {
+                        await this.userRepository.save(dbUser);
+                    }
+                } else {
+                    // Crear nuevo usuario
+                    dbUser = this.userRepository.create({
+                        username,
+                        nombre: userData?.nombre,
+                        apellido: userData?.apellido,
+                        email: userData?.email,
+                        role: userData?.role,
+                        numeroAgente: userData?.numeroAgente,
+                    });
+                    await this.userRepository.save(dbUser);
+                }
+
+                // ?? OPTIMIZACI�N: Actualizar cach� de usuario
+                this.userCache.set(username, {
+                    id: dbUser.id,
+                    username: dbUser.username,
+                    nombre: dbUser.nombre,
+                    apellido: dbUser.apellido,
+                    role: dbUser.role,
+                    numeroAgente: dbUser.numeroAgente,
+                    cachedAt: Date.now(),
                 });
-                await this.userRepository.save(dbUser);
             }
 
             // ?? NUEVO: Agregar a adminUsers si es admin
@@ -941,14 +1035,8 @@ export class SocketGateway
                     //     Array.from(roomUsers),
                     // );
 
-                    // ?? Detectar menciones en el mensaje
-                    const mentionRegex =
-                        /@([a-zA-Z������������][a-zA-Z������������\s]+?)(?=\s{2,}|$|[.,!?;:]|\n)/g;
-                    const mentions = [];
-                    let match;
-                    while ((match = mentionRegex.exec(message)) !== null) {
-                        mentions.push(match[1].trim());
-                    }
+                    // ?? OPTIMIZADO: Detectar menciones usando m�todo helper con regex precompilado
+                    const mentions = this.detectMentions(message);
                     // console.log(`?? Menciones detectadas en mensaje:`, mentions);
 
                     roomUsers.forEach((member) => {
@@ -1056,14 +1144,8 @@ export class SocketGateway
                         }
                     }
 
-                    //  Detectar menciones en el mensaje
-                    const mentionRegex =
-                        /@([a-zA-Z������������][a-zA-Z������������\s]+?)(?=\s{2,}|$|[.,!?;:]|\n)/g;
-                    const mentions = [];
-                    let match;
-                    while ((match = mentionRegex.exec(message)) !== null) {
-                        mentions.push(match[1].trim());
-                    }
+                    // ?? OPTIMIZADO: Detectar menciones usando m�todo helper con regex precompilado
+                    const mentions = this.detectMentions(message);
                     // console.log(`?? Menciones detectadas en mensaje de grupo:`, mentions);
 
                     const groupMembers = Array.from(group);
@@ -1120,27 +1202,8 @@ export class SocketGateway
                 // );
             }
 
-            // Log de usuarios conectados
-            const connectedUsers = Array.from(this.users.keys());
-            // console.log(`?? Usuarios conectados: ${connectedUsers.join(', ')}`);
-            // console.log(`?? Buscando destinatario: ${recipientUsername}`);
-
-            // ?? B�squeda case-insensitive del destinatario
-            let recipient = this.users.get(recipientUsername);
-
-            // Si no se encuentra con el nombre exacto, buscar case-insensitive
-            if (!recipient) {
-                const recipientNormalized = recipientUsername?.toLowerCase().trim();
-                const foundUsername = Array.from(this.users.keys()).find(
-                    (key) => key?.toLowerCase().trim() === recipientNormalized,
-                );
-                if (foundUsername) {
-                    recipient = this.users.get(foundUsername);
-                    // console.log(
-                    //     `? Usuario encontrado con b�squeda case-insensitive: ${foundUsername}`,
-                    // );
-                }
-            }
+            // ?? OPTIMIZADO: B�squeda case-insensitive usando �ndice (O(1) en lugar de O(n))
+            const recipient = this.getUserCaseInsensitive(recipientUsername);
 
             // Preparar el objeto del mensaje para enviar
             const messageToSend = {
@@ -3155,17 +3218,19 @@ export class SocketGateway
     }
 
     /**
-     *  NUEVO: Emitir evento de monitoreo a todos los ADMIN/JEFEPISO
+     *  OPTIMIZADO: Emitir evento de monitoreo solo a ADMIN/JEFEPISO usando adminUsers Map
      * Cuando se env�a un mensaje entre dos usuarios, notificar a los monitores
+     * ANTES: O(n) iterando sobre 200+ usuarios
+     * AHORA: O(k) iterando solo sobre ~5 admins
      */
     private broadcastMonitoringMessage(messageData: any) {
         // console.log(
         //     `?? Broadcasting monitoringMessage a ADMIN/JEFEPISO - De: ${messageData.from}, Para: ${messageData.to}`,
         // );
 
-        this.users.forEach(({ socket, userData }) => {
-            const role = userData?.role?.toString().toUpperCase().trim();
-            if (socket.connected && (role === 'ADMIN' || role === 'JEFEPISO')) {
+        // ?? OPTIMIZADO: Usar adminUsers Map en lugar de iterar todos los usuarios
+        this.adminUsers.forEach(({ socket }) => {
+            if (socket.connected) {
                 socket.emit('monitoringMessage', messageData);
             }
         });
@@ -3211,17 +3276,19 @@ export class SocketGateway
     }
 
     /**
-     *  NUEVO: M�todo p�blico para emitir evento de monitoreo desde el controller HTTP
+     *  OPTIMIZADO: M�todo p�blico para emitir evento de monitoreo desde el controller HTTP
      * Se usa cuando se crea un mensaje a trav�s del endpoint POST /api/messages
+     * ANTES: O(n) iterando sobre 200+ usuarios
+     * AHORA: O(k) iterando solo sobre ~5 admins
      */
     public broadcastMonitoringMessagePublic(messageData: any) {
         // console.log(
         //     `?? Broadcasting monitoringMessage (PUBLIC) a ADMIN/JEFEPISO - De: ${messageData.from}, Para: ${messageData.to}`,
         // );
 
-        this.users.forEach(({ socket, userData }) => {
-            const role = userData?.role?.toString().toUpperCase().trim();
-            if (socket.connected && (role === 'ADMIN' || role === 'JEFEPISO')) {
+        // ?? OPTIMIZADO: Usar adminUsers Map en lugar de iterar todos los usuarios
+        this.adminUsers.forEach(({ socket }) => {
+            if (socket.connected) {
                 socket.emit('monitoringMessage', messageData);
             }
         });
@@ -3558,12 +3625,15 @@ export class SocketGateway
         }
     }
 
-    // ?? NUEVO: M�todo para limpiar conexiones hu�rfanas
+    // ?? OPTIMIZADO: M�todo para limpiar conexiones hu�rfanas
     private cleanOrphanedConnections() {
         let cleaned = 0;
         for (const [username, user] of this.users.entries()) {
             if (!user.socket.connected) {
                 this.users.delete(username);
+                this.adminUsers.delete(username);
+                // ?? OPTIMIZACI�N: Limpiar tambi�n del �ndice normalizado
+                this.usernameIndex.delete(username.toLowerCase().trim());
                 cleaned++;
                 // console.log(`?? Limpiando conexi�n hu�rfana: ${username}`);
             }
