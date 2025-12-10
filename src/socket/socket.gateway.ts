@@ -26,15 +26,13 @@ import { getPeruDate, formatPeruTime } from '../utils/date.utils';
     },
     transports: ['websocket', 'polling'],
     path: '/socket.io/',
-    // ?? OPTIMIZADO: Configuraciones de optimizaci�n para reducir consumo de CPU
-    pingTimeout: 60000, // 60 segundos (antes: 30s) - tiempo m�ximo sin respuesta antes de desconectar
-    pingInterval: 45000, // 45 segundos (antes: 25s) - frecuencia de verificaci�n de conexi�n (menos pings = menos CPU)
-    maxHttpBufferSize: 10 * 1024 * 1024, // 10MB - l�mite de tama�o de mensaje
-    connectTimeout: 45000, // 45 segundos - timeout de conexi�n inicial
+    //  OPTIMIZADO: Configuraciones de optimizaciN para reducir consumo de CPU (200+ usuarios)
+    pingTimeout: 120000, // 🚀 2 minutos (antes: 60s)
+    pingInterval: 60000, // 🚀 1 minuto (antes: 45s) - menos pings = menos CPU
+    maxHttpBufferSize: 10 * 1024 * 1024, // 10MB - lmite de tamao de mensaje
+    connectTimeout: 45000, // 45 segundos - timeout de conexin inicial
     upgradeTimeout: 10000, // 10 segundos - timeout de upgrade de polling a websocket
-    allowEIO3: false, // Deshabilitar compatibilidad con Engine.IO v3 (m�s antiguo)
-    perMessageDeflate: false, // Deshabilitar compresi�n para reducir CPU
-    // ?? OPTIMIZADO: Deshabilitar compresi�n HTTP para reducir CPU
+    //  OPTIMIZADO: Deshabilitar compresi�n HTTP para reducir CPU
     httpCompression: false,
 })
 @Injectable()
@@ -85,11 +83,20 @@ export class SocketGateway
     >();
     private CACHE_TTL = 5 * 60 * 1000; // 5 minutos
 
-    // ?? NUEVO: Map de admins para broadcasting eficiente
+    //  NUEVO: Map de admins para broadcasting eficiente
     private adminUsers = new Map<string, { socket: Socket; userData: any }>();
 
-    // ?? OPTIMIZACI�N: Regex precompilado para menciones (evitar recompilar en cada mensaje)
+    //  OPTIMIZACI�N: Regex precompilado para menciones (evitar recompilar en cada mensaje)
     private readonly mentionRegex = /@([a-zA-Z������������][a-zA-Z������������\s]+?)(?=\s{2,}|$|[.,!?;:]|\n)/g;
+
+    //  OPTIMIZACIÓN: Caché de salas para evitar consultas repetidas a BD
+    private roomCache = new Map<string, { room: any; cachedAt: number }>();
+    private ROOM_CACHE_TTL = 60 * 1000; // 🚀 1 minuto (antes: 30s)
+
+    //  OPTIMIZACIÓN: Throttle para broadcastUserList (200+ usuarios)
+    private lastBroadcastUserList = 0;
+    private BROADCAST_USERLIST_THROTTLE = 10000; // 🚀 10 segundos (antes: 5s)
+    private pendingBroadcastUserList = false;
 
     // ?? NUEVO: M�todo p�blico para verificar si un usuario est� conectado
     public isUserOnline(username: string): boolean {
@@ -135,6 +142,55 @@ export class SocketGateway
         return mentions;
     }
 
+    /**
+     *  OPTIMIZACIÓN: Obtener sala desde caché o BD
+     * Evita consultas repetidas a BD en cada mensaje
+     */
+    private async getCachedRoom(roomCode: string): Promise<any> {
+        const cached = this.roomCache.get(roomCode);
+        if (cached && Date.now() - cached.cachedAt < this.ROOM_CACHE_TTL) {
+            return cached.room;
+        }
+
+        try {
+            const room = await this.temporaryRoomsService.findByRoomCode(roomCode);
+            if (room) {
+                this.roomCache.set(roomCode, { room, cachedAt: Date.now() });
+            }
+            return room;
+        } catch (error) {
+            console.error(`❌ Error al obtener sala ${roomCode}:`, error);
+            return null;
+        }
+    }
+
+    /**
+     *  OPTIMIZACIÓN: Invalidar caché de una sala (cuando hay cambios)
+     */
+    private invalidateRoomCache(roomCode: string): void {
+        this.roomCache.delete(roomCode);
+    }
+
+    /**
+     * 🚀 OPTIMIZACIÓN: Broadcast ligero de cambio de estado de usuario
+     * En lugar de enviar toda la lista, solo envía el cambio de estado
+     */
+    private broadcastUserStatusChange(username: string, isOnline: boolean, userData?: any): void {
+        const statusUpdate = {
+            username,
+            isOnline,
+            nombre: userData?.nombre || null,
+            apellido: userData?.apellido || null,
+        };
+
+        // Enviar solo a usuarios que necesitan saber (eficiente)
+        this.users.forEach(({ socket }) => {
+            if (socket.connected) {
+                socket.emit('userStatusChanged', statusUpdate);
+            }
+        });
+    }
+
     constructor(
         private temporaryRoomsService: TemporaryRoomsService,
         private messagesService: MessagesService,
@@ -159,6 +215,9 @@ export class SocketGateway
 
         // ?? OPTIMIZADO: Limpiar cach� de usuarios cada 15 minutos (antes: 10min)
         setInterval(() => this.cleanUserCache(), 15 * 60 * 1000);
+
+        // 🚀 OPTIMIZACIÓN: Limpiar caché de salas cada 5 minutos
+        setInterval(() => this.cleanRoomCache(), 5 * 60 * 1000);
 
         // ?? OPTIMIZADO: Monitorear estad�sticas del sistema cada 60 minutos (antes: 30min)
         setInterval(() => this.logSystemStats(), 60 * 60 * 1000);
@@ -228,29 +287,18 @@ export class SocketGateway
                 this.usernameIndex.delete(username.toLowerCase().trim());
                 // console.log(`? Usuario ${username} removido del mapa de usuarios`);
 
-                // ?? Obtener todas las conversaciones asignadas para actualizar correctamente la lista de usuarios
-                try {
-                    //  CORREGIDO: Construir displayName usando userData antes de que se pierda
-                    const userData = user.userData;
-                    const displayName =
-                        userData?.nombre && userData?.apellido
-                            ? `${userData.nombre} ${userData.apellido}`
-                            : username;
+                // 🚀 OPTIMIZACIÓN: Usar broadcast ligero de cambio de estado
+                // En lugar de obtener conversaciones y hacer broadcastUserList completo,
+                // solo notificar que el usuario se desconectó
+                const userData = user.userData;
+                const displayName =
+                    userData?.nombre && userData?.apellido
+                        ? `${userData.nombre} ${userData.apellido}`
+                        : username;
 
-                    const allAssignedConversationsResult =
-                        await this.temporaryConversationsService.findAll(displayName);
-                    // 🔥 FIX: findAll devuelve { data, total, page, totalPages }, extraer .data
-                    const allAssignedConversations: any[] = Array.isArray(allAssignedConversationsResult)
-                        ? allAssignedConversationsResult
-                        : (allAssignedConversationsResult?.data || []);
-                    await this.broadcastUserList(allAssignedConversations);
-                } catch (error) {
-                    console.error(
-                        ' Error al obtener conversaciones asignadas en handleDisconnect:',
-                        error,
-                    );
-                    this.broadcastUserList();
-                }
+                // Broadcast ligero: solo notificar cambio de estado offline
+                this.broadcastUserStatusChange(displayName, false, userData);
+
                 break;
             }
         }
@@ -348,21 +396,12 @@ export class SocketGateway
             console.error(` Error al guardar usuario ${username} en BD:`, error);
         }
 
-        //  NUEVO: Restaurar salas del usuario desde BD
+        //  🚀 OPTIMIZADO: Restaurar salas del usuario desde BD
+        // ANTES: findAll() obtenía TODAS las salas y filtraba en memoria (muy costoso)
+        // AHORA: Solo obtener salas donde el usuario es miembro
         try {
-            const allRooms = await this.temporaryRoomsService.findAll();
-            const userRooms = allRooms.filter(
-                (room) =>
-                    (room.connectedMembers && room.connectedMembers.includes(username)) ||
-                    (room.members && room.members.includes(username)),
-            );
-
-            if (userRooms.length > 0) {
-                const roomNames = userRooms.map((r) => r.name).join(', ');
-                // console.log(
-                //     ` Restaurando ${userRooms.length} salas para ${username}: [${roomNames}]`,
-                // );
-            }
+            // Usar método específico para buscar salas del usuario
+            const userRooms = await this.temporaryRoomsService.findByMember(username);
 
             for (const room of userRooms) {
                 // Agregar usuario a la sala en memoria
@@ -370,10 +409,9 @@ export class SocketGateway
                     this.roomUsers.set(room.roomCode, new Set());
                 }
                 this.roomUsers.get(room.roomCode)!.add(username);
-                //  Solo mostrar log detallado en modo desarrollo
-                if (process.env.NODE_ENV === 'development') {
-                    // console.log(`   ? "${room.name}" (${room.roomCode})`);
-                }
+
+                // 🚀 Cachear la sala para evitar consultas futuras
+                this.roomCache.set(room.roomCode, { room, cachedAt: Date.now() });
             }
 
             // Si el usuario estaba en una sala, actualizar su currentRoom
@@ -381,9 +419,6 @@ export class SocketGateway
                 const user = this.users.get(username);
                 if (user) {
                     user.currentRoom = userRooms[0].roomCode;
-                    // console.log(
-                    //     ` Sala actual del usuario restaurada a ${userRooms[0].roomCode}`,
-                    // );
                 }
             }
         } catch (error) {
@@ -395,28 +430,107 @@ export class SocketGateway
             message: `Registrado como ${username}`,
         });
 
-        //  CORREGIDO: Enviar userList actualizado a TODOS los usuarios conectados
-        // para que vean al nuevo usuario conectado en tiempo real
-        try {
-            //  CORREGIDO: Construir displayName para filtrar correctamente por nombre completo
-            const displayName =
-                userData?.nombre && userData?.apellido
-                    ? `${userData.nombre} ${userData.apellido}`
-                    : username;
+        //  🚀 OPTIMIZACIÓN: Enviar notificación ligera de conexión
+        // En lugar de consultar conversaciones y hacer broadcastUserList completo,
+        // solo notificar que el usuario se conectó
+        const displayName =
+            userData?.nombre && userData?.apellido
+                ? `${userData.nombre} ${userData.apellido}`
+                : username;
 
-            const allAssignedConversationsResult =
+        // Broadcast ligero: solo notificar cambio de estado online
+        this.broadcastUserStatusChange(displayName, true, userData);
+
+        // Enviar la lista completa SOLO al usuario que se acaba de conectar
+        // (no a todos los usuarios)
+        try {
+            const userAssignedConversationsResult =
                 await this.temporaryConversationsService.findAll(displayName);
-            // 🔥 FIX: findAll devuelve { data, total, page, totalPages }, extraer .data
-            const allAssignedConversations: any[] = Array.isArray(allAssignedConversationsResult)
-                ? allAssignedConversationsResult
-                : (allAssignedConversationsResult?.data || []);
-            await this.broadcastUserList(allAssignedConversations);
+            const userAssignedConversations: any[] = Array.isArray(userAssignedConversationsResult)
+                ? userAssignedConversationsResult
+                : (userAssignedConversationsResult?.data || []);
+
+            // Enviar lista solo al usuario que se conectó
+            await this.sendUserListToSingleUser(client, userData, userAssignedConversations);
         } catch (error) {
-            console.error(
-                '? Error al obtener conversaciones asignadas en handleRegister:',
-                error,
-            );
-            this.broadcastUserList(assignedConversations);
+            console.error('❌ Error al enviar lista de usuarios al nuevo usuario:', error);
+        }
+    }
+
+    /**
+     * 🚀 OPTIMIZACIÓN: Enviar lista de usuarios a un solo usuario
+     * En lugar de broadcast a todos, solo envía al usuario específico
+     */
+    private async sendUserListToSingleUser(
+        socket: Socket,
+        userData: any,
+        assignedConversations: any[]
+    ): Promise<void> {
+        // Crear lista de usuarios conectados
+        const connectedUsersMap = new Map<string, any>();
+        const userListWithData = Array.from(this.users.entries()).map(
+            ([username, { userData: ud }]) => {
+                const userInfo = {
+                    id: ud?.id || null,
+                    username: username,
+                    nombre: ud?.nombre || null,
+                    apellido: ud?.apellido || null,
+                    email: ud?.email || null,
+                    role: ud?.role || 'USER',
+                    picture: ud?.picture || null,
+                    sede: ud?.sede || null,
+                    sede_id: ud?.sede_id || null,
+                    numeroAgente: ud?.numeroAgente || null,
+                    isOnline: true,
+                };
+                connectedUsersMap.set(username, userInfo);
+                return userInfo;
+            },
+        );
+
+        const isAdmin = userData?.role?.toString().toUpperCase().trim() === 'ADMIN';
+
+        if (isAdmin) {
+            // Admin: enviar usuarios paginados
+            const pageSize = 50;
+            const firstPage = userListWithData.slice(0, pageSize);
+            socket.emit('userList', {
+                users: firstPage,
+                page: 0,
+                pageSize: pageSize,
+                totalUsers: userListWithData.length,
+                hasMore: userListWithData.length > pageSize,
+            });
+        } else {
+            // Usuario normal: enviar solo su info + participantes de conversaciones
+            const usersToSend = [];
+            const ownUserData = connectedUsersMap.get(userData?.username);
+            if (ownUserData) usersToSend.push(ownUserData);
+
+            // Agregar usuarios de conversaciones asignadas (solo los conectados)
+            if (assignedConversations && assignedConversations.length > 0) {
+                const currentUserFullName =
+                    userData?.nombre && userData?.apellido
+                        ? `${userData.nombre} ${userData.apellido}`
+                        : userData?.username;
+
+                for (const conv of assignedConversations) {
+                    if (conv.participants && Array.isArray(conv.participants)) {
+                        for (const participantName of conv.participants) {
+                            if (participantName !== currentUserFullName) {
+                                if (!usersToSend.some((u) => u.username === participantName)) {
+                                    const participantData = connectedUsersMap.get(participantName);
+                                    if (participantData) {
+                                        usersToSend.push(participantData);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            socket.emit('userList', { users: usersToSend });
         }
     }
 
@@ -527,71 +641,72 @@ export class SocketGateway
 
             // Agregar informaci�n de los otros usuarios en las conversaciones asignadas
             if (data.assignedConversations && data.assignedConversations.length > 0) {
+                // 🚀 OPTIMIZACIÓN: Recolectar todos los participantes primero
+                const participantsToFind: string[] = [];
+
                 for (const conv of data.assignedConversations) {
                     if (conv.participants && Array.isArray(conv.participants)) {
                         for (const participantName of conv.participants) {
                             if (participantName !== data.username) {
-                                // Verificar si ya est� en la lista
-                                if (usersToSend.some((u) => u.username === participantName)) {
-                                    continue;
-                                }
+                                // Verificar si ya está en la lista o ya lo agregamos
+                                if (!usersToSend.some((u) => u.username === participantName) &&
+                                    !participantsToFind.includes(participantName)) {
 
-                                // Primero buscar en usuarios conectados
-                                const participantData = connectedUsersMap.get(participantName);
-
-                                if (participantData) {
-                                    // Usuario est� conectado
-                                    usersToSend.push(participantData);
-                                } else {
-                                    // Usuario NO est� conectado, buscar en la base de datos
-                                    try {
-                                        // Buscar por nombre completo (participantName puede ser "Nombre Apellido")
-                                        const dbUser = await this.userRepository
-                                            .createQueryBuilder('user')
-                                            .where(
-                                                'CONCAT(user.nombre, " ", user.apellido) = :fullName',
-                                                { fullName: participantName },
-                                            )
-                                            .orWhere('user.username = :username', {
-                                                username: participantName,
-                                            })
-                                            .getOne();
-
-                                        if (dbUser) {
-                                            const fullName =
-                                                dbUser.nombre && dbUser.apellido
-                                                    ? `${dbUser.nombre} ${dbUser.apellido}`
-                                                    : dbUser.username;
-
-                                            // ?? CORREGIDO: Verificar si el usuario est� conectado
-                                            const isUserConnected =
-                                                this.users.has(fullName) ||
-                                                this.users.has(dbUser.username);
-
-                                            // Agregar usuario de la BD con estado de conexi�n correcto
-                                            usersToSend.push({
-                                                id: dbUser.id || null,
-                                                username: fullName,
-                                                nombre: dbUser.nombre || null,
-                                                apellido: dbUser.apellido || null,
-                                                email: dbUser.email || null,
-                                                role: dbUser.role || 'USER', //  Obtener role de la BD
-                                                picture: null, // No tenemos picture en la entidad User de chat
-                                                sede: null,
-                                                sede_id: null,
-                                                numeroAgente: dbUser.numeroAgente || null, //  Obtener numeroAgente de la BD
-                                                isOnline: isUserConnected, //  CORREGIDO: Estado de conexi�n real
-                                            });
-                                        }
-                                    } catch (error) {
-                                        console.error(
-                                            `? Error al buscar usuario ${participantName} en BD:`,
-                                            error,
-                                        );
+                                    // Primero buscar en usuarios conectados
+                                    const participantData = connectedUsersMap.get(participantName);
+                                    if (participantData) {
+                                        usersToSend.push(participantData);
+                                    } else {
+                                        // No conectado, agregar para batch query
+                                        participantsToFind.push(participantName);
                                     }
                                 }
                             }
                         }
+                    }
+                }
+
+                // 🚀 OPTIMIZACIÓN: UNA sola query para todos los participantes offline
+                if (participantsToFind.length > 0) {
+                    try {
+                        const dbUsers = await this.userRepository
+                            .createQueryBuilder('user')
+                            .where(
+                                'CONCAT(user.nombre, " ", user.apellido) IN (:...names)',
+                                { names: participantsToFind },
+                            )
+                            .orWhere('user.username IN (:...usernames)', {
+                                usernames: participantsToFind,
+                            })
+                            .getMany();
+
+                        // Procesar resultados de batch
+                        dbUsers.forEach((dbUser) => {
+                            const fullName =
+                                dbUser.nombre && dbUser.apellido
+                                    ? `${dbUser.nombre} ${dbUser.apellido}`
+                                    : dbUser.username;
+
+                            const isUserConnected =
+                                this.users.has(fullName) ||
+                                this.users.has(dbUser.username);
+
+                            usersToSend.push({
+                                id: dbUser.id || null,
+                                username: fullName,
+                                nombre: dbUser.nombre || null,
+                                apellido: dbUser.apellido || null,
+                                email: dbUser.email || null,
+                                role: dbUser.role || 'USER',
+                                picture: null,
+                                sede: null,
+                                sede_id: null,
+                                numeroAgente: dbUser.numeroAgente || null,
+                                isOnline: isUserConnected,
+                            });
+                        });
+                    } catch (error) {
+                        console.error(`❌ Error en batch query de usuarios:`, error);
                     }
                 }
             }
@@ -1001,16 +1116,11 @@ export class SocketGateway
                 //     `?? Enviando a sala temporal: ${finalRoomCode}, Miembros en memoria: ${roomUsers?.size || 0}`,
                 // );
 
-                // ?? SIEMPRE sincronizar con la base de datos para asegurar que todos reciban el mensaje
-                try {
-                    const room =
-                        await this.temporaryRoomsService.findByRoomCode(finalRoomCode);
+                // 🚀 OPTIMIZADO: Usar caché de salas en lugar de consultar BD en cada mensaje
+                // Solo sincronizar si NO tenemos usuarios en memoria
+                if (!roomUsers || roomUsers.size === 0) {
+                    const room = await this.getCachedRoom(finalRoomCode);
                     if (room && room.connectedMembers) {
-                        // console.log(
-                        //     `?? Sincronizando usuarios de BD para sala ${finalRoomCode}:`,
-                        //     room.connectedMembers,
-                        // );
-
                         // Combinar usuarios en memoria con usuarios de BD
                         const allUsers = new Set([
                             ...(roomUsers ? Array.from(roomUsers) : []),
@@ -1018,15 +1128,8 @@ export class SocketGateway
                                 this.users.has(username),
                             ),
                         ]);
-
                         roomUsers = allUsers;
-                        // console.log(`? Total de usuarios para env�o: ${roomUsers.size}`);
                     }
-                } catch (error) {
-                    console.error(
-                        `? Error al sincronizar usuarios de sala ${finalRoomCode}:`,
-                        error,
-                    );
                 }
 
                 if (roomUsers && roomUsers.size > 0) {
@@ -1776,7 +1879,7 @@ export class SocketGateway
         let currentPinnedMessageId: number | null = null;
 
         try {
-            const room = await this.temporaryRoomsService.findByRoomCode(
+            const room = await this.getCachedRoom(
                 data.roomCode,
             );
             // MODIFICADO: Usar TODOS los usuarios a�adidos (members)
@@ -1955,6 +2058,21 @@ export class SocketGateway
     }
 
     private async broadcastUserList(assignedConversations?: any[]) {
+        // 🚀 OPTIMIZACIÓN: Throttle para evitar broadcasts excesivos
+        const now = Date.now();
+        if (now - this.lastBroadcastUserList < this.BROADCAST_USERLIST_THROTTLE) {
+            // Si ya hay un broadcast pendiente, no programar otro
+            if (!this.pendingBroadcastUserList) {
+                this.pendingBroadcastUserList = true;
+                setTimeout(() => {
+                    this.pendingBroadcastUserList = false;
+                    this.broadcastUserList(assignedConversations);
+                }, this.BROADCAST_USERLIST_THROTTLE);
+            }
+            return;
+        }
+        this.lastBroadcastUserList = now;
+
         // Crear lista de usuarios conectados con toda su informaci�n
         const connectedUsersMap = new Map<string, any>();
         const userListWithData = Array.from(this.users.entries()).map(
@@ -2203,75 +2321,72 @@ export class SocketGateway
                                 ? `${userData.nombre} ${userData.apellido}`
                                 : userData?.username;
 
+                        // 🚀 OPTIMIZACIÓN: Recolectar participantes offline primero
+                        const participantsToFind: string[] = [];
+
                         for (const conv of userConversations) {
                             if (conv.participants && Array.isArray(conv.participants)) {
                                 for (const participantName of conv.participants) {
                                     // No agregar al usuario actual (comparar por nombre completo)
                                     if (participantName !== currentUserFullName) {
                                         // Verificar si ya est� en la lista
-                                        if (
-                                            usersToSend.some((u) => u.username === participantName)
-                                        ) {
-                                            continue;
-                                        }
+                                        if (!usersToSend.some((u) => u.username === participantName) &&
+                                            !participantsToFind.includes(participantName)) {
 
-                                        // Primero buscar en usuarios conectados
-                                        const participantData =
-                                            connectedUsersMap.get(participantName);
-
-                                        if (participantData) {
-                                            // Usuario est� conectado
-                                            usersToSend.push(participantData);
-                                        } else {
-                                            // Usuario NO est� conectado, buscar en la base de datos
-                                            try {
-                                                // Buscar por nombre completo (participantName puede ser "Nombre Apellido")
-                                                const dbUser = await this.userRepository
-                                                    .createQueryBuilder('user')
-                                                    .where(
-                                                        'CONCAT(user.nombre, " ", user.apellido) = :fullName',
-                                                        { fullName: participantName },
-                                                    )
-                                                    .orWhere('user.username = :username', {
-                                                        username: participantName,
-                                                    })
-                                                    .getOne();
-
-                                                if (dbUser) {
-                                                    const fullName =
-                                                        dbUser.nombre && dbUser.apellido
-                                                            ? `${dbUser.nombre} ${dbUser.apellido}`
-                                                            : dbUser.username;
-
-                                                    // ?? CORREGIDO: Verificar si el usuario est� conectado
-                                                    const isUserConnected =
-                                                        this.users.has(fullName) ||
-                                                        this.users.has(dbUser.username);
-
-                                                    // Agregar usuario de la BD con estado de conexi�n correcto
-                                                    usersToSend.push({
-                                                        id: dbUser.id || null,
-                                                        username: fullName,
-                                                        nombre: dbUser.nombre || null,
-                                                        apellido: dbUser.apellido || null,
-                                                        email: dbUser.email || null,
-                                                        role: dbUser.role || 'USER', // Obtener role de la BD
-                                                        picture: null, // No tenemos picture en la entidad User de chat
-                                                        sede: null,
-                                                        sede_id: null,
-                                                        numeroAgente: dbUser.numeroAgente || null, // Obtener numeroAgente de la BD
-                                                        isOnline: isUserConnected, // CORREGIDO: Estado de conexi�n real
-                                                    });
-                                                }
-                                            } catch (error) {
-                                                console.error(
-                                                    `? Error al buscar usuario ${participantName} en BD:`,
-                                                    error,
-                                                );
+                                            // Primero buscar en usuarios conectados
+                                            const participantData = connectedUsersMap.get(participantName);
+                                            if (participantData) {
+                                                usersToSend.push(participantData);
+                                            } else {
+                                                // No conectado, agregar para batch query
+                                                participantsToFind.push(participantName);
                                             }
                                         }
                                     }
                                 }
+                            }
+                        }
+
+                        // 🚀 OPTIMIZACIÓN: UNA sola query para todos los participantes offline
+                        if (participantsToFind.length > 0) {
+                            try {
+                                const dbUsers = await this.userRepository
+                                    .createQueryBuilder('user')
+                                    .where(
+                                        'CONCAT(user.nombre, " ", user.apellido) IN (:...names)',
+                                        { names: participantsToFind },
+                                    )
+                                    .orWhere('user.username IN (:...usernames)', {
+                                        usernames: participantsToFind,
+                                    })
+                                    .getMany();
+
+                                dbUsers.forEach((dbUser) => {
+                                    const fullName =
+                                        dbUser.nombre && dbUser.apellido
+                                            ? `${dbUser.nombre} ${dbUser.apellido}`
+                                            : dbUser.username;
+
+                                    const isUserConnected =
+                                        this.users.has(fullName) ||
+                                        this.users.has(dbUser.username);
+
+                                    usersToSend.push({
+                                        id: dbUser.id || null,
+                                        username: fullName,
+                                        nombre: dbUser.nombre || null,
+                                        apellido: dbUser.apellido || null,
+                                        email: dbUser.email || null,
+                                        role: dbUser.role || 'USER',
+                                        picture: null,
+                                        sede: null,
+                                        sede_id: null,
+                                        numeroAgente: dbUser.numeroAgente || null,
+                                        isOnline: isUserConnected,
+                                    });
+                                });
+                            } catch (error) {
+                                console.error(`❌ Error en batch query de usuarios:`, error);
                             }
                         }
                     }
@@ -2307,7 +2422,7 @@ export class SocketGateway
         let allUsernames: string[] = [];
         let memberCount: number = 0;
         try {
-            const room = await this.temporaryRoomsService.findByRoomCode(roomCode);
+            const room = await this.getCachedRoom(roomCode);
             // MODIFICADO: Usar TODOS los usuarios a�adidos (members) para mostrar en la lista
             allUsernames = room.members || [];
             // El contador debe ser el total de usuarios a�adidos a la sala
@@ -2590,7 +2705,7 @@ export class SocketGateway
         if (data.roomCode) {
             try {
                 // ?? PRIMERO: Buscar en la base de datos para obtener TODOS los miembros
-                const room = await this.temporaryRoomsService.findByRoomCode(
+                const room = await this.getCachedRoom(
                     data.roomCode,
                 );
                 if (room && room.members && room.members.length > 0) {
@@ -2918,7 +3033,7 @@ export class SocketGateway
             let roomName = '';
             if (isGroup && roomCode) {
                 // Buscar el nombre de la sala en BD
-                const room = await this.temporaryRoomsService.findByRoomCode(roomCode);
+                const room = await this.getCachedRoom(roomCode);
                 roomName = room?.name || '';
             }
 
@@ -3666,6 +3781,19 @@ export class SocketGateway
             //     `?? Limpiadas ${cleaned} entradas del cach� de usuarios (${this.userCache.size} restantes)`,
             // );
         }
+    }
+
+    // 🚀 OPTIMIZACIÓN: Método para limpiar caché de salas expirado
+    private cleanRoomCache() {
+        const now = Date.now();
+        let cleaned = 0;
+        for (const [roomCode, cached] of this.roomCache.entries()) {
+            if (now - cached.cachedAt > this.ROOM_CACHE_TTL) {
+                this.roomCache.delete(roomCode);
+                cleaned++;
+            }
+        }
+        // Log silencioso para no llenar logs
     }
 
     // M�todo para monitorear estad�sticas del sistema

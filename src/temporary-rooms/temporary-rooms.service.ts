@@ -949,6 +949,30 @@ export class TemporaryRoomsService {
     }
   }
 
+  /**
+   * 🚀 OPTIMIZACIÓN: Buscar salas donde el usuario es miembro
+   * Usa query SQL directa en lugar de cargar todas las salas y filtrar en memoria
+   */
+  async findByMember(username: string): Promise<TemporaryRoom[]> {
+    try {
+      // Usar LIKE con JSON para buscar en el array members
+      // Esto es más eficiente que cargar todas las salas y filtrar
+      const rooms = await this.temporaryRoomRepository
+        .createQueryBuilder('room')
+        .where('room.isActive = :isActive', { isActive: true })
+        .andWhere(
+          '(room.members LIKE :memberPattern OR room.connectedMembers LIKE :memberPattern)',
+          { memberPattern: `%"${username}"%` }
+        )
+        .getMany();
+
+      return rooms;
+    } catch (error) {
+      console.error(`❌ Error al buscar salas del usuario ${username}:`, error);
+      return [];
+    }
+  }
+
   // ?? NUEVO: Actualizar miembros de sala (para sincronizar cambios de grupos)
   async updateRoomMembers(
     id: number,
