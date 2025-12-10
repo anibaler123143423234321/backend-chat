@@ -316,7 +316,10 @@ export class SocketGateway
         @MessageBody()
         data: { username: string; userData: any; assignedConversations?: any[] },
     ) {
-        // console.log(` WS: register - Usuario: ${data.username}`);
+        // 🔥 PERFORMANCE LOGGING - Diagnosticar picos de CPU
+        const perfLabel = `⏱️ handleRegister [${data.username}]`;
+        console.time(perfLabel);
+
         const { username, userData, assignedConversations } = data;
         this.users.set(username, { socket: client, userData });
 
@@ -455,6 +458,9 @@ export class SocketGateway
         } catch (error) {
             console.error('❌ Error al enviar lista de usuarios al nuevo usuario:', error);
         }
+
+        // 🔥 PERFORMANCE LOGGING - Fin
+        console.timeEnd(perfLabel);
     }
 
     /**
@@ -998,8 +1004,13 @@ export class SocketGateway
         @ConnectedSocket() client: Socket,
         @MessageBody() data: any,
     ) {
+        // 🔥 PERFORMANCE LOGGING - Diagnosticar picos de CPU
+        const msgPerfLabel = `⏱️ handleMessage [${data.isGroup ? 'GROUP' : 'DM'}:${data.from}]`;
+        console.time(msgPerfLabel);
+
         // ?? NUEVO: Verificar si es un mensaje duplicado
         if (this.isDuplicateMessage(data)) {
+            console.timeEnd(msgPerfLabel);
             return; // Ignorar el mensaje duplicado
         }
 
@@ -1028,38 +1039,44 @@ export class SocketGateway
 
         // Log DEBUG removido para optimizaci�n
 
-        //  OPTIMIZACI�N: Cachear informaci�n del usuario para evitar consultas repetidas a BD
+        // 🚀 OPTIMIZADO: Usar userCache primero (O(1)) antes de consultar BD
         if (!senderRole || !senderNumeroAgente) {
-            // Primero verificar si ya tenemos el usuario en memoria (de una conexi�n anterior)
-            const cachedUser = this.users.get(from);
-            if (cachedUser?.userData?.role && cachedUser?.userData?.numeroAgente) {
-                senderRole = cachedUser.userData.role;
-                senderNumeroAgente = cachedUser.userData.numeroAgente;
-            } else {
-                // Solo consultar BD si no est� en cach�
+            // 1. Verificar en userCache (más rápido que BD)
+            const cachedUserInfo = this.userCache.get(from);
+            if (cachedUserInfo && (Date.now() - cachedUserInfo.cachedAt < this.CACHE_TTL)) {
+                senderRole = senderRole || cachedUserInfo.role;
+                senderNumeroAgente = senderNumeroAgente || cachedUserInfo.numeroAgente;
+            }
+            // 2. Si aún falta info, verificar en users Map (ya conectados)
+            else if (senderUser?.userData?.role || senderUser?.userData?.numeroAgente) {
+                senderRole = senderRole || senderUser.userData.role;
+                senderNumeroAgente = senderNumeroAgente || senderUser.userData.numeroAgente;
+            }
+            // 3. Solo consultar BD como último recurso
+            else if (!senderRole || !senderNumeroAgente) {
                 try {
                     const dbUser = await this.userRepository.findOne({
                         where: { username: from },
+                        select: ['id', 'username', 'role', 'numeroAgente', 'nombre', 'apellido'], // Solo campos necesarios
                     });
 
                     if (dbUser) {
                         senderRole = dbUser.role || senderRole;
                         senderNumeroAgente = dbUser.numeroAgente || senderNumeroAgente;
-                        // Log optimizado: info de remitente cachada
 
-                        //  Cachear en memoria para futuras consultas
-                        if (cachedUser) {
-                            cachedUser.userData = {
-                                ...cachedUser.userData,
-                                role: senderRole,
-                                numeroAgente: senderNumeroAgente,
-                            };
-                        }
-                    } else {
-                        // console.warn(`?? Usuario ${from} no encontrado en BD`);
+                        // Cachear para futuras consultas
+                        this.userCache.set(from, {
+                            id: dbUser.id,
+                            username: dbUser.username,
+                            nombre: dbUser.nombre,
+                            apellido: dbUser.apellido,
+                            role: dbUser.role,
+                            numeroAgente: dbUser.numeroAgente,
+                            cachedAt: Date.now(),
+                        });
                     }
                 } catch (error) {
-                    console.error(`? Error al buscar usuario en BD:`, error);
+                    console.error(`❌ Error al buscar usuario en BD:`, error);
                 }
             }
         }
@@ -1142,6 +1159,32 @@ export class SocketGateway
                     const mentions = this.detectMentions(message);
                     // console.log(`?? Menciones detectadas en mensaje:`, mentions);
 
+                    // 🚀 OPTIMIZADO: Crear objeto base UNA vez fuera del loop (reduce allocations)
+                    const baseGroupMessage = {
+                        id: savedMessage?.id,
+                        from: from || 'Usuario Desconocido',
+                        senderRole,
+                        senderNumeroAgente,
+                        group: to,
+                        groupName: to,
+                        roomCode: finalRoomCode,
+                        message,
+                        isGroup: true,
+                        time: time || formatPeruTime(),
+                        sentAt: savedMessage?.sentAt,
+                        mediaType,
+                        mediaData,
+                        fileName,
+                        fileSize,
+                        replyToMessageId,
+                        replyToSender,
+                        replyToText,
+                        type: data.type,
+                        videoCallUrl: data.videoCallUrl,
+                        videoRoomID: data.videoRoomID,
+                        metadata: data.metadata,
+                    };
+
                     roomUsers.forEach((member) => {
                         const memberUser = this.users.get(member);
 
@@ -1161,31 +1204,10 @@ export class SocketGateway
                             // console.log(
                             //     `? Enviando mensaje a ${member} en sala ${finalRoomCode}${isMentioned ? ' (MENCIONADO)' : ''} - Socket ID: ${memberUser.socket.id}`,
                             // );
+                            // 🚀 OPTIMIZADO: Solo agregar hasMention dinámicamente
                             memberUser.socket.emit('message', {
-                                id: savedMessage?.id, //  Incluir ID del mensaje
-                                from: from || 'Usuario Desconocido',
-                                senderRole, //  Incluir role del remitente
-                                senderNumeroAgente, //  Incluir numeroAgente del remitente
-                                group: to,
-                                groupName: to, //  Incluir groupName expl�citamente para el frontend
-                                roomCode: finalRoomCode, //  CR�TICO: Incluir roomCode para validaci�n en frontend
-                                message,
-                                isGroup: true,
-                                time: time || formatPeruTime(),
-                                sentAt: savedMessage?.sentAt, //  Incluir sentAt para extraer hora correcta en frontend
-                                mediaType,
-                                mediaData,
-                                fileName,
-                                fileSize,
-                                replyToMessageId,
-                                replyToSender,
-                                replyToText,
-                                hasMention: isMentioned, //  NUEVO: Indicar si el usuario fue mencionado
-                                //  NUEVO: Campos de videollamada
-                                type: data.type,
-                                videoCallUrl: data.videoCallUrl,
-                                videoRoomID: data.videoRoomID,
-                                metadata: data.metadata,
+                                ...baseGroupMessage,
+                                hasMention: isMentioned,
                             });
 
                             // ?? NUEVO: Actualizar �ltimo mensaje para todos los usuarios (excepto el remitente)
@@ -1426,6 +1448,9 @@ export class SocketGateway
             }
 
         }
+
+        // 🔥 PERFORMANCE LOGGING - Fin
+        console.timeEnd(msgPerfLabel);
     }
 
     private async saveMessageToDatabase(data: any) {
