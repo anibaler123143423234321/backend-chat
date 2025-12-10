@@ -444,23 +444,27 @@ export class SocketGateway
         // Broadcast ligero: solo notificar cambio de estado online
         this.broadcastUserStatusChange(displayName, true, userData);
 
-        // Enviar la lista completa SOLO al usuario que se acaba de conectar
-        // (no a todos los usuarios)
-        try {
-            const userAssignedConversationsResult =
-                await this.temporaryConversationsService.findAll(displayName);
-            const userAssignedConversations: any[] = Array.isArray(userAssignedConversationsResult)
-                ? userAssignedConversationsResult
-                : (userAssignedConversationsResult?.data || []);
-
-            // Enviar lista solo al usuario que se conectó
-            await this.sendUserListToSingleUser(client, userData, userAssignedConversations);
-        } catch (error) {
-            console.error('❌ Error al enviar lista de usuarios al nuevo usuario:', error);
-        }
-
-        // 🔥 PERFORMANCE LOGGING - Fin
+        // 🔥 PERFORMANCE LOGGING - Fin (registro base completado)
         console.timeEnd(perfLabel);
+
+        // 🚀 OPTIMIZADO: Enviar lista de usuarios de forma NO BLOQUEANTE
+        // Esto permite que handleRegister termine rápido y no bloquee otros registros
+        setImmediate(async () => {
+            try {
+                const userAssignedConversationsResult =
+                    await this.temporaryConversationsService.findAll(displayName);
+                const userAssignedConversations: any[] = Array.isArray(userAssignedConversationsResult)
+                    ? userAssignedConversationsResult
+                    : (userAssignedConversationsResult?.data || []);
+
+                // Enviar lista solo al usuario que se conectó
+                if (client.connected) {
+                    await this.sendUserListToSingleUser(client, userData, userAssignedConversations);
+                }
+            } catch (error) {
+                console.error('❌ Error al enviar lista de usuarios al nuevo usuario:', error);
+            }
+        });
     }
 
     /**
@@ -1112,190 +1116,77 @@ export class SocketGateway
                 }
             }
         } catch (error) {
-            console.error(`? Error al guardar mensaje en BD:`, error);
+            console.error(`❌ Error al guardar mensaje en BD:`, error);
+            console.timeEnd(msgPerfLabel);
+            return; // No continuar si falló el guardado
         }
 
-        if (isGroup) {
-            // console.log(`?? Procesando mensaje de GRUPO`);
+        // 🔥 PERFORMANCE LOGGING - Fin de parte crítica (guardado en BD)
+        console.timeEnd(msgPerfLabel);
 
-            // console.log(`?? Usuario remitente:`, {
-            //     username: from,
-            //     messageRoomCode, // Ya est� disponible del destructuring
-            //     currentRoom: user?.currentRoom,
-            //     finalRoomCode,
-            //     hasUser: !!user,
-            // });
+        // 🚀 OPTIMIZADO: Broadcast NO BLOQUEANTE
+        // Capturar variables necesarias para el closure
+        const msgContext = { savedMessage, isGroup, to, from, message, time, mediaType, mediaData, fileName, fileSize, replyToMessageId, replyToSender, replyToText, senderRole, senderNumeroAgente, finalRoomCode, data };
 
-            if (finalRoomCode) {
-                // Es una sala temporal
-                let roomUsers = this.roomUsers.get(finalRoomCode);
-                // console.log(
-                //     `?? Enviando a sala temporal: ${finalRoomCode}, Miembros en memoria: ${roomUsers?.size || 0}`,
-                // );
+        setImmediate(async () => {
+            try {
+                if (msgContext.isGroup) {
+                    // console.log(`?? Procesando mensaje de GRUPO`);
 
-                // 🚀 OPTIMIZADO: Usar caché de salas en lugar de consultar BD en cada mensaje
-                // Solo sincronizar si NO tenemos usuarios en memoria
-                if (!roomUsers || roomUsers.size === 0) {
-                    const room = await this.getCachedRoom(finalRoomCode);
-                    if (room && room.connectedMembers) {
-                        // Combinar usuarios en memoria con usuarios de BD
-                        const allUsers = new Set([
-                            ...(roomUsers ? Array.from(roomUsers) : []),
-                            ...room.connectedMembers.filter((username) =>
-                                this.users.has(username),
-                            ),
-                        ]);
-                        roomUsers = allUsers;
-                    }
-                }
+                    // console.log(`?? Usuario remitente:`, {
+                    //     username: from,
+                    //     messageRoomCode, // Ya est� disponible del destructuring
+                    //     currentRoom: user?.currentRoom,
+                    //     finalRoomCode,
+                    //     hasUser: !!user,
+                    // });
 
-                if (roomUsers && roomUsers.size > 0) {
-                    // console.log(
-                    //     `?? Lista completa de usuarios en sala ${finalRoomCode}:`,
-                    //     Array.from(roomUsers),
-                    // );
+                    if (finalRoomCode) {
+                        // Es una sala temporal
+                        let roomUsers = this.roomUsers.get(finalRoomCode);
+                        // console.log(
+                        //     `?? Enviando a sala temporal: ${finalRoomCode}, Miembros en memoria: ${roomUsers?.size || 0}`,
+                        // );
 
-                    // ?? OPTIMIZADO: Detectar menciones usando m�todo helper con regex precompilado
-                    const mentions = this.detectMentions(message);
-                    // console.log(`?? Menciones detectadas en mensaje:`, mentions);
-
-                    // 🚀 OPTIMIZADO: Crear objeto base UNA vez fuera del loop (reduce allocations)
-                    const baseGroupMessage = {
-                        id: savedMessage?.id,
-                        from: from || 'Usuario Desconocido',
-                        senderRole,
-                        senderNumeroAgente,
-                        group: to,
-                        groupName: to,
-                        roomCode: finalRoomCode,
-                        message,
-                        isGroup: true,
-                        time: time || formatPeruTime(),
-                        sentAt: savedMessage?.sentAt,
-                        mediaType,
-                        mediaData,
-                        fileName,
-                        fileSize,
-                        replyToMessageId,
-                        replyToSender,
-                        replyToText,
-                        type: data.type,
-                        videoCallUrl: data.videoCallUrl,
-                        videoRoomID: data.videoRoomID,
-                        metadata: data.metadata,
-                    };
-
-                    roomUsers.forEach((member) => {
-                        const memberUser = this.users.get(member);
-
-                        // ?? NUEVO: Validar que el socket est� conectado
-                        if (
-                            memberUser &&
-                            memberUser.socket &&
-                            memberUser.socket.connected
-                        ) {
-                            // ?? Verificar si este usuario fue mencionado
-                            const isMentioned = mentions.some(
-                                (mention) =>
-                                    member.toUpperCase().includes(mention.toUpperCase()) ||
-                                    mention.toUpperCase().includes(member.toUpperCase()),
-                            );
-
-                            // console.log(
-                            //     `? Enviando mensaje a ${member} en sala ${finalRoomCode}${isMentioned ? ' (MENCIONADO)' : ''} - Socket ID: ${memberUser.socket.id}`,
-                            // );
-                            // 🚀 OPTIMIZADO: Solo agregar hasMention dinámicamente
-                            memberUser.socket.emit('message', {
-                                ...baseGroupMessage,
-                                hasMention: isMentioned,
-                            });
-
-                            // ?? NUEVO: Actualizar �ltimo mensaje para todos los usuarios (excepto el remitente)
-                            // Esto asegura que el �ltimo mensaje se actualice en tiempo real en la lista de salas
-                            if (member !== from) {
-                                // Verificar si el usuario est� viendo esta sala actualmente
-                                const isViewingThisRoom = memberUser.currentRoom === finalRoomCode;
-                                // console.log(`?? DEBUG - Usuario ${member}: currentRoom="${memberUser.currentRoom}", roomCode="${finalRoomCode}", isViewingThisRoom=${isViewingThisRoom}`);
-
-                                const lastMessageData = {
-                                    text: message,
-                                    from: from,
-                                    time: time || formatPeruTime(),
-                                    sentAt: savedMessage?.sentAt || new Date().toISOString(),
-                                };
-
-                                if (!isViewingThisRoom) {
-                                    // Usuario NO est� viendo esta sala, enviar actualizaci�n con contador
-                                    this.emitUnreadCountUpdateForUser(
-                                        finalRoomCode,
-                                        member,
-                                        1, // Incrementar contador
-                                        lastMessageData,
-                                    );
-                                } else {
-                                    // Usuario S� est� viendo esta sala, solo actualizar �ltimo mensaje sin incrementar contador
-                                    this.emitUnreadCountUpdateForUser(
-                                        finalRoomCode,
-                                        member,
-                                        0, // No incrementar contador
-                                        lastMessageData,
-                                    );
-                                }
+                        // 🚀 OPTIMIZADO: Usar caché de salas en lugar de consultar BD en cada mensaje
+                        // Solo sincronizar si NO tenemos usuarios en memoria
+                        if (!roomUsers || roomUsers.size === 0) {
+                            const room = await this.getCachedRoom(finalRoomCode);
+                            if (room && room.connectedMembers) {
+                                // Combinar usuarios en memoria con usuarios de BD
+                                const allUsers = new Set([
+                                    ...(roomUsers ? Array.from(roomUsers) : []),
+                                    ...room.connectedMembers.filter((username) =>
+                                        this.users.has(username),
+                                    ),
+                                ]);
+                                roomUsers = allUsers;
                             }
-                        } else {
-                            //  NUEVO: Log cuando no se puede enviar
-                            // console.warn(
-                            //     `?? No se puede enviar mensaje a ${member}: socket no conectado o usuario no existe`,
+                        }
+
+                        if (roomUsers && roomUsers.size > 0) {
+                            // console.log(
+                            //     `?? Lista completa de usuarios en sala ${finalRoomCode}:`,
+                            //     Array.from(roomUsers),
                             // );
-                        }
-                    });
-                } else {
-                    //  NUEVO: Log cuando no hay usuarios en la sala
-                    // console.warn(`?? No hay usuarios en la sala ${finalRoomCode}`);
-                }
-            } else {
-                // Es un grupo normal
-                const group = this.groups.get(to);
-                // console.log(
-                //     `?? Enviando a grupo normal: ${to}, Miembros: ${group?.size || 0}`,
-                // );
-                if (group) {
-                    //  Obtener el roomCode del grupo (buscar en roomUsers)
-                    let groupRoomCode = null;
-                    for (const [code, users] of this.roomUsers.entries()) {
-                        if (users.has(from)) {
-                            groupRoomCode = code;
-                            break;
-                        }
-                    }
 
-                    // ?? OPTIMIZADO: Detectar menciones usando m�todo helper con regex precompilado
-                    const mentions = this.detectMentions(message);
-                    // console.log(`?? Menciones detectadas en mensaje de grupo:`, mentions);
+                            // ?? OPTIMIZADO: Detectar menciones usando m�todo helper con regex precompilado
+                            const mentions = this.detectMentions(message);
+                            // console.log(`?? Menciones detectadas en mensaje:`, mentions);
 
-                    const groupMembers = Array.from(group);
-                    groupMembers.forEach((member) => {
-                        const user = this.users.get(member);
-                        if (user && user.socket.connected) {
-                            //  Verificar si este usuario fue mencionado
-                            const isMentioned = mentions.some(
-                                (mention) =>
-                                    member.toUpperCase().includes(mention.toUpperCase()) ||
-                                    mention.toUpperCase().includes(member.toUpperCase()),
-                            );
-
-                            user.socket.emit('message', {
-                                id: savedMessage?.id, //  Incluir ID del mensaje
+                            // 🚀 OPTIMIZADO: Crear objeto base UNA vez fuera del loop (reduce allocations)
+                            const baseGroupMessage = {
+                                id: savedMessage?.id,
                                 from: from || 'Usuario Desconocido',
-                                senderRole, //  Incluir role del remitente
-                                senderNumeroAgente, //  Incluir numeroAgente del remitente
+                                senderRole,
+                                senderNumeroAgente,
                                 group: to,
-                                groupName: to, //  Incluir groupName expl�citamente para el frontend
-                                roomCode: groupRoomCode, //  CR�TICO: Incluir roomCode para validaci�n en frontend
+                                groupName: to,
+                                roomCode: finalRoomCode,
                                 message,
                                 isGroup: true,
                                 time: time || formatPeruTime(),
-                                sentAt: savedMessage?.sentAt, //  Incluir sentAt para extraer hora correcta en frontend
+                                sentAt: savedMessage?.sentAt,
                                 mediaType,
                                 mediaData,
                                 fileName,
@@ -1303,154 +1194,279 @@ export class SocketGateway
                                 replyToMessageId,
                                 replyToSender,
                                 replyToText,
-                                hasMention: isMentioned, //  NUEVO: Indicar si el usuario fue mencionado
-                                //  NUEVO: Campos de videollamada
                                 type: data.type,
                                 videoCallUrl: data.videoCallUrl,
                                 videoRoomID: data.videoRoomID,
                                 metadata: data.metadata,
+                            };
+
+                            roomUsers.forEach((member) => {
+                                const memberUser = this.users.get(member);
+
+                                // ?? NUEVO: Validar que el socket est� conectado
+                                if (
+                                    memberUser &&
+                                    memberUser.socket &&
+                                    memberUser.socket.connected
+                                ) {
+                                    // ?? Verificar si este usuario fue mencionado
+                                    const isMentioned = mentions.some(
+                                        (mention) =>
+                                            member.toUpperCase().includes(mention.toUpperCase()) ||
+                                            mention.toUpperCase().includes(member.toUpperCase()),
+                                    );
+
+                                    // console.log(
+                                    //     `? Enviando mensaje a ${member} en sala ${finalRoomCode}${isMentioned ? ' (MENCIONADO)' : ''} - Socket ID: ${memberUser.socket.id}`,
+                                    // );
+                                    // 🚀 OPTIMIZADO: Solo agregar hasMention dinámicamente
+                                    memberUser.socket.emit('message', {
+                                        ...baseGroupMessage,
+                                        hasMention: isMentioned,
+                                    });
+
+                                    // ?? NUEVO: Actualizar �ltimo mensaje para todos los usuarios (excepto el remitente)
+                                    // Esto asegura que el �ltimo mensaje se actualice en tiempo real en la lista de salas
+                                    if (member !== from) {
+                                        // Verificar si el usuario est� viendo esta sala actualmente
+                                        const isViewingThisRoom = memberUser.currentRoom === finalRoomCode;
+                                        // console.log(`?? DEBUG - Usuario ${member}: currentRoom="${memberUser.currentRoom}", roomCode="${finalRoomCode}", isViewingThisRoom=${isViewingThisRoom}`);
+
+                                        const lastMessageData = {
+                                            text: message,
+                                            from: from,
+                                            time: time || formatPeruTime(),
+                                            sentAt: savedMessage?.sentAt || new Date().toISOString(),
+                                        };
+
+                                        if (!isViewingThisRoom) {
+                                            // Usuario NO est� viendo esta sala, enviar actualizaci�n con contador
+                                            this.emitUnreadCountUpdateForUser(
+                                                finalRoomCode,
+                                                member,
+                                                1, // Incrementar contador
+                                                lastMessageData,
+                                            );
+                                        } else {
+                                            // Usuario S� est� viendo esta sala, solo actualizar �ltimo mensaje sin incrementar contador
+                                            this.emitUnreadCountUpdateForUser(
+                                                finalRoomCode,
+                                                member,
+                                                0, // No incrementar contador
+                                                lastMessageData,
+                                            );
+                                        }
+                                    }
+                                } else {
+                                    //  NUEVO: Log cuando no se puede enviar
+                                    // console.warn(
+                                    //     `?? No se puede enviar mensaje a ${member}: socket no conectado o usuario no existe`,
+                                    // );
+                                }
+                            });
+                        } else {
+                            //  NUEVO: Log cuando no hay usuarios en la sala
+                            // console.warn(`?? No hay usuarios en la sala ${finalRoomCode}`);
+                        }
+                    } else {
+                        // Es un grupo normal
+                        const group = this.groups.get(to);
+                        // console.log(
+                        //     `?? Enviando a grupo normal: ${to}, Miembros: ${group?.size || 0}`,
+                        // );
+                        if (group) {
+                            //  Obtener el roomCode del grupo (buscar en roomUsers)
+                            let groupRoomCode = null;
+                            for (const [code, users] of this.roomUsers.entries()) {
+                                if (users.has(from)) {
+                                    groupRoomCode = code;
+                                    break;
+                                }
+                            }
+
+                            // ?? OPTIMIZADO: Detectar menciones usando m�todo helper con regex precompilado
+                            const mentions = this.detectMentions(message);
+                            // console.log(`?? Menciones detectadas en mensaje de grupo:`, mentions);
+
+                            const groupMembers = Array.from(group);
+                            groupMembers.forEach((member) => {
+                                const user = this.users.get(member);
+                                if (user && user.socket.connected) {
+                                    //  Verificar si este usuario fue mencionado
+                                    const isMentioned = mentions.some(
+                                        (mention) =>
+                                            member.toUpperCase().includes(mention.toUpperCase()) ||
+                                            mention.toUpperCase().includes(member.toUpperCase()),
+                                    );
+
+                                    user.socket.emit('message', {
+                                        id: savedMessage?.id, //  Incluir ID del mensaje
+                                        from: from || 'Usuario Desconocido',
+                                        senderRole, //  Incluir role del remitente
+                                        senderNumeroAgente, //  Incluir numeroAgente del remitente
+                                        group: to,
+                                        groupName: to, //  Incluir groupName expl�citamente para el frontend
+                                        roomCode: groupRoomCode, //  CR�TICO: Incluir roomCode para validaci�n en frontend
+                                        message,
+                                        isGroup: true,
+                                        time: time || formatPeruTime(),
+                                        sentAt: savedMessage?.sentAt, //  Incluir sentAt para extraer hora correcta en frontend
+                                        mediaType,
+                                        mediaData,
+                                        fileName,
+                                        fileSize,
+                                        replyToMessageId,
+                                        replyToSender,
+                                        replyToText,
+                                        hasMention: isMentioned, //  NUEVO: Indicar si el usuario fue mencionado
+                                        //  NUEVO: Campos de videollamada
+                                        type: data.type,
+                                        videoCallUrl: data.videoCallUrl,
+                                        videoRoomID: data.videoRoomID,
+                                        metadata: data.metadata,
+                                    });
+                                }
                             });
                         }
-                    });
-                }
-            }
-        } else {
-            // console.log(`?? Procesando mensaje INDIVIDUAL (1-a-1)`);
-            // Mensaje individual
-            let recipientUsername = to;
-
-            // Si es una conversaci�n asignada, obtener el destinatario real
-            if (data.isAssignedConversation && data.actualRecipient) {
-                recipientUsername = data.actualRecipient;
-                // console.log(
-                //     `?? Conversaci�n asignada detectada. Destinatario real: ${recipientUsername}`,
-                // );
-            }
-
-            // ?? OPTIMIZADO: B�squeda case-insensitive usando �ndice (O(1) en lugar de O(n))
-            const recipient = this.getUserCaseInsensitive(recipientUsername);
-
-            // Preparar el objeto del mensaje para enviar
-            const messageToSend = {
-                id: savedMessage?.id, // Incluir ID del mensaje guardado en BD
-                from: from || 'Usuario Desconocido',
-                senderRole, // Incluir role del remitente
-                senderNumeroAgente, // Incluir numeroAgente del remitente
-                to: recipientUsername,
-                message,
-                isGroup: false,
-                time: time || formatPeruTime(),
-                sentAt: savedMessage?.sentAt, //  Incluir sentAt para extraer hora correcta en frontend
-                mediaType,
-                mediaData,
-                fileName,
-                fileSize,
-                replyToMessageId,
-                replyToSender,
-                replyToText,
-                conversationId: savedMessage?.conversationId, //  Incluir conversationId para chats asignados
-                //  NUEVO: Campos de videollamada
-                type: data.type,
-                videoCallUrl: data.videoCallUrl,
-                videoRoomID: data.videoRoomID,
-                metadata: data.metadata,
-            };
-
-            //  Enviar mensaje al destinatario
-            if (recipient && recipient.socket.connected) {
-                // console.log(
-                //     `? Enviando mensaje a ${recipientUsername} (socket conectado)`,
-                // );
-                // console.log(`?? Datos del mensaje:`, {
-                //     id: savedMessage?.id,
-                //     from,
-                //     to: recipientUsername,
-                //     message: message?.substring(0, 50),
-                //     isGroup: false,
-                // });
-
-                recipient.socket.emit('message', messageToSend);
-                // console.log(`? Mensaje emitido exitosamente a ${recipientUsername}`);
-            } else {
-                // console.log(
-                //     `? No se pudo enviar mensaje a ${recipientUsername} (usuario no conectado o no encontrado)`,
-                // );
-                if (recipient) {
-                    // console.log(`   Socket conectado: ${recipient.socket.connected}`);
-                } else {
-                    // console.log(`   Destinatario no encontrado en el Map de usuarios`);
-                }
-            }
-
-            // ?? NUEVO: Enviar mensaje de vuelta al remitente para que vea su propio mensaje
-            const sender = this.users.get(from);
-            if (sender && sender.socket.connected) {
-                // console.log(
-                //     `? Enviando confirmaci�n de mensaje al remitente: ${from}`,
-                // );
-                sender.socket.emit('message', messageToSend);
-            }
-
-            //  Emitir evento de monitoreo a todos los ADMIN/JEFEPISO
-            this.broadcastMonitoringMessage({
-                id: savedMessage?.id,
-                from: from || 'Usuario Desconocido',
-                to: recipientUsername,
-                message,
-                isGroup: false,
-                time: time || formatPeruTime(),
-                sentAt: savedMessage?.sentAt, //  Incluir sentAt para extraer hora correcta en frontend
-                mediaType,
-                mediaData,
-                fileName,
-                fileSize,
-                senderRole,
-                senderNumeroAgente,
-                replyToMessageId,
-                replyToSender,
-                replyToText,
-            });
-
-            // NUEVO: Emitir evento de actualizaci�n de conversaci�n asignada
-            // Esto permite que ambos participantes reordenen sus listas autom�ticamente
-            if (data.isAssignedConversation && data.conversationId) {
-                // console.log(`?? Emitiendo assignedConversationUpdated para conversaci�n ${data.conversationId}`);
-
-                // Determinar el texto del mensaje para mostrar
-                let messageText = message;
-                if (!messageText && mediaType) {
-                    if (mediaType === 'image') messageText = '?? Imagen';
-                    else if (mediaType === 'video') messageText = '?? Video';
-                    else if (mediaType === 'audio') messageText = '?? Audio';
-                    else if (mediaType === 'document') messageText = '?? Documento';
-                    else messageText = '?? Archivo';
-                } else if (!messageText && fileName) {
-                    messageText = '?? Archivo';
-                }
-
-                const conversationUpdateData = {
-                    conversationId: data.conversationId,
-                    lastMessage: messageText,
-                    lastMessageTime: savedMessage?.sentAt || new Date().toISOString(),
-                    lastMessageFrom: from,
-                    lastMessageMediaType: mediaType
-                };
-
-                // Emitir a ambos participantes (remitente y destinatario)
-                const participants = [from, recipientUsername];
-                participants.forEach(participantName => {
-                    const participantConnection = this.users.get(participantName);
-                    if (participantConnection && participantConnection.socket.connected) {
-                        participantConnection.socket.emit('assignedConversationUpdated', conversationUpdateData);
-                        // console.log(`? Evento assignedConversationUpdated emitido a ${participantName}`);
                     }
-                });
+                } else {
+                    // console.log(`?? Procesando mensaje INDIVIDUAL (1-a-1)`);
+                    // Mensaje individual
+                    let recipientUsername = to;
+
+                    // Si es una conversaci�n asignada, obtener el destinatario real
+                    if (data.isAssignedConversation && data.actualRecipient) {
+                        recipientUsername = data.actualRecipient;
+                        // console.log(
+                        //     `?? Conversaci�n asignada detectada. Destinatario real: ${recipientUsername}`,
+                        // );
+                    }
+
+                    // ?? OPTIMIZADO: B�squeda case-insensitive usando �ndice (O(1) en lugar de O(n))
+                    const recipient = this.getUserCaseInsensitive(recipientUsername);
+
+                    // Preparar el objeto del mensaje para enviar
+                    const messageToSend = {
+                        id: savedMessage?.id, // Incluir ID del mensaje guardado en BD
+                        from: from || 'Usuario Desconocido',
+                        senderRole, // Incluir role del remitente
+                        senderNumeroAgente, // Incluir numeroAgente del remitente
+                        to: recipientUsername,
+                        message,
+                        isGroup: false,
+                        time: time || formatPeruTime(),
+                        sentAt: savedMessage?.sentAt, //  Incluir sentAt para extraer hora correcta en frontend
+                        mediaType,
+                        mediaData,
+                        fileName,
+                        fileSize,
+                        replyToMessageId,
+                        replyToSender,
+                        replyToText,
+                        conversationId: savedMessage?.conversationId, //  Incluir conversationId para chats asignados
+                        //  NUEVO: Campos de videollamada
+                        type: data.type,
+                        videoCallUrl: data.videoCallUrl,
+                        videoRoomID: data.videoRoomID,
+                        metadata: data.metadata,
+                    };
+
+                    //  Enviar mensaje al destinatario
+                    if (recipient && recipient.socket.connected) {
+                        // console.log(
+                        //     `? Enviando mensaje a ${recipientUsername} (socket conectado)`,
+                        // );
+                        // console.log(`?? Datos del mensaje:`, {
+                        //     id: savedMessage?.id,
+                        //     from,
+                        //     to: recipientUsername,
+                        //     message: message?.substring(0, 50),
+                        //     isGroup: false,
+                        // });
+
+                        recipient.socket.emit('message', messageToSend);
+                        // console.log(`? Mensaje emitido exitosamente a ${recipientUsername}`);
+                    } else {
+                        // console.log(
+                        //     `? No se pudo enviar mensaje a ${recipientUsername} (usuario no conectado o no encontrado)`,
+                        // );
+                        if (recipient) {
+                            // console.log(`   Socket conectado: ${recipient.socket.connected}`);
+                        } else {
+                            // console.log(`   Destinatario no encontrado en el Map de usuarios`);
+                        }
+                    }
+
+                    // ?? NUEVO: Enviar mensaje de vuelta al remitente para que vea su propio mensaje
+                    const sender = this.users.get(from);
+                    if (sender && sender.socket.connected) {
+                        // console.log(
+                        //     `? Enviando confirmaci�n de mensaje al remitente: ${from}`,
+                        // );
+                        sender.socket.emit('message', messageToSend);
+                    }
+
+                    //  Emitir evento de monitoreo a todos los ADMIN/JEFEPISO
+                    this.broadcastMonitoringMessage({
+                        id: savedMessage?.id,
+                        from: from || 'Usuario Desconocido',
+                        to: recipientUsername,
+                        message,
+                        isGroup: false,
+                        time: time || formatPeruTime(),
+                        sentAt: savedMessage?.sentAt, //  Incluir sentAt para extraer hora correcta en frontend
+                        mediaType,
+                        mediaData,
+                        fileName,
+                        fileSize,
+                        senderRole,
+                        senderNumeroAgente,
+                        replyToMessageId,
+                        replyToSender,
+                        replyToText,
+                    });
+
+                    // NUEVO: Emitir evento de actualizaci�n de conversaci�n asignada
+                    // Esto permite que ambos participantes reordenen sus listas autom�ticamente
+                    if (data.isAssignedConversation && data.conversationId) {
+                        // console.log(`?? Emitiendo assignedConversationUpdated para conversaci�n ${data.conversationId}`);
+
+                        // Determinar el texto del mensaje para mostrar
+                        let messageText = message;
+                        if (!messageText && mediaType) {
+                            if (mediaType === 'image') messageText = '?? Imagen';
+                            else if (mediaType === 'video') messageText = '?? Video';
+                            else if (mediaType === 'audio') messageText = '?? Audio';
+                            else if (mediaType === 'document') messageText = '?? Documento';
+                            else messageText = '?? Archivo';
+                        } else if (!messageText && fileName) {
+                            messageText = '?? Archivo';
+                        }
+
+                        const conversationUpdateData = {
+                            conversationId: data.conversationId,
+                            lastMessage: messageText,
+                            lastMessageTime: savedMessage?.sentAt || new Date().toISOString(),
+                            lastMessageFrom: from,
+                            lastMessageMediaType: mediaType
+                        };
+
+                        // Emitir a ambos participantes (remitente y destinatario)
+                        const participants = [from, recipientUsername];
+                        participants.forEach(participantName => {
+                            const participantConnection = this.users.get(participantName);
+                            if (participantConnection && participantConnection.socket.connected) {
+                                participantConnection.socket.emit('assignedConversationUpdated', conversationUpdateData);
+                                // console.log(`? Evento assignedConversationUpdated emitido a ${participantName}`);
+                            }
+                        });
+                    }
+
+                }
+            } catch (broadcastError) {
+                console.error('❌ Error en broadcast de mensaje:', broadcastError);
             }
-
-        }
-
-        // 🔥 PERFORMANCE LOGGING - Fin
-        console.timeEnd(msgPerfLabel);
+        }); // Fin de setImmediate
     }
 
     private async saveMessageToDatabase(data: any) {
