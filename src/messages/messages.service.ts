@@ -277,20 +277,12 @@ export class MessagesService {
 
   async findByRoomOrderedById(
     roomCode: string,
-    limit: number = 20,
+    limit: number = 15,
     offset: number = 0,
   ): Promise<{ data: any[]; total: number; hasMore: boolean; page: number; totalPages: number }> {
-    // 🔥 PRIMERO: Obtener el total de mensajes para calcular paginación
-    const total = await this.messageRepository
-      .createQueryBuilder('message')
-      .where('message.roomCode = :roomCode', { roomCode })
-      .andWhere('message.threadId IS NULL')
-      .andWhere('message.isDeleted = :isDeleted', { isDeleted: false })
-      .getCount();
-
-    // 🚀 OPTIMIZADO: Usar QueryBuilder para seleccionar solo campos necesarios
-    // Esto reduce significativamente el tiempo de transferencia de datos
-    const messages = await this.messageRepository
+    // 🚀 OPTIMIZADO: Usar getManyAndCount() para combinar COUNT + SELECT en una operación
+    // Esto reduce de 2 queries a 1, mejorando significativamente el rendimiento
+    const [messages, total] = await this.messageRepository
       .createQueryBuilder('message')
       .select([
         'message.id',
@@ -304,7 +296,7 @@ export class MessagesService {
         'message.groupName',
         'message.roomCode',
         'message.mediaType',
-        'message.mediaData', // Incluir porque el frontend lo necesita para mostrar preview
+        'message.mediaData',
         'message.fileName',
         'message.fileSize',
         'message.sentAt',
@@ -336,7 +328,7 @@ export class MessagesService {
       .orderBy('message.id', 'DESC')
       .take(limit)
       .skip(offset)
-      .getMany();
+      .getManyAndCount();
 
     // 🚀 OPTIMIZACIÓN: Obtener threadCounts en un solo query
     const messageIds = messages.map((m) => m.id);
@@ -406,7 +398,7 @@ export class MessagesService {
   async findByUser(
     from: string,
     to: string,
-    limit: number = 20,
+    limit: number = 15,
     offset: number = 0,
   ): Promise<Message[]> {
     // 🔥 CORREGIDO: Usar búsqueda case-insensitive para nombres de usuarios
@@ -480,7 +472,7 @@ export class MessagesService {
   async findByUserOrderedById(
     from: string,
     to: string,
-    limit: number = 20,
+    limit: number = 15,
     offset: number = 0,
   ): Promise<any[]> {
     // � OPTIMIZADO: Usar QueryBuilder con campos específicos
