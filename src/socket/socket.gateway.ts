@@ -18,6 +18,7 @@ import { MessagesService } from '../messages/messages.service';
 import { TemporaryConversationsService } from '../temporary-conversations/temporary-conversations.service';
 import { PollsService } from '../polls/polls.service';
 import { User } from '../users/entities/user.entity';
+import { RoomFavoritesService } from '../room-favorites/room-favorites.service';
 import { getPeruDate, formatPeruTime } from '../utils/date.utils';
 
 @WebSocketGateway({
@@ -195,6 +196,7 @@ export class SocketGateway
         private messagesService: MessagesService,
         private temporaryConversationsService: TemporaryConversationsService,
         private pollsService: PollsService,
+        private roomFavoritesService: RoomFavoritesService, // 🔥 NUEVO: Inyectar servicio de favoritos
         @InjectRepository(User)
         private userRepository: Repository<User>,
     ) {
@@ -456,7 +458,11 @@ export class SocketGateway
         const { username, userData, assignedConversations } = data;
         this.users.set(username, { socket: client, userData });
 
-        // ?? OPTIMIZACI�N: Actualizar �ndice normalizado para b�squedas r�pidas
+        // 🔥 CLUSTER FIX: Unir socket a sala personal para recibir DMs desde otros nodos
+        await client.join(username); // Para mensajes dirigidos a "username"
+        await client.join(`user:${username}`); // Prefijo estándar por si acaso (opcional)
+
+        // ?? OPTIMIZACIN: Actualizar ndice normalizado para bsquedas rpidas
         this.usernameIndex.set(username.toLowerCase().trim(), username);
 
         // ?? OPTIMIZADO: Guardar o actualizar usuario en la base de datos con numeroAgente y role
@@ -546,6 +552,9 @@ export class SocketGateway
                 }
                 this.roomUsers.get(room.roomCode)!.add(username);
 
+                // 🔥 CLUSTER FIX: Unir socket a la sala Redis para recibir broadcasts
+                await client.join(room.roomCode);
+
                 // 🚀 Cachear la sala para evitar consultas futuras
                 this.roomCache.set(room.roomCode, { room, cachedAt: Date.now() });
             }
@@ -561,7 +570,27 @@ export class SocketGateway
             console.error(` Error al restaurar salas para ${username}:`, error);
         }
 
-        // Enviar confirmaci�n de registro
+        // 🔥 CLUSTER FIX: Restaurar salas FAVORITAS (incluso si no está en members explícitamente)
+        try {
+            const favoriteRoomCodes = await this.roomFavoritesService.getUserFavoriteRoomCodes(username);
+
+            if (favoriteRoomCodes.length > 0) {
+                // console.log(`⭐ Restaurando ${favoriteRoomCodes.length} favoritos para ${username}`);
+                for (const code of favoriteRoomCodes) {
+                    await client.join(code);
+
+                    // Opcional: Agregar a memoria si queremos trackearlo como "roomUser"
+                    if (!this.roomUsers.has(code)) {
+                        this.roomUsers.set(code, new Set());
+                    }
+                    this.roomUsers.get(code)!.add(username);
+                }
+            }
+        } catch (error) {
+            console.error(` Error al restaurar favoritos para ${username}:`, error);
+        }
+
+        // Enviar confirmación de registro
         client.emit('info', {
             message: `Registrado como ${username}`,
         });
@@ -594,6 +623,16 @@ export class SocketGateway
                 const userAssignedConversations: any[] = Array.isArray(userAssignedConversationsResult)
                     ? userAssignedConversationsResult
                     : (userAssignedConversationsResult?.data || []);
+
+                // 🔥 CLUSTER FIX: Unir socket a las salas de conversaciones asignadas
+                // Esto permite recibir eventos 'typing' si el frontend usa el ID de conversación
+                if (userAssignedConversations.length > 0 && client.connected) {
+                    for (const conv of userAssignedConversations) {
+                        if (conv.id) {
+                            await client.join(conv.id.toString());
+                        }
+                    }
+                }
 
                 // Enviar lista solo al usuario que se conectó
                 if (client.connected) {
@@ -763,6 +802,22 @@ export class SocketGateway
         // Actualizar la lista de usuarios para este usuario espec�fico
         const userConnection = this.users.get(data.username);
         if (userConnection && userConnection.socket.connected) {
+            // 🔥 CLUSTER FIX: Unir socket a las nuevas salas de conversaciones asignadas
+            // Esto asegura que el 'typing' funcione para las nuevas asignaciones
+            if (data.assignedConversations && data.assignedConversations.length > 0) {
+                const client = userConnection.socket;
+                data.assignedConversations.forEach(async (conv) => {
+                    if (conv.id) {
+                        try {
+                            await client.join(conv.id.toString());
+                        } catch (e) {
+                            console.error(`Error uniendo a sala asignada ${conv.id}:`, e);
+                        }
+                    }
+                });
+            }
+
+            // Crear lista de usuarios conectados con toda su informacin
             // Crear lista de usuarios conectados con toda su informaci�n
             const connectedUsersMap = new Map<string, any>();
             Array.from(this.users.entries()).forEach(([uname, { userData }]) => {
@@ -1113,33 +1168,24 @@ export class SocketGateway
         this.typingThrottle.set(throttleKey, now);
 
         // ----------------------------------------
-        // Lógica original
+        // Lógica optimizada para Cluster (Redis Adapter)
         // ----------------------------------------
 
         if (data.roomCode) {
-            const roomUsers = this.roomUsers.get(data.roomCode);
-            if (roomUsers) {
-                roomUsers.forEach((member) => {
-                    if (member !== data.from) {
-                        const memberUser = this.users.get(member);
-                        if (memberUser && memberUser.socket.connected) {
-                            memberUser.socket.emit('roomTyping', {
-                                from: data.from,
-                                roomCode: data.roomCode,
-                                isTyping: data.isTyping,
-                            });
-                        }
-                    }
-                });
-            }
+            // Broadcast a la sala de grupo (gestionada por Redis)
+            this.server.to(data.roomCode).emit('roomTyping', {
+                from: data.from,
+                roomCode: data.roomCode,
+                isTyping: data.isTyping,
+            });
+            // console.log(`⌨️ Typing broadcast a sala ${data.roomCode}`);
         } else {
-            const recipientConnection = this.users.get(data.to);
-            if (recipientConnection && recipientConnection.socket.connected) {
-                recipientConnection.socket.emit('userTyping', {
-                    from: data.from,
-                    isTyping: data.isTyping,
-                });
-            }
+            // Broadcast dirigido al usuario (gestionado por Redis)
+            this.server.to(data.to).emit('userTyping', {
+                from: data.from,
+                isTyping: data.isTyping,
+            });
+            // console.log(`⌨️ Typing broadcast a usuario ${data.to}`);
         }
     }
 
@@ -1358,35 +1404,24 @@ export class SocketGateway
                                 metadata: data.metadata,
                             };
 
+                            // 🚀 CLUSTER FIX: Broadcast global a la sala vía Redis
+                            // Delegamos a los clientes la lógica de menciones (o simplificamos)
+                            this.server.to(finalRoomCode).emit('message', {
+                                ...baseGroupMessage,
+                                hasMention: false, // Simplificación para cluster
+                                mentions: mentions // Enviamos lista para que el cliente decida (si se implementa)
+                            });
+
+                            // Log de éxito (asumido por Redis broadcast)
+                            // console.log(`🚀 DEBUG: Mensaje de grupo enviado a sala ${finalRoomCode} (Redis Broadcast)`);
+
+                            // ?? NUEVO: Actualizar ltimo mensaje para todos los usuarios (excepto el remitente)
+                            // Esto asegura que el ltimo mensaje se actualice en tiempo real en la lista de salas
                             roomUsers.forEach((member) => {
-                                const memberUser = this.users.get(member);
-
-                                // ?? NUEVO: Validar que el socket est� conectado
-                                if (
-                                    memberUser &&
-                                    memberUser.socket &&
-                                    memberUser.socket.connected
-                                ) {
-                                    // ?? Verificar si este usuario fue mencionado
-                                    const isMentioned = mentions.some(
-                                        (mention) =>
-                                            member.toUpperCase().includes(mention.toUpperCase()) ||
-                                            mention.toUpperCase().includes(member.toUpperCase()),
-                                    );
-
-                                    // console.log(
-                                    //     `? Enviando mensaje a ${member} en sala ${finalRoomCode}${isMentioned ? ' (MENCIONADO)' : ''} - Socket ID: ${memberUser.socket.id}`,
-                                    // );
-                                    // 🚀 OPTIMIZADO: Solo agregar hasMention dinámicamente
-                                    memberUser.socket.emit('message', {
-                                        ...baseGroupMessage,
-                                        hasMention: isMentioned,
-                                    });
-
-                                    // ?? NUEVO: Actualizar �ltimo mensaje para todos los usuarios (excepto el remitente)
-                                    // Esto asegura que el �ltimo mensaje se actualice en tiempo real en la lista de salas
-                                    if (member !== from) {
-                                        // Verificar si el usuario est� viendo esta sala actualmente
+                                if (member !== from) {
+                                    const memberUser = this.users.get(member);
+                                    if (memberUser && memberUser.socket && memberUser.socket.connected) {
+                                        // Verificar si el usuario est viendo esta sala actualmente
                                         const isViewingThisRoom = memberUser.currentRoom === finalRoomCode;
                                         // console.log(`?? DEBUG - Usuario ${member}: currentRoom="${memberUser.currentRoom}", roomCode="${finalRoomCode}", isViewingThisRoom=${isViewingThisRoom}`);
 
@@ -1398,7 +1433,7 @@ export class SocketGateway
                                         };
 
                                         if (!isViewingThisRoom) {
-                                            // Usuario NO est� viendo esta sala, enviar actualizaci�n con contador
+                                            // Usuario NO est viendo esta sala, enviar actualizacin con contador
                                             this.emitUnreadCountUpdateForUser(
                                                 finalRoomCode,
                                                 member,
@@ -1406,7 +1441,7 @@ export class SocketGateway
                                                 lastMessageData,
                                             );
                                         } else {
-                                            // Usuario S� est� viendo esta sala, solo actualizar �ltimo mensaje sin incrementar contador
+                                            // Usuario S est viendo esta sala, solo actualizar ltimo mensaje sin incrementar contador
                                             this.emitUnreadCountUpdateForUser(
                                                 finalRoomCode,
                                                 member,
@@ -1415,11 +1450,6 @@ export class SocketGateway
                                             );
                                         }
                                     }
-                                } else {
-                                    //  NUEVO: Log cuando no se puede enviar
-                                    // console.warn(
-                                    //     `?? No se puede enviar mensaje a ${member}: socket no conectado o usuario no existe`,
-                                    // );
                                 }
                             });
                         } else {
@@ -1442,33 +1472,63 @@ export class SocketGateway
                                 }
                             }
 
-                            // ?? OPTIMIZADO: Detectar menciones usando m�todo helper con regex precompilado
+                            // ?? OPTIMIZADO: Detectar menciones usando mtodo helper con regex precompilado
                             const mentions = this.detectMentions(message);
                             // console.log(`?? Menciones detectadas en mensaje de grupo:`, mentions);
 
                             const groupMembers = Array.from(group);
-                            groupMembers.forEach((member) => {
-                                const user = this.users.get(member);
-                                if (user && user.socket.connected) {
-                                    //  Verificar si este usuario fue mencionado
+
+                            if (groupRoomCode) {
+                                // 🚀 CLUSTER FIX: Broadcast optimizado si tenemos roomCode
+                                this.server.to(groupRoomCode).emit('message', {
+                                    id: savedMessage?.id,
+                                    from: from || 'Usuario Desconocido',
+                                    senderRole,
+                                    senderNumeroAgente,
+                                    group: to,
+                                    groupName: to,
+                                    roomCode: groupRoomCode,
+                                    message,
+                                    isGroup: true,
+                                    time: time || formatPeruTime(),
+                                    sentAt: savedMessage?.sentAt,
+                                    mediaType,
+                                    mediaData,
+                                    fileName,
+                                    fileSize,
+                                    replyToMessageId,
+                                    replyToSender,
+                                    replyToText,
+                                    hasMention: false, // Simplificado para broadcast
+                                    mentions: mentions, // Para que el cliente procese
+                                    type: data.type, // Campos de videollamada
+                                    videoCallUrl: data.videoCallUrl,
+                                    videoRoomID: data.videoRoomID,
+                                    metadata: data.metadata,
+                                });
+                                // console.log(`🚀 DEBUG: Mensaje enviado a sala ${groupRoomCode} (Redis Broadcast)`);
+                            } else {
+                                // Fallback: Iterar miembros usando comunicación directa (Redis friendly)
+                                groupMembers.forEach((member) => {
                                     const isMentioned = mentions.some(
                                         (mention) =>
                                             member.toUpperCase().includes(mention.toUpperCase()) ||
                                             mention.toUpperCase().includes(member.toUpperCase()),
                                     );
 
-                                    user.socket.emit('message', {
-                                        id: savedMessage?.id, //  Incluir ID del mensaje
+                                    // Usar broadcast dirigido a la sala del usuario (client.join(username))
+                                    this.server.to(member).emit('message', {
+                                        id: savedMessage?.id,
                                         from: from || 'Usuario Desconocido',
-                                        senderRole, //  Incluir role del remitente
-                                        senderNumeroAgente, //  Incluir numeroAgente del remitente
+                                        senderRole,
+                                        senderNumeroAgente,
                                         group: to,
-                                        groupName: to, //  Incluir groupName expl�citamente para el frontend
-                                        roomCode: groupRoomCode, //  CR�TICO: Incluir roomCode para validaci�n en frontend
+                                        groupName: to,
+                                        roomCode: groupRoomCode,
                                         message,
                                         isGroup: true,
                                         time: time || formatPeruTime(),
-                                        sentAt: savedMessage?.sentAt, //  Incluir sentAt para extraer hora correcta en frontend
+                                        sentAt: savedMessage?.sentAt,
                                         mediaType,
                                         mediaData,
                                         fileName,
@@ -1476,15 +1536,14 @@ export class SocketGateway
                                         replyToMessageId,
                                         replyToSender,
                                         replyToText,
-                                        hasMention: isMentioned, //  NUEVO: Indicar si el usuario fue mencionado
-                                        //  NUEVO: Campos de videollamada
+                                        hasMention: isMentioned,
                                         type: data.type,
                                         videoCallUrl: data.videoCallUrl,
                                         videoRoomID: data.videoRoomID,
                                         metadata: data.metadata,
                                     });
-                                }
-                            });
+                                });
+                            }
                         }
                     }
                 } else {
@@ -1531,31 +1590,11 @@ export class SocketGateway
                     };
 
                     //  Enviar mensaje al destinatario
-                    if (recipient && recipient.socket.connected) {
-                        console.log(
-                            `🚀 DEBUG: Enviando mensaje a ${recipientUsername} (socket conectado)`,
-                        );
-                        console.log(`🚀 DEBUG: Datos del mensaje:`, {
-                            id: savedMessage?.id,
-                            from,
-                            to: recipientUsername,
-                            message: message?.substring(0, 50),
-                            isGroup: false,
-                        });
-
-                        recipient.socket.emit('message', messageToSend);
-                        console.log(`🚀 DEBUG: Mensaje emitido exitosamente a ${recipientUsername}`);
-                    } else {
-                        console.log(
-                            `❌ DEBUG: No se pudo enviar mensaje a ${recipientUsername} (usuario no conectado o no encontrado)`,
-                        );
-                        if (recipient) {
-                            console.log(`   Socket conectado: ${recipient.socket.connected}`);
-                        } else {
-                            console.log(`   Destinatario no encontrado en el Map de usuarios`);
-                            console.log(`   Usuarios conectados: ${Array.from(this.users.keys()).join(', ')}`);
-                        }
-                    }
+                    //  Enviar mensaje al destinatario
+                    // 🚀 CLUSTER FIX: Usar Redis Broadcast (server.to) en lugar de socket directo
+                    // Esto permite alcanzar usuarios conectados en OTROS nodos/clusters
+                    this.server.to(recipientUsername).emit('message', messageToSend);
+                    console.log(`🚀 DEBUG: Mensaje enviado a ${recipientUsername} vía Redis Broadcast`);
 
                     // ?? NUEVO: Enviar mensaje de vuelta al remitente para que vea su propio mensaje
                     const sender = this.users.get(from);
@@ -2058,6 +2097,10 @@ export class SocketGateway
             this.roomUsers.set(data.roomCode, new Set());
         }
         this.roomUsers.get(data.roomCode)!.add(data.from);
+
+        // 🔥 CLUSTER FIX: Unir socket a sala Redis para broadcast global
+        await client.join(data.roomCode);
+
         // console.log(`? Usuario ${data.from} agregado a sala en memoria`);
 
         // Actualizar la sala actual del usuario
@@ -2699,16 +2742,12 @@ export class SocketGateway
         //     `?? WS: callUser - De: ${data.from}, Para: ${data.userToCall}, Tipo: ${data.callType}`,
         // );
 
-        const targetUser = this.users.get(data.userToCall);
-        if (targetUser && targetUser.socket.connected) {
-            targetUser.socket.emit('callUser', {
-                signal: data.signalData,
-                from: data.from,
-                callType: data.callType,
-            });
-        } else {
-            client.emit('callFailed', { reason: 'Usuario no disponible' });
-        }
+        // 🚀 CLUSTER FIX: Broadcast directed via Redis
+        this.server.to(data.userToCall).emit('callUser', {
+            signal: data.signalData,
+            from: data.from,
+            callType: data.callType,
+        });
     }
 
     @SubscribeMessage('answerCall')
@@ -2718,12 +2757,9 @@ export class SocketGateway
     ) {
         // console.log(`?? WS: answerCall - Para: ${data.to}`);
 
-        const targetUser = this.users.get(data.to);
-        if (targetUser && targetUser.socket.connected) {
-            targetUser.socket.emit('callAccepted', {
-                signal: data.signal,
-            });
-        }
+        this.server.to(data.to).emit('callAccepted', {
+            signal: data.signal,
+        });
     }
 
     @SubscribeMessage('callRejected')
@@ -2733,12 +2769,9 @@ export class SocketGateway
     ) {
         // console.log(`? WS: callRejected - De: ${data.from}`);
 
-        const targetUser = this.users.get(data.to);
-        if (targetUser && targetUser.socket.connected) {
-            targetUser.socket.emit('callRejected', {
-                from: data.from,
-            });
-        }
+        this.server.to(data.to).emit('callRejected', {
+            from: data.from,
+        });
     }
 
     // ?? NUEVO: Manejar candidatos ICE para trickling
@@ -2749,12 +2782,9 @@ export class SocketGateway
     ) {
         // console.log(`?? WS: iceCandidate - Para: ${data.to}`);
 
-        const targetUser = this.users.get(data.to);
-        if (targetUser && targetUser.socket.connected) {
-            targetUser.socket.emit('iceCandidate', {
-                candidate: data.candidate,
-            });
-        }
+        this.server.to(data.to).emit('iceCandidate', {
+            candidate: data.candidate,
+        });
     }
 
     @SubscribeMessage('callEnded')
@@ -2764,10 +2794,7 @@ export class SocketGateway
     ) {
         // console.log(`?? WS: callEnded - Para: ${data.to}`);
 
-        const targetUser = this.users.get(data.to);
-        if (targetUser && targetUser.socket.connected) {
-            targetUser.socket.emit('callEnded');
-        }
+        this.server.to(data.to).emit('callEnded');
     }
 
     // ==================== VIDEOLLAMADAS (ZEGOCLOUD) ====================
