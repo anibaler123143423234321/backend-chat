@@ -453,6 +453,7 @@ export class TemporaryConversationsService {
         return {
           ...conv,
           unreadCount,
+          lastMessage,
         };
       }),
     );

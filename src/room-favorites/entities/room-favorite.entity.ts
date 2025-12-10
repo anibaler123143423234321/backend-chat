@@ -6,7 +6,10 @@ import {
   UpdateDateColumn,
   Unique,
   Index,
+  ManyToOne,
+  JoinColumn,
 } from 'typeorm';
+import { TemporaryRoom } from '../../temporary-rooms/entities/temporary-room.entity';
 
 // 🚀 ÍNDICES PARA OPTIMIZAR CONSULTAS DE FAVORITOS DE SALAS
 @Entity('room_favorites')
@@ -36,5 +39,11 @@ export class RoomFavorite {
 
   @UpdateDateColumn()
   updatedAt: Date;
+
+  // 🔥 Relación con la sala para obtener datos completos
+  // Nota: createForeignKeyConstraints: false evita el error con datos huérfanos existentes
+  @ManyToOne(() => TemporaryRoom, { eager: false, createForeignKeyConstraints: false })
+  @JoinColumn({ name: 'roomId', referencedColumnName: 'id' })
+  room: TemporaryRoom;
 }
 

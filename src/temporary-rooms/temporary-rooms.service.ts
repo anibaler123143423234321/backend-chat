@@ -123,7 +123,7 @@ export class TemporaryRoomsService {
   }
 
   async findUserRooms(
-    username: string,
+    username: string, // Este es el displayName que envía el frontend
     page: number = 1,
     limit: number = 10,
     search?: string, // 🔥 NUEVO: Parámetro de búsqueda
@@ -134,23 +134,17 @@ export class TemporaryRoomsService {
     totalPages: number;
     hasMore: boolean;
   }> {
-    // Buscar el usuario para obtener su displayName
-    const user = await this.userRepository.findOne({ where: { username } });
-    if (!user) {
-      return {
-        rooms: [],
-        total: 0,
-        page,
-        totalPages: 0,
-        hasMore: false,
-      };
-    }
+    // El frontend envía el displayName (nombre completo) en el parámetro username
+    const displayName = username;
 
-    // Construir el displayName (nombre completo) igual que en el frontend
-    const displayName =
-      user.nombre && user.apellido
-        ? `${user.nombre} ${user.apellido}`
-        : user.username;
+    // 🔥 Obtener roomCodes de favoritos para excluirlos
+    let favoriteRoomCodes: string[] = [];
+    try {
+      favoriteRoomCodes = await this.roomFavoritesService.getUserFavoriteRoomCodes(displayName);
+      console.log(`🔥 [findUserRooms] Favoritos de ${displayName}:`, favoriteRoomCodes, '- Estos serán excluidos');
+    } catch (error) {
+      console.error('Error al obtener favoritos:', error);
+    }
 
     // Obtener todas las salas activas
     const allRooms = await this.temporaryRoomRepository.find({
@@ -164,7 +158,10 @@ export class TemporaryRoomsService {
       return members.includes(displayName);
     });
 
-    // 🔥 NUEVO: Aplicar filtro de búsqueda por nombre o roomCode
+    // 🔥 Excluir grupos que son favoritos - así siempre devuelve 10 NO-favoritos
+    userRooms = userRooms.filter((room) => !favoriteRoomCodes.includes(room.roomCode));
+
+    // 🔥 Aplicar filtro de búsqueda por nombre o roomCode
     if (search && search.trim()) {
       const searchLower = search.toLowerCase().trim();
       userRooms = userRooms.filter((room) =>
@@ -608,7 +605,8 @@ export class TemporaryRoomsService {
         }
         : null;
 
-      // ?? OPTIMIZACI�N: NO devolver arrays pesados de members/connectedMembers
+
+      // 🔥 OPTIMIZACIÓN: NO devolver arrays pesados de members/connectedMembers
       // Solo devolver contadores para reducir payload ~83%
       return {
         id: room.id,
@@ -616,12 +614,15 @@ export class TemporaryRoomsService {
         description: room.description,
         roomCode: room.roomCode,
         currentMembers: room.currentMembers,
+        maxCapacity: room.maxCapacity, // 🔥 Agregado para mostrar capacidad máxima
         isActive: room.isActive,
         isAssignedByAdmin: room.isAssignedByAdmin,
         settings: room.settings,
         pinnedMessageId: room.pinnedMessageId,
         createdAt: room.createdAt,
         updatedAt: room.updatedAt,
+        lastMessage,
+        lastMessageAt: lastMessage?.sentAt,
       };
     }).filter(room => room !== null); // Eliminar nulos del filtrado
 
@@ -633,44 +634,32 @@ export class TemporaryRoomsService {
       (room) => !favoriteRoomCodes.includes(room.roomCode),
     );
 
-    // Funci�n de ordenamiento: CON mensajes primero, SIN mensajes despu�s
+    // Función de ordenamiento unificada: Por fecha más reciente (mensaje o actualización)
     const sortByLastMessage = (rooms) => {
-      const roomsWithMessages = rooms.filter((r) => r.lastMessage?.sentAt);
-      const roomsWithoutMessages = rooms.filter((r) => !r.lastMessage?.sentAt);
-
-      roomsWithMessages.sort((a, b) => {
-        return (
-          new Date(b.lastMessage.sentAt).getTime() -
-          new Date(a.lastMessage.sentAt).getTime()
-        );
+      return rooms.sort((a, b) => {
+        const timeA = new Date(a.lastMessage?.sentAt || a.updatedAt || a.createdAt).getTime();
+        const timeB = new Date(b.lastMessage?.sentAt || b.updatedAt || b.createdAt).getTime();
+        return timeB - timeA;
       });
-
-      roomsWithoutMessages.sort((a, b) => {
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-      });
-
-      return [...roomsWithMessages, ...roomsWithoutMessages];
     };
 
-    // Ordenar cada grupo
-    const sortedFavorites = sortByLastMessage(favoritesWithMessage);
+    // 🔥 MODIFICADO: Solo ordenar los NO-favoritos (favoritos van a su propia API)
     const sortedNonFavorites = sortByLastMessage(nonFavoritesWithMessage);
 
-    // Combinar: favoritas primero, luego no-favoritas
-    const finalSortedRooms = [...sortedFavorites, ...sortedNonFavorites];
-
-    // Aplicar paginaci�n
+    // 🔥 MODIFICADO: Solo paginar los NO-favoritos
     const pageNum = Number(page);
     const limitNum = Number(limit);
     const skip = (pageNum - 1) * limitNum;
-    const paginatedRooms = finalSortedRooms.slice(skip, skip + limitNum);
+    const paginatedRooms = sortedNonFavorites.slice(skip, skip + limitNum);
+
+    // console.log(`🔥 [getAdminRooms] Total grupos: ${allRoomsWithLastMessage.length}, Favoritos: ${favoritesWithMessage.length}, No-favoritos: ${nonFavoritesWithMessage.length}, Devolviendo: ${paginatedRooms.length}`);
 
     return {
-      data: paginatedRooms, // ?? Devolver solo la p�gina solicitada
-      total: allRoomsWithLastMessage.length,
-      page: Number(page),    // ?? Asegurar tipo num�rico
-      limit: Number(limit),  // ?? Asegurar tipo num�rico
-      totalPages: Math.ceil(allRoomsWithLastMessage.length / limit),
+      data: paginatedRooms, // 🔥 Solo NO-favoritos
+      total: nonFavoritesWithMessage.length, // 🔥 Total de NO-favoritos
+      page: Number(page),
+      limit: Number(limit),
+      totalPages: Math.ceil(nonFavoritesWithMessage.length / limit),
     };
   }
 

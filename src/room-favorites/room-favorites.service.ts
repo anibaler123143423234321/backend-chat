@@ -1,14 +1,17 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, IsNull } from 'typeorm';
 import { RoomFavorite } from './entities/room-favorite.entity';
+import { Message } from '../messages/entities/message.entity';
 
 @Injectable()
 export class RoomFavoritesService {
   constructor(
     @InjectRepository(RoomFavorite)
     private roomFavoriteRepository: Repository<RoomFavorite>,
-  ) {}
+    @InjectRepository(Message)
+    private messageRepository: Repository<Message>,
+  ) { }
 
   // Agregar sala a favoritos
   async addFavorite(username: string, roomCode: string, roomId: number): Promise<RoomFavorite> {
@@ -76,6 +79,52 @@ export class RoomFavoritesService {
   async getUserFavoriteRoomCodes(username: string): Promise<string[]> {
     const favorites = await this.getUserFavorites(username);
     return favorites.map(f => f.roomCode);
+  }
+
+  // 🔥 NUEVO: Obtener favoritos con datos completos de la sala (JOIN)
+  async getUserFavoritesWithRoomData(username: string): Promise<any[]> {
+    const favorites = await this.roomFavoriteRepository.find({
+      where: { username },
+      relations: ['room'],
+      order: { createdAt: 'DESC' },
+    });
+
+    // Retornar formato consistente con myActiveRooms, filtrando salas inactivas o eliminadas
+    // Retornar formato consistente con myActiveRooms, filtrando salas inactivas o eliminadas
+    const enrichedFavorites = await Promise.all(
+      favorites
+        .filter(fav => fav.room && fav.room.isActive)
+        .map(async fav => {
+          const code = fav.room?.roomCode || fav.roomCode;
+          const lastMessage = code ? await this.messageRepository.findOne({
+            where: { roomCode: code, isDeleted: false, threadId: IsNull() },
+            order: { sentAt: 'DESC' },
+          }) : null;
+
+          return {
+            id: fav.room.id,
+            name: fav.room.name,
+            roomCode: fav.roomCode,
+            description: fav.room.description,
+            maxCapacity: fav.room.maxCapacity,
+            currentMembers: fav.room.currentMembers,
+            isActive: fav.room.isActive,
+            members: fav.room.members,
+            createdAt: fav.room.createdAt,
+            updatedAt: fav.room.updatedAt,
+            isFavorite: true,
+            favoriteCreatedAt: fav.createdAt,
+            lastMessageTime: lastMessage?.sentAt,
+            lastMessageAt: lastMessage?.sentAt, // Alias extra por si acaso
+            lastMessage: lastMessage ? {
+              id: lastMessage.id,
+              sentAt: lastMessage.sentAt,
+            } : null,
+          };
+        })
+    );
+
+    return enrichedFavorites;
   }
 }
 

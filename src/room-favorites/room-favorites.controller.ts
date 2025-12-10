@@ -3,7 +3,7 @@ import { RoomFavoritesService } from './room-favorites.service';
 
 @Controller('room-favorites')
 export class RoomFavoritesController {
-  constructor(private readonly roomFavoritesService: RoomFavoritesService) {}
+  constructor(private readonly roomFavoritesService: RoomFavoritesService) { }
 
   // Alternar favorito (agregar o quitar)
   @Post('toggle')
@@ -59,6 +59,12 @@ export class RoomFavoritesController {
   async getUserFavoriteRoomCodes(@Param('username') username: string) {
     const roomCodes = await this.roomFavoritesService.getUserFavoriteRoomCodes(username);
     return { roomCodes };
+  }
+
+  // 🔥 NUEVO: Obtener favoritos con datos completos de la sala
+  @Get('full/:username')
+  async getUserFavoritesWithData(@Param('username') username: string) {
+    return await this.roomFavoritesService.getUserFavoritesWithRoomData(username);
   }
 }
 

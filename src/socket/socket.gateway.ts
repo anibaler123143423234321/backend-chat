@@ -823,7 +823,7 @@ export class SocketGateway
         });
     }
 
- @SubscribeMessage('typing')
+    @SubscribeMessage('typing')
     handleTyping(
         @ConnectedSocket() client: Socket,
         @MessageBody()
@@ -2914,7 +2914,14 @@ export class SocketGateway
         try {
             const { messageId, lastReplyFrom, isGroup, roomCode, to, from } = data;
 
-            // ?? Preparar el payload completo con toda la informaci�n necesaria
+            // 🔥 Preparar el payload completo con toda la información necesaria
+            let roomName = '';
+            if (isGroup && roomCode) {
+                // Buscar el nombre de la sala en BD
+                const room = await this.temporaryRoomsService.findByRoomCode(roomCode);
+                roomName = room?.name || '';
+            }
+
             const updatePayload = {
                 messageId,
                 lastReplyFrom,
@@ -2922,6 +2929,7 @@ export class SocketGateway
                 to,
                 isGroup,
                 roomCode,
+                roomName,
             };
 
             if (isGroup && roomCode) {
