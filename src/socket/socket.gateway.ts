@@ -235,10 +235,44 @@ export class SocketGateway
             const { createClient } = await import('redis');
             const { createAdapter } = await import('@socket.io/redis-adapter');
 
+            const redisUrl = `redis://:${process.env.REDIS_PASSWORD || 'Midas*2025'}@${process.env.REDIS_HOST || '198.46.186.2'}:${process.env.REDIS_PORT || 6379}`;
+
             const pubClient = createClient({
-                url: `redis://:${process.env.REDIS_PASSWORD || 'Midas*2025'}@${process.env.REDIS_HOST || '198.46.186.2'}:${process.env.REDIS_PORT || 6379}`
+                url: redisUrl,
+                socket: {
+                    connectTimeout: 10000,       // 10 segundos para conectar
+                    keepAlive: 30000,            // Keep-alive cada 30 segundos
+                    reconnectStrategy: (retries) => {
+                        // Reconectar con backoff exponencial, máximo 30 segundos
+                        const delay = Math.min(retries * 100, 30000);
+                        console.log(`🔄 Redis reconectando intento ${retries}, delay: ${delay}ms`);
+                        return delay;
+                    }
+                }
             });
+
             const subClient = pubClient.duplicate();
+
+            // 🔥 Event handlers para monitorear estado de Redis
+            pubClient.on('error', (err) => {
+                console.error('❌ Redis pubClient error:', err.message);
+            });
+
+            pubClient.on('reconnecting', () => {
+                console.log('🔄 Redis pubClient reconectando...');
+            });
+
+            pubClient.on('ready', () => {
+                console.log('✅ Redis pubClient listo');
+            });
+
+            subClient.on('error', (err) => {
+                console.error('❌ Redis subClient error:', err.message);
+            });
+
+            subClient.on('reconnecting', () => {
+                console.log('🔄 Redis subClient reconectando...');
+            });
 
             // 🔥 Guardar referencia para tracking de usuarios online
             this.redisClient = pubClient;
@@ -274,9 +308,14 @@ export class SocketGateway
         }
     }
 
+    // 🔥 Helper para verificar si Redis está conectado y listo
+    private isRedisReady(): boolean {
+        return this.redisClient && this.redisClient.isReady;
+    }
+
     // 🔥 CLUSTER FIX: Funciones para gestionar usuarios online en Redis
     private async addOnlineUserToRedis(username: string, userData: any): Promise<void> {
-        if (!this.redisClient) return;
+        if (!this.isRedisReady()) return;
         try {
             const userInfo = JSON.stringify({
                 username,
@@ -291,7 +330,7 @@ export class SocketGateway
     }
 
     private async removeOnlineUserFromRedis(username: string): Promise<void> {
-        if (!this.redisClient) return;
+        if (!this.isRedisReady()) return;
         try {
             await this.redisClient.hDel(this.REDIS_ONLINE_USERS_KEY, username);
         } catch (error) {
@@ -300,7 +339,7 @@ export class SocketGateway
     }
 
     private async getOnlineUsersFromRedis(): Promise<any[]> {
-        if (!this.redisClient) return [];
+        if (!this.isRedisReady()) return [];
         try {
             const usersHash = await this.redisClient.hGetAll(this.REDIS_ONLINE_USERS_KEY);
             const users = [];
@@ -325,7 +364,7 @@ export class SocketGateway
         username: string,
         assignedConversations: any[] = []
     ): Promise<void> {
-        if (!this.redisClient) return;
+        if (!this.isRedisReady()) return;
         try {
             const onlineUsers = await this.getOnlineUsersFromRedis();
 
@@ -456,6 +495,22 @@ export class SocketGateway
         console.time(perfLabel);
 
         const { username, userData, assignedConversations } = data;
+
+        // 🔥 FIX: Verificar si el usuario ya tiene una conexión activa
+        // Esto previene sockets huérfanos cuando el usuario se reconecta rápidamente
+        const existingUser = this.users.get(username);
+        if (existingUser && existingUser.socket !== client) {
+            // El usuario ya está conectado con otro socket, desconectar el anterior
+            try {
+                if (existingUser.socket.connected) {
+                    console.log(`⚠️ ${username} ya conectado, desconectando socket anterior`);
+                    existingUser.socket.disconnect(true);
+                }
+            } catch (err) {
+                console.error(`Error desconectando socket anterior de ${username}:`, err.message);
+            }
+        }
+
         this.users.set(username, { socket: client, userData });
 
         // 🔥 CLUSTER FIX: Unir socket a sala personal para recibir DMs desde otros nodos
