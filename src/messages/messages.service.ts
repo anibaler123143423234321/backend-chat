@@ -29,7 +29,9 @@ export class MessagesService {
   async create(createMessageDto: CreateMessageDto): Promise<Message> {
     // Log eliminado para optimización
 
-    // 🔥 NUEVO: Verificar duplicados antes de guardar
+    // 🔥 REMOVIDO: La deduplicación por from+message+time era demasiado agresiva
+    // Causaba que mensajes legítimos con texto igual (ej: "hola") fueran ignorados
+    // La deduplicación debe hacerse a nivel de socket con hash de tiempo más preciso
     const {
       id, // Excluir id del DTO - la BD auto-genera
       conversationId, // 🔥 CRÍTICO: Extraer explícitamente para guardarlo
@@ -42,51 +44,6 @@ export class MessagesService {
       threadId,
       ...restDto
     } = createMessageDto;
-
-    // 🔥 Construir condiciones de búsqueda de duplicados
-    const duplicateConditions: any = {
-      from,
-      message: messageText,
-      time,
-      isDeleted: false,
-    };
-
-    // 🔥 CRÍTICO: Agregar fileName y mediaData para evitar que archivos diferentes se consideren duplicados
-    if (restDto.fileName) {
-      duplicateConditions.fileName = restDto.fileName;
-    }
-    if (restDto.mediaData) {
-      duplicateConditions.mediaData = restDto.mediaData;
-    }
-
-    // 🔥 IMPORTANTE: Agregar threadId a las condiciones de duplicados
-    // Los mensajes de hilo deben considerarse únicos incluso si tienen el mismo texto
-    if (threadId !== undefined && threadId !== null) {
-      duplicateConditions.threadId = threadId;
-    } else {
-      // Solo para mensajes principales (no de hilo)
-      duplicateConditions.threadId = IsNull();
-    }
-
-    // Agregar condiciones específicas según el tipo de mensaje
-    if (isGroup && roomCode) {
-      duplicateConditions.roomCode = roomCode;
-      duplicateConditions.isGroup = true;
-    } else if (!isGroup && to) {
-      duplicateConditions.to = to;
-      duplicateConditions.isGroup = false;
-    }
-
-    // Buscar un mensaje duplicado reciente
-    const recentDuplicate = await this.messageRepository.findOne({
-      where: duplicateConditions,
-      order: { id: 'DESC' },
-    });
-
-    if (recentDuplicate) {
-      // Log eliminado para optimización - duplicado detectado
-      return recentDuplicate;
-    }
 
     // 🔥 CRÍTICO: SIEMPRE generar sentAt en el servidor con zona horaria de Perú
     // NO aceptar sentAt del frontend para evitar problemas de zona horaria y duplicados

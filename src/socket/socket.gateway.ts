@@ -505,7 +505,7 @@ export class SocketGateway
 
         const { username, userData, assignedConversations } = data;
 
-        // 🔥 CLUSTER FIX: Tracking global de sockets via Redis
+        //  CLUSTER FIX: Tracking global de sockets via Redis
         // Antes usábamos this.users (local), ahora verificamos en Redis para detectar
         // conexiones duplicadas en CUALQUIER cluster
         if (this.isRedisReady()) {
@@ -549,7 +549,19 @@ export class SocketGateway
         await client.join(username); // Para mensajes dirigidos a "username"
         await client.join(username.toLowerCase()); //  FIX: Para mensajes dirigidos a "username" normalizado
         await client.join(`user:${username}`); // Prefijo estándar por si acaso (opcional)
-        await client.join(client.id); // 🔥 NUEVO: Unir a sala con su propio socket ID para recibir forceDisconnect
+        await client.join(client.id); //  NUEVO: Unir a sala con su propio socket ID para recibir forceDisconnect
+
+        //  FIX: También unir con displayName (nombre + apellido) para chats asignados
+        // Los mensajes DM se envían al displayName completo, no solo al username
+        if (userData?.nombre && userData?.apellido) {
+            const displayName = `${userData.nombre} ${userData.apellido}`;
+            await client.join(displayName);
+            await client.join(displayName.toLowerCase());
+            await client.join(displayName.toUpperCase()); // Por si acaso frontend envía en mayúsculas
+            console.log(`🚪 Usuario ${username} unido a salas: [${username}], [${displayName}], [${displayName.toLowerCase()}], [${displayName.toUpperCase()}]`);
+        } else {
+            console.log(`⚠️ Usuario ${username} SIN nombre/apellido - salas: [${username}], [${username.toLowerCase()}]`);
+        }
 
         // ?? OPTIMIZACIN: Actualizar ndice normalizado para bsquedas rpidas
         this.usernameIndex.set(username.toLowerCase().trim(), username);
@@ -1481,6 +1493,10 @@ export class SocketGateway
                             const mentions = this.detectMentions(message);
                             // console.log(`?? Menciones detectadas en mensaje:`, mentions);
 
+                            // 🔥 FIX: Obtener nombre de la sala para mostrar en toast del frontend
+                            const cachedRoom = await this.getCachedRoom(finalRoomCode);
+                            const roomName = cachedRoom?.name || to; // Fallback al destinatario si no hay nombre
+
                             // 🚀 OPTIMIZADO: Crear objeto base UNA vez fuera del loop (reduce allocations)
                             const baseGroupMessage = {
                                 id: savedMessage?.id,
@@ -1490,6 +1506,7 @@ export class SocketGateway
                                 group: to,
                                 groupName: to,
                                 roomCode: finalRoomCode,
+                                roomName, // 🔥 NUEVO: Nombre real de la sala para mostrar en toast
                                 message,
                                 isGroup: true,
                                 time: time || formatPeruTime(),
