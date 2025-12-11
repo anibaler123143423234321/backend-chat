@@ -49,7 +49,7 @@ export class TemporaryConversationsController {
     @Query('search') search?: string, // 🔥 NUEVO: Parámetro de búsqueda
   ) {
     const pageNum = Math.max(1, parseInt(page) || 1);
-    const limitNum = Math.max(1, Math.min(10, parseInt(limit) || 10)); // Máximo 10 por página
+    const limitNum = Math.max(1, Math.min(50, parseInt(limit) || 10)); // Máximo 50 por página
     return this.temporaryConversationsService.findAssignedConversations(
       username,
       pageNum,

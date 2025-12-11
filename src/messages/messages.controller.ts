@@ -55,7 +55,7 @@ export class MessagesController {
   }
   async findByRoom(
     @Param('roomCode') roomCode: string,
-    @Query('limit') limit: string = '15',
+    @Query('limit') limit: string = '20',
     @Query('offset') offset: string = '0',
   ) {
     // console.log(`ðŸ“‹ Obteniendo mensajes de la sala: ${roomCode}`);
@@ -69,7 +69,7 @@ export class MessagesController {
   @Get('room/:roomCode/by-id')
   async findByRoomOrderedById(
     @Param('roomCode') roomCode: string,
-    @Query('limit') limit: string = '15',
+    @Query('limit') limit: string = '20',
     @Query('offset') offset: string = '0',
   ) {
     return await this.messagesService.findByRoomOrderedById(
@@ -98,7 +98,7 @@ export class MessagesController {
   async findByUser(
     @Param('from') from: string,
     @Param('to') to: string,
-    @Query('limit') limit: string = '15',
+    @Query('limit') limit: string = '20',
     @Query('offset') offset: string = '0',
   ) {
     // console.log(`ðŸ‘¤ Obteniendo mensajes entre ${from} y ${to}`);
@@ -114,7 +114,7 @@ export class MessagesController {
   async findByUserOrderedById(
     @Param('from') from: string,
     @Param('to') to: string,
-    @Query('limit') limit: string = '15',
+    @Query('limit') limit: string = '20',
     @Query('offset') offset: string = '0',
   ) {
     return await this.messagesService.findByUserOrderedById(
