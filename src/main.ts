@@ -1,6 +1,7 @@
 ﻿import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
+import { RedisIoAdapter } from './socket/redis-io.adapter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -26,6 +27,11 @@ async function bootstrap() {
 
   // Configurar prefijo global para todas las rutas
   app.setGlobalPrefix('api');
+
+  // Configurar Redis Adapter para Socket.IO
+  const redisIoAdapter = new RedisIoAdapter(app);
+  await redisIoAdapter.connectToRedis();
+  app.useWebSocketAdapter(redisIoAdapter);
 
   const port = process.env.PORT || 8747;
   await app.listen(port, '0.0.0.0');

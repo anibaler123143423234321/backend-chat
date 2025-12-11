@@ -28,8 +28,9 @@ import { getPeruDate, formatPeruTime } from '../utils/date.utils';
     transports: ['websocket', 'polling'],
     path: '/socket.io/',
     //  OPTIMIZADO: Configuraciones de optimizaciN para reducir consumo de CPU (200+ usuarios)
-    pingTimeout: 120000, // 🚀 2 minutos (antes: 60s)
-    pingInterval: 60000, // 🚀 1 minuto (antes: 45s) - menos pings = menos CPU
+    // 🚀 Ajustado a estándar (25s/20s) para evitar cortes de Load Balancers
+    pingTimeout: 20000,
+    pingInterval: 25000,
     maxHttpBufferSize: 10 * 1024 * 1024, // 10MB - lmite de tamao de mensaje
     connectTimeout: 45000, // 45 segundos - timeout de conexin inicial
     upgradeTimeout: 10000, // 10 segundos - timeout de upgrade de polling a websocket
@@ -467,18 +468,37 @@ export class SocketGateway
                 //  LOG: Confirmar desconexión
                 console.log(`👤 handleDisconnect: ${displayName} (${username}) se desconectó`);
 
-                // Broadcast ligero: solo notificar cambio de estado offline
-                this.broadcastUserStatusChange(displayName, false, userData, username);
-
-                //  CLUSTER FIX: Remover usuario de Redis para tracking global
-                await this.removeOnlineUserFromRedis(username);
-
-                //  CLUSTER FIX: Limpiar socket ID de Redis
+                // 🛡️ RACE CONDITION FIX: Verificar si este socket sigue siendo el actual en Redis
+                // Si el ID en Redis es DIFERENTE, significa que ya hay una nueva sesión activa.
+                // En ese caso, NO borramos el estado "Online" ni el socket key.
+                let isCurrentSession = true;
                 if (this.isRedisReady()) {
                     try {
-                        await this.redisClient.del(`socket:user:${username}`);
+                        const currentRedisSocketId = await this.redisClient.get(`socket:user:${username}`);
+                        // Si hay un socket registrado y NO es este, entonces es uno más nuevo
+                        if (currentRedisSocketId && currentRedisSocketId !== client.id) {
+                            console.log(`🛡️ handleDisconnect: Socket ${client.id} desconectado, pero ${username} tiene nueva sesión (${currentRedisSocketId}). MANTENIENDO ONLINE.`);
+                            isCurrentSession = false;
+                        }
                     } catch (err) {
-                        console.error(`Error limpiando socket Redis de ${username}:`, err.message);
+                        console.error(`Error verificando sesión Redis para ${username}:`, err);
+                    }
+                }
+
+                if (isCurrentSession) {
+                    // Broadcast ligero: solo notificar cambio de estado offline
+                    this.broadcastUserStatusChange(displayName, false, userData, username);
+
+                    //  CLUSTER FIX: Remover usuario de Redis para tracking global
+                    await this.removeOnlineUserFromRedis(username);
+
+                    //  CLUSTER FIX: Limpiar socket ID de Redis
+                    if (this.isRedisReady()) {
+                        try {
+                            await this.redisClient.del(`socket:user:${username}`);
+                        } catch (err) {
+                            console.error(`Error limpiando socket Redis de ${username}:`, err.message);
+                        }
                     }
                 }
 
@@ -1679,6 +1699,12 @@ export class SocketGateway
                         );
                     }
 
+                    // 🛡️ SECURITY FIX: Validar que exista un destinatario
+                    if (!recipientUsername) {
+                        console.warn(`⚠️ handleMessage: Mensaje ignorado - Sin destinatario (to: ${to})`);
+                        return;
+                    }
+
                     // ?? OPTIMIZADO: Búsqueda case-insensitive rápida usando índice (O(1) en lugar de O(n))
                     const recipient = this.getUserCaseInsensitive(recipientUsername);
                     console.log(`🚀 DEBUG: Destinatario ${recipientUsername} encontrado? ${!!recipient} - Conectado? ${recipient?.socket?.connected}`);
@@ -1710,11 +1736,15 @@ export class SocketGateway
                     };
 
                     //  Enviar mensaje al destinatario
-                    //  Enviar mensaje al destinatario
                     // 🚀 CLUSTER FIX: Usar Redis Broadcast (server.to) en lugar de socket directo
                     // Esto permite alcanzar usuarios conectados en OTROS nodos/clusters
-                    this.server.to(recipientUsername).emit('message', messageToSend);
-                    console.log(`🚀 DEBUG: Mensaje enviado a ${recipientUsername} vía Redis Broadcast`);
+                    try {
+                        this.server.to(recipientUsername).emit('message', messageToSend);
+                        console.log(`🚀 DEBUG: Mensaje enviado a ${recipientUsername} vía Redis Broadcast`);
+                    } catch (emitError) {
+                        console.error(`❌ Error crítico al enviar mensaje a ${recipientUsername}:`, emitError);
+                        // No repulsar el error para evitar desconexión del remitente
+                    }
 
                     // ?? NUEVO: Enviar mensaje de vuelta al remitente para que vea su propio mensaje
                     const sender = this.users.get(from);
