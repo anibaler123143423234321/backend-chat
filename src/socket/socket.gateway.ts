@@ -1618,7 +1618,10 @@ export class SocketGateway
 
                             const groupMembers = Array.from(group);
 
-                            if (groupRoomCode) {
+                            // 🚀 CROSS-CHAT FIX: Desactivar broadcast por roomCode "adivinada".
+                            // Forzamos el envío individual (Fallback) para asegurar que solo los miembros
+                            // REALES del grupo reciban el mensaje, evitando cruces de salas.
+                            if (false && groupRoomCode) {
                                 // 🚀 CLUSTER FIX: Broadcast optimizado si tenemos roomCode
                                 this.server.to(groupRoomCode).emit('message', {
                                     id: savedMessage?.id,
