@@ -473,7 +473,7 @@ export class SocketGateway
                 //  CLUSTER FIX: Remover usuario de Redis para tracking global
                 await this.removeOnlineUserFromRedis(username);
 
-                // 🔥 CLUSTER FIX: Limpiar socket ID de Redis
+                //  CLUSTER FIX: Limpiar socket ID de Redis
                 if (this.isRedisReady()) {
                     try {
                         await this.redisClient.del(`socket:user:${username}`);
@@ -3434,14 +3434,20 @@ export class SocketGateway
             threadId?: number; //  Para reacciones en mensajes de hilo
         },
     ) {
-        // console.log(
-        //     `?? WS: toggleReaction - Mensaje ${data.messageId}, Usuario: ${data.username}, Emoji: ${data.emoji}`,
-        // );
-        // console.log(
-        //     `?? toggleReaction - roomCode: ${data.roomCode}, to: ${data.to}`,
-        // );
+        // 🔥 DEDUPLICACIÓN: Evitar procesamiento múltiple del mismo evento
+        const dedupeKey = `reaction:${data.messageId}:${data.username}:${data.emoji}`;
 
         try {
+            if (this.isRedisReady()) {
+                const exists = await this.redisClient.get(dedupeKey);
+                if (exists) {
+                    // Ya procesado recientemente, ignorar
+                    return;
+                }
+                // Marcar como procesado con TTL de 2 segundos (reacciones son rápidas)
+                await this.redisClient.set(dedupeKey, '1', { EX: 2 });
+            }
+
             const message = await this.messagesService.toggleReaction(
                 data.messageId,
                 data.username,
@@ -3461,16 +3467,12 @@ export class SocketGateway
                 };
 
                 if (data.roomCode) {
-                    //  CLUSTER: Broadcast a sala de grupo via Redis
-                    console.log(`👍 Emitiendo reactionUpdated a sala de grupo: ${data.roomCode}`);
+                    //  CLUSTER: Broadcast a sala de grupo via Redis (sin log)
                     this.server.to(data.roomCode).emit('reactionUpdated', reactionPayload);
                 } else if (data.to) {
                     //  CLUSTER: Broadcast a participantes del chat 1:1 via Redis
                     const toRoom = data.to?.toLowerCase?.();
                     const fromRoom = data.username?.toLowerCase?.();
-
-                    console.log(`👍 Emitiendo reactionUpdated a sala TO: ${toRoom}`);
-                    console.log(`👍 Emitiendo reactionUpdated a sala FROM: ${fromRoom}`);
 
                     if (toRoom) {
                         this.server.to(toRoom).emit('reactionUpdated', reactionPayload);
@@ -3478,15 +3480,11 @@ export class SocketGateway
                     if (fromRoom && fromRoom !== toRoom) {
                         this.server.to(fromRoom).emit('reactionUpdated', reactionPayload);
                     }
-                } else {
-                    console.log(`⚠️ reactionUpdated: No hay roomCode ni to, no se puede notificar`);
                 }
-            } else {
-                console.log(`❌ No se pudo guardar la reacción (mensaje no encontrado)`);
             }
         } catch (error) {
-            console.error('? Error al alternar reacci�n:', error);
-            client.emit('error', { message: 'Error al alternar reacci�n' });
+            console.error('Error al alternar reacción:', error);
+            client.emit('error', { message: 'Error al alternar reacción' });
         }
     }
 
