@@ -175,18 +175,18 @@ export class SocketGateway
     /**
      * 🚀 OPTIMIZACIÓN: Broadcast ligero de cambio de estado de usuario
      * En lugar de enviar toda la lista, solo envía el cambio de estado
-     * 🔥 CLUSTER FIX: Usar server.emit() para broadcast a TODAS las instancias
+     *  CLUSTER FIX: Usar server.emit() para broadcast a TODAS las instancias
      */
     private broadcastUserStatusChange(username: string, isOnline: boolean, userData?: any, originalUsername?: string): void {
         const statusUpdate = {
             username,  // displayName (ej: "Juan Pérez")
-            originalUsername: originalUsername || username,  // 🔥 username original para match
+            originalUsername: originalUsername || username,  //  username original para match
             isOnline,
             nombre: userData?.nombre || null,
             apellido: userData?.apellido || null,
         };
 
-        // 🔥 CLUSTER FIX: Usar server.emit() para broadcast global
+        //  CLUSTER FIX: Usar server.emit() para broadcast global
         // Esto funciona con Redis adapter y también sin él (single instance)
         this.server.emit('userStatusChanged', statusUpdate);
     }
@@ -196,7 +196,7 @@ export class SocketGateway
         private messagesService: MessagesService,
         private temporaryConversationsService: TemporaryConversationsService,
         private pollsService: PollsService,
-        private roomFavoritesService: RoomFavoritesService, // 🔥 NUEVO: Inyectar servicio de favoritos
+        private roomFavoritesService: RoomFavoritesService, //  NUEVO: Inyectar servicio de favoritos
         @InjectRepository(User)
         private userRepository: Repository<User>,
     ) {
@@ -224,13 +224,13 @@ export class SocketGateway
         setInterval(() => this.logSystemStats(), 60 * 60 * 1000);
     }
 
-    // 🔥 NUEVO: Cargar grupos al iniciar el servidor y configurar Redis Adapter
-    // 🔥 Cliente Redis para tracking global de usuarios online
+    //  NUEVO: Cargar grupos al iniciar el servidor y configurar Redis Adapter
+    //  Cliente Redis para tracking global de usuarios online
     private redisClient: any = null;
     private readonly REDIS_ONLINE_USERS_KEY = 'chat:online_users';
 
     async afterInit(server: Server) {
-        // 🔥 CLUSTER FIX: Configurar Redis Adapter para sincronizar entre instancias
+        //  CLUSTER FIX: Configurar Redis Adapter para sincronizar entre instancias
         try {
             const { createClient } = await import('redis');
             const { createAdapter } = await import('@socket.io/redis-adapter');
@@ -253,7 +253,7 @@ export class SocketGateway
 
             const subClient = pubClient.duplicate();
 
-            // 🔥 Event handlers para monitorear estado de Redis
+            //  Event handlers para monitorear estado de Redis
             pubClient.on('error', (err) => {
                 console.error('❌ Redis pubClient error:', err.message);
             });
@@ -274,7 +274,7 @@ export class SocketGateway
                 console.log('🔄 Redis subClient reconectando...');
             });
 
-            // 🔥 Guardar referencia para tracking de usuarios online
+            //  Guardar referencia para tracking de usuarios online
             this.redisClient = pubClient;
 
             await Promise.all([pubClient.connect(), subClient.connect()]);
@@ -308,12 +308,12 @@ export class SocketGateway
         }
     }
 
-    // 🔥 Helper para verificar si Redis está conectado y listo
+    //  Helper para verificar si Redis está conectado y listo
     private isRedisReady(): boolean {
         return this.redisClient && this.redisClient.isReady;
     }
 
-    // 🔥 CLUSTER FIX: Funciones para gestionar usuarios online en Redis
+    //  CLUSTER FIX: Funciones para gestionar usuarios online en Redis
     private async addOnlineUserToRedis(username: string, userData: any): Promise<void> {
         if (!this.isRedisReady()) return;
         try {
@@ -358,7 +358,7 @@ export class SocketGateway
         }
     }
 
-    // 🔥 CLUSTER FIX: Enviar estado online (Filtrado por relevancia)
+    //  CLUSTER FIX: Enviar estado online (Filtrado por relevancia)
     private async sendInitialOnlineStatuses(
         socket: Socket,
         username: string,
@@ -398,7 +398,7 @@ export class SocketGateway
             for (const user of onlineUsers) {
                 const targetUsername = user.username?.toLowerCase().trim();
 
-                // 🔥 FILTRO: Solo enviar si es relevante o si es el mismo usuario (para confirmación)
+                //  FILTRO: Solo enviar si es relevante o si es el mismo usuario (para confirmación)
                 if (relevantUsers.has(targetUsername) || targetUsername === username.toLowerCase().trim()) {
                     socket.emit('userStatusChanged', {
                         username: user.nombre && user.apellido
@@ -464,13 +464,13 @@ export class SocketGateway
                         ? `${userData.nombre} ${userData.apellido}`
                         : username;
 
-                // 🔥 LOG: Confirmar desconexión
+                //  LOG: Confirmar desconexión
                 console.log(`👤 handleDisconnect: ${displayName} (${username}) se desconectó`);
 
                 // Broadcast ligero: solo notificar cambio de estado offline
                 this.broadcastUserStatusChange(displayName, false, userData, username);
 
-                // 🔥 CLUSTER FIX: Remover usuario de Redis para tracking global
+                //  CLUSTER FIX: Remover usuario de Redis para tracking global
                 await this.removeOnlineUserFromRedis(username);
 
                 break;
@@ -490,13 +490,13 @@ export class SocketGateway
         @MessageBody()
         data: { username: string; userData: any; assignedConversations?: any[] },
     ) {
-        // 🔥 PERFORMANCE LOGGING - Diagnosticar picos de CPU
+        //  PERFORMANCE LOGGING - Diagnosticar picos de CPU
         const perfLabel = `⏱️ handleRegister [${data.username}]`;
         console.time(perfLabel);
 
         const { username, userData, assignedConversations } = data;
 
-        // 🔥 FIX: Verificar si el usuario ya tiene una conexión activa
+        //  FIX: Verificar si el usuario ya tiene una conexión activa
         // Esto previene sockets huérfanos cuando el usuario se reconecta rápidamente
         const existingUser = this.users.get(username);
         if (existingUser && existingUser.socket !== client) {
@@ -513,9 +513,9 @@ export class SocketGateway
 
         this.users.set(username, { socket: client, userData });
 
-        // 🔥 CLUSTER FIX: Unir socket a sala personal para recibir DMs desde otros nodos
+        //  CLUSTER FIX: Unir socket a sala personal para recibir DMs desde otros nodos
         await client.join(username); // Para mensajes dirigidos a "username"
-        await client.join(username.toLowerCase()); // 🔥 FIX: Para mensajes dirigidos a "username" normalizado
+        await client.join(username.toLowerCase()); //  FIX: Para mensajes dirigidos a "username" normalizado
         await client.join(`user:${username}`); // Prefijo estándar por si acaso (opcional)
 
         // ?? OPTIMIZACIN: Actualizar ndice normalizado para bsquedas rpidas
@@ -608,7 +608,7 @@ export class SocketGateway
                 }
                 this.roomUsers.get(room.roomCode)!.add(username);
 
-                // 🔥 CLUSTER FIX: Unir socket a la sala Redis para recibir broadcasts
+                //  CLUSTER FIX: Unir socket a la sala Redis para recibir broadcasts
                 await client.join(room.roomCode);
 
                 // 🚀 Cachear la sala para evitar consultas futuras
@@ -626,7 +626,7 @@ export class SocketGateway
             console.error(` Error al restaurar salas para ${username}:`, error);
         }
 
-        // 🔥 CLUSTER FIX: Restaurar salas FAVORITAS (incluso si no está en members explícitamente)
+        //  CLUSTER FIX: Restaurar salas FAVORITAS (incluso si no está en members explícitamente)
         try {
             const favoriteRoomCodes = await this.roomFavoritesService.getUserFavoriteRoomCodes(username);
 
@@ -662,12 +662,12 @@ export class SocketGateway
         // Broadcast ligero: solo notificar cambio de estado online
         this.broadcastUserStatusChange(displayName, true, userData, username);
 
-        // 🔥 CLUSTER FIX: Agregar usuario a Redis para tracking global
+        //  CLUSTER FIX: Agregar usuario a Redis para tracking global
         await this.addOnlineUserToRedis(username, userData);
 
         // MOVIDO: await this.sendInitialOnlineStatuses(client); (Ahora se llama en setImmediate con datos)
 
-        // 🔥 PERFORMANCE LOGGING - Fin (registro base completado)
+        //  PERFORMANCE LOGGING - Fin (registro base completado)
         console.timeEnd(perfLabel);
 
         // 🚀 OPTIMIZADO: Enviar lista de usuarios de forma NO BLOQUEANTE
@@ -680,7 +680,7 @@ export class SocketGateway
                     ? userAssignedConversationsResult
                     : (userAssignedConversationsResult?.data || []);
 
-                // 🔥 CLUSTER FIX: Unir socket a las salas de conversaciones asignadas
+                //  CLUSTER FIX: Unir socket a las salas de conversaciones asignadas
                 // Esto permite recibir eventos 'typing' si el frontend usa el ID de conversación
                 if (userAssignedConversations.length > 0 && client.connected) {
                     for (const conv of userAssignedConversations) {
@@ -694,7 +694,7 @@ export class SocketGateway
                 if (client.connected) {
                     await this.sendUserListToSingleUser(client, userData, userAssignedConversations);
 
-                    // 🔥 NUEVO: Enviar estados online filtrados (Ahora que tenemos las conversaciones)
+                    //  NUEVO: Enviar estados online filtrados (Ahora que tenemos las conversaciones)
                     await this.sendInitialOnlineStatuses(client, username, userAssignedConversations);
                 }
             } catch (error) {
@@ -858,7 +858,7 @@ export class SocketGateway
         // Actualizar la lista de usuarios para este usuario espec�fico
         const userConnection = this.users.get(data.username);
         if (userConnection && userConnection.socket.connected) {
-            // 🔥 CLUSTER FIX: Unir socket a las nuevas salas de conversaciones asignadas
+            //  CLUSTER FIX: Unir socket a las nuevas salas de conversaciones asignadas
             // Esto asegura que el 'typing' funcione para las nuevas asignaciones
             if (data.assignedConversations && data.assignedConversations.length > 0) {
                 const client = userConnection.socket;
@@ -1236,7 +1236,7 @@ export class SocketGateway
             });
             // console.log(`⌨️ Typing broadcast a sala ${data.roomCode}`);
         } else {
-            // 🔥 CLUSTER FIX: Broadcast dirigido al usuario (gestionado por Redis)
+            //  CLUSTER FIX: Broadcast dirigido al usuario (gestionado por Redis)
             // Enviar a variantes normalizadas también para asegurar entrega
             const targetRooms = [data.to, data.to?.toLowerCase?.()].filter(Boolean);
 
@@ -1245,7 +1245,7 @@ export class SocketGateway
             for (const room of targetRooms) {
                 this.server.to(room).emit('userTyping', {
                     from: data.from,
-                    to: data.to,  // 🔥 FIX: Incluir 'to' para que el frontend valide correctamente
+                    to: data.to,  //  FIX: Incluir 'to' para que el frontend valide correctamente
                     isTyping: data.isTyping,
                 });
             }
@@ -1258,7 +1258,7 @@ export class SocketGateway
         @ConnectedSocket() client: Socket,
         @MessageBody() data: any,
     ) {
-        // 🔥 PERFORMANCE LOGGING - Diagnosticar picos de CPU
+        //  PERFORMANCE LOGGING - Diagnosticar picos de CPU
         const msgPerfLabel = `⏱️ handleMessage [${data.isGroup ? 'GROUP' : 'DM'}:${data.from}]`;
         console.time(msgPerfLabel);
 
@@ -1269,7 +1269,7 @@ export class SocketGateway
             return; // Ignorar el mensaje duplicado
         }
 
-        // 🔥 FIX: Ignorar mensajes de hilo - se manejan en handleThreadMessage
+        //  FIX: Ignorar mensajes de hilo - se manejan en handleThreadMessage
         if (data.threadId) {
             console.log(`⚠️ handleMessage: Ignorando mensaje con threadId=${data.threadId} (debe usar handleThreadMessage)`);
             console.timeEnd(msgPerfLabel);
@@ -1395,7 +1395,7 @@ export class SocketGateway
             }
         }
 
-        // 🔥 PERFORMANCE LOGGING - Fin de parte crítica (guardado en BD)
+        //  PERFORMANCE LOGGING - Fin de parte crítica (guardado en BD)
         console.timeEnd(msgPerfLabel);
 
         // 🚀 OPTIMIZADO: Broadcast NO BLOQUEANTE
@@ -2168,7 +2168,7 @@ export class SocketGateway
         }
         this.roomUsers.get(data.roomCode)!.add(data.from);
 
-        // 🔥 CLUSTER FIX: Unir socket a sala Redis para broadcast global
+        //  CLUSTER FIX: Unir socket a sala Redis para broadcast global
         await client.join(data.roomCode);
 
         // console.log(`? Usuario ${data.from} agregado a sala en memoria`);
@@ -2614,7 +2614,7 @@ export class SocketGateway
                                 await this.temporaryConversationsService.findAll(
                                     userData?.username,
                                 );
-                            // 🔥 FIX: findAll devuelve { data, total, page, totalPages }, extraer .data
+                            //  FIX: findAll devuelve { data, total, page, totalPages }, extraer .data
                             userConversations = Array.isArray(userConversationsResult)
                                 ? userConversationsResult
                                 : (userConversationsResult?.data || []);
@@ -3098,7 +3098,7 @@ export class SocketGateway
             );
 
             if (message) {
-                // 🔥 CLUSTER FIX: Usar server.to() en lugar de socket.emit()
+                //  CLUSTER FIX: Usar server.to() en lugar de socket.emit()
                 const senderRoom = data.from?.toLowerCase?.();
                 const readerRoom = data.username?.toLowerCase?.();
 
@@ -3197,31 +3197,40 @@ export class SocketGateway
         @MessageBody()
         data: { messageId: number; username: string; roomCode: string },
     ) {
-        // console.log(
-        //     `? WS: markRoomMessageAsRead - Mensaje ${data.messageId} en sala ${data.roomCode} le�do por ${data.username}`,
-        // );
+        // 🔥 DEDUPLICACIÓN: Bloquear eventos duplicados del frontend viejo (cacheado)
+        const dedupeKey = `markRead:${data.messageId}:${data.username}`;
 
         try {
-            // Marcar el mensaje como le�do en la base de datos
+            // Verificar si ya fue procesado recientemente
+            if (this.isRedisReady()) {
+                const exists = await this.redisClient.get(dedupeKey);
+                if (exists) {
+                    // Ya procesado, ignorar silenciosamente
+                    return;
+                }
+                // Marcar como procesado con TTL de 5 segundos
+                await this.redisClient.set(dedupeKey, '1', { EX: 5 });
+            }
+
+            // Marcar el mensaje como leído en la base de datos
             const message = await this.messagesService.markAsRead(
                 data.messageId,
                 data.username,
             );
 
             if (message) {
-                // 🔥 CLUSTER FIX: Usar server.to() en lugar de socket.emit()
-                console.log(`👁️ Emitiendo roomMessageRead a sala: ${data.roomCode}`);
+                // Broadcast a la sala - SIN log para evitar spam
                 this.server.to(data.roomCode).emit('roomMessageRead', {
                     messageId: data.messageId,
-                    readBy: message.readBy, // Enviar el array completo de lectores
+                    readBy: message.readBy,
                     readAt: message.readAt,
                     roomCode: data.roomCode,
                 });
             }
         } catch (error) {
-            console.error('Error al marcar mensaje de sala como le�do:', error);
+            console.error('Error al marcar mensaje de sala como leído:', error);
             client.emit('error', {
-                message: 'Error al marcar mensaje de sala como le�do',
+                message: 'Error al marcar mensaje de sala como leído',
             });
         }
     }
@@ -3279,7 +3288,7 @@ export class SocketGateway
             // El mensaje ya debe estar guardado en BD por el frontend antes de emitir este evento
             // Solo necesitamos reenviar el mensaje a todos los usuarios relevantes
 
-            // 🔥 DEBUG: Logging para diagnosticar problemas de entrega en cluster
+            //  DEBUG: Logging para diagnosticar problemas de entrega en cluster
             console.log('🧵 handleThreadMessage recibido:', {
                 from: data.from,
                 to: data.to,
@@ -3290,12 +3299,12 @@ export class SocketGateway
 
             // Determinar destinatarios basados en si es grupo o no
             if (data.isGroup && data.roomCode) {
-                // 🔥 CLUSTER FIX: Broadcast a sala Redis de grupo
+                //  CLUSTER FIX: Broadcast a sala Redis de grupo
                 console.log(`🧵 Emitiendo threadMessage a sala de grupo: ${data.roomCode}`);
                 this.server.to(data.roomCode).emit('threadMessage', data);
             } else {
-                // 🔥 CLUSTER FIX: Enviar a ambos participantes mediante Redis
-                // 🔥 FIX: Solo enviar a la versión LOWERCASE para evitar eventos duplicados
+                //  CLUSTER FIX: Enviar a ambos participantes mediante Redis
+                //  FIX: Solo enviar a la versión LOWERCASE para evitar eventos duplicados
                 const fromRoom = data.from?.toLowerCase?.();
                 const toRoom = data.to?.toLowerCase?.();
 
@@ -3330,7 +3339,7 @@ export class SocketGateway
         try {
             const { messageId, lastReplyFrom, isGroup, roomCode, to, from } = data;
 
-            // 🔥 Preparar el payload completo con toda la información necesaria
+            //  Preparar el payload completo con toda la información necesaria
             let roomName = '';
             if (isGroup && roomCode) {
                 // Buscar el nombre de la sala en BD
@@ -3349,12 +3358,12 @@ export class SocketGateway
             };
 
             if (isGroup && roomCode) {
-                // 🔥 CLUSTER FIX: Broadcast a sala Redis de grupo
+                //  CLUSTER FIX: Broadcast a sala Redis de grupo
                 console.log(`🔢 Emitiendo threadCountUpdated a sala de grupo: ${roomCode}`);
                 this.server.to(roomCode).emit('threadCountUpdated', updatePayload);
             } else {
-                // 🔥 CLUSTER FIX: Broadcast directed via Redis for 1:1
-                // 🔥 FIX: Solo enviar a la versión LOWERCASE para evitar eventos duplicados
+                //  CLUSTER FIX: Broadcast directed via Redis for 1:1
+                //  FIX: Solo enviar a la versión LOWERCASE para evitar eventos duplicados
                 // (Los usuarios están unidos a ambas versiones de su nombre, pero solo necesitamos emitir a una)
                 const toRoom = to?.toLowerCase?.();
                 const fromRoom = from?.toLowerCase?.();
@@ -3389,7 +3398,7 @@ export class SocketGateway
             emoji: string;
             roomCode?: string;
             to?: string;
-            threadId?: number; // 🔥 Para reacciones en mensajes de hilo
+            threadId?: number; //  Para reacciones en mensajes de hilo
         },
     ) {
         // console.log(
@@ -3407,7 +3416,7 @@ export class SocketGateway
             );
 
             if (message) {
-                // 🔥 CLUSTER FIX: Usar server.to().emit() en lugar de socket.emit()
+                //  CLUSTER FIX: Usar server.to().emit() en lugar de socket.emit()
 
                 // Preparar payload
                 const reactionPayload = {
@@ -3415,15 +3424,15 @@ export class SocketGateway
                     reactions: message.reactions,
                     roomCode: data.roomCode || null,
                     to: data.to || null,
-                    threadId: data.threadId || null, // 🔥 Para saber si es reacción en hilo
+                    threadId: data.threadId || null, //  Para saber si es reacción en hilo
                 };
 
                 if (data.roomCode) {
-                    // 🔥 CLUSTER: Broadcast a sala de grupo via Redis
+                    //  CLUSTER: Broadcast a sala de grupo via Redis
                     console.log(`👍 Emitiendo reactionUpdated a sala de grupo: ${data.roomCode}`);
                     this.server.to(data.roomCode).emit('reactionUpdated', reactionPayload);
                 } else if (data.to) {
-                    // 🔥 CLUSTER: Broadcast a participantes del chat 1:1 via Redis
+                    //  CLUSTER: Broadcast a participantes del chat 1:1 via Redis
                     const toRoom = data.to?.toLowerCase?.();
                     const fromRoom = data.username?.toLowerCase?.();
 
