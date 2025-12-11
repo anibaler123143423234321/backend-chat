@@ -28,9 +28,9 @@ import { getPeruDate, formatPeruTime } from '../utils/date.utils';
     transports: ['websocket', 'polling'],
     path: '/socket.io/',
     //  OPTIMIZADO: Configuraciones de optimizaciN para reducir consumo de CPU (200+ usuarios)
-    // 🚀 Ajustado a estándar (25s/20s) para evitar cortes de Load Balancers
-    pingTimeout: 20000,
-    pingInterval: 25000,
+    // 🚀 Ajustado a ULTRA-AGRESIVO (5s/10s) a pedido del usuario (Estilo Gaming)
+    pingTimeout: 10000,
+    pingInterval: 5000,
     maxHttpBufferSize: 10 * 1024 * 1024, // 10MB - lmite de tamao de mensaje
     connectTimeout: 45000, // 45 segundos - timeout de conexin inicial
     upgradeTimeout: 10000, // 10 segundos - timeout de upgrade de polling a websocket
@@ -189,6 +189,7 @@ export class SocketGateway
 
         //  CLUSTER FIX: Usar server.emit() para broadcast global
         // Esto funciona con Redis adapter y también sin él (single instance)
+        // console.log(`📢 ESTADO: Broadcasting ${originalUsername} isOnline=${isOnline} a todo el cluster`);
         this.server.emit('userStatusChanged', statusUpdate);
     }
 
@@ -533,18 +534,20 @@ export class SocketGateway
                 const redisKey = `socket:user:${username}`;
                 const existingSocketId = await this.redisClient.get(redisKey);
 
+                // 🛡️ RACE CONDITION FIX: Actualizar Redis ANTES de desconectar el socket anterior
+                // Esto asegura que cuando 'handleDisconnect' se ejecute en el socket viejo,
+                // vea que ya hay un nuevo ID registrado y NO marque al usuario como offline.
+                await this.redisClient.set(redisKey, client.id, { EX: 86400 });
+
                 if (existingSocketId && existingSocketId !== client.id) {
                     // El usuario ya tiene un socket activo en algún cluster
                     // Emitir evento global para desconectarlo (via Redis adapter)
-                    console.log(`⚠️ ${username} ya conectado en otro cluster (socket: ${existingSocketId}), forzando desconexión`);
+                    console.log(`⚠️ ${username} ya conectado en otro cluster (socket: ${existingSocketId}), forzando desconexión (Nuevo: ${client.id})`);
                     this.server.to(existingSocketId).emit('forceDisconnect', {
                         reason: 'Nueva conexión detectada',
                         newSocketId: client.id
                     });
                 }
-
-                // Guardar nuevo socket ID en Redis con TTL de 24 horas
-                await this.redisClient.set(redisKey, client.id, { EX: 86400 });
             } catch (err) {
                 console.error(`Error en tracking Redis de ${username}:`, err.message);
             }
