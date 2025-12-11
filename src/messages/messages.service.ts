@@ -246,10 +246,10 @@ export class MessagesService {
         threadCountMap[row.threadId] = parseInt(row.count, 10);
       });
 
-      // Query 2: Obtener último mensaje de cada hilo
+      // Query 2: Obtener último mensaje de cada hilo (incluir texto para preview)
       const lastReplies = await this.messageRepository
         .createQueryBuilder('message')
-        .select(['message.threadId', 'message.from', 'message.sentAt'])
+        .select(['message.threadId', 'message.from', 'message.message', 'message.sentAt'])
         .where('message.threadId IN (:...messageIds)', { messageIds })
         .andWhere('message.isDeleted = false')
         .orderBy('message.sentAt', 'DESC')
@@ -257,19 +257,29 @@ export class MessagesService {
 
       // Agrupar por threadId (solo el primero de cada grupo es el más reciente)
       const seenThreadIds = new Set<number>();
+      const lastReplyTextMap: Record<number, string> = {}; // 🔥 NUEVO: Mapa para texto del último mensaje
       lastReplies.forEach((reply) => {
         if (!seenThreadIds.has(reply.threadId)) {
           lastReplyMap[reply.threadId] = reply.from;
+          lastReplyTextMap[reply.threadId] = reply.message || ''; // 🔥 Guardar texto
           seenThreadIds.add(reply.threadId);
         }
       });
+
+      // Asignar valores a cada mensaje
+      for (const message of messages) {
+        message.threadCount = threadCountMap[message.id] || 0;
+        message.lastReplyFrom = lastReplyMap[message.id] || null;
+        (message as any).lastReplyText = lastReplyTextMap[message.id] || null; // 🔥 NUEVO: Texto del último mensaje
+        (message as any).displayDate = formatDisplayDate(message.sentAt);
+      }
     }
 
-    // Asignar valores a cada mensaje
+    // Si no hay mensajes con hilos, igual asignar displayDate
     for (const message of messages) {
-      message.threadCount = threadCountMap[message.id] || 0;
-      message.lastReplyFrom = lastReplyMap[message.id] || null;
-      (message as any).displayDate = formatDisplayDate(message.sentAt);
+      if (!(message as any).displayDate) {
+        (message as any).displayDate = formatDisplayDate(message.sentAt);
+      }
     }
 
     return messages;
@@ -350,10 +360,10 @@ export class MessagesService {
         threadCountMap[tc.threadId] = parseInt(tc.count);
       });
 
-      // Obtener último mensaje de cada hilo (solo campos necesarios)
+      // Obtener último mensaje de cada hilo (incluir texto para preview)
       const lastReplies = await this.messageRepository
         .createQueryBuilder('message')
-        .select(['message.threadId', 'message.from'])
+        .select(['message.threadId', 'message.from', 'message.message'])
         .where('message.threadId IN (:...messageIds)', { messageIds })
         .andWhere('message.isDeleted = false')
         .orderBy('message.id', 'DESC')
@@ -361,13 +371,21 @@ export class MessagesService {
 
       // Agrupar por threadId y tomar el primero (más reciente)
       const seenThreadIds = new Set<number>();
+      const lastReplyTextMap: Record<number, string> = {}; // 🔥 NUEVO
       lastReplies.forEach((reply) => {
         if (!seenThreadIds.has(reply.threadId)) {
           lastReplyMap[reply.threadId] = reply.from;
+          lastReplyTextMap[reply.threadId] = reply.message || ''; // 🔥 Guardar texto
           seenThreadIds.add(reply.threadId);
         }
       });
+
+      // 🔥 Guardar mapa de texto para uso posterior
+      (this as any)._lastReplyTextMap = lastReplyTextMap;
     }
+
+    // 🔥 Obtener el mapa de texto (puede estar vacío)
+    const lastReplyTextMap: Record<number, string> = (this as any)._lastReplyTextMap || {};
 
     // 🔥 Invertir el orden para que se muestren cronológicamente (más antiguos primero)
     const reversedMessages = messages.reverse();
@@ -383,6 +401,7 @@ export class MessagesService {
       numberInList: index + 1 + offset,
       threadCount: threadCountMap[msg.id] || 0,
       lastReplyFrom: lastReplyMap[msg.id] || null,
+      lastReplyText: lastReplyTextMap[msg.id] || null, // 🔥 NUEVO: Texto del último mensaje
       displayDate: formatDisplayDate(msg.sentAt),
     }));
 
@@ -545,10 +564,10 @@ export class MessagesService {
         threadCountMap[tc.threadId] = parseInt(tc.count);
       });
 
-      // Obtener último mensaje de cada hilo (solo campos necesarios, usar ID para orden)
+      // Obtener último mensaje de cada hilo (incluir texto para preview)
       const lastReplies = await this.messageRepository
         .createQueryBuilder('message')
-        .select(['message.threadId', 'message.from'])
+        .select(['message.threadId', 'message.from', 'message.message'])
         .where('message.threadId IN (:...messageIds)', { messageIds })
         .andWhere('message.isDeleted = false')
         .orderBy('message.id', 'DESC')
@@ -556,13 +575,21 @@ export class MessagesService {
 
       // Agrupar por threadId y tomar el primero (más reciente)
       const seenThreadIds = new Set<number>();
+      const lastReplyTextMap: Record<number, string> = {}; // 🔥 NUEVO
       lastReplies.forEach((reply) => {
         if (!seenThreadIds.has(reply.threadId)) {
           lastReplyMap[reply.threadId] = reply.from;
+          lastReplyTextMap[reply.threadId] = reply.message || ''; // 🔥 Guardar texto
           seenThreadIds.add(reply.threadId);
         }
       });
+
+      // 🔥 Guardar mapa de texto para uso posterior
+      (this as any)._lastReplyTextMapUser = lastReplyTextMap;
     }
+
+    // 🔥 Obtener el mapa de texto (puede estar vacío)
+    const lastReplyTextMap: Record<number, string> = (this as any)._lastReplyTextMapUser || {};
 
     // 🔥 Invertir el orden para que se muestren cronológicamente (más antiguos primero)
     const reversedMessages = messages.reverse();
@@ -573,6 +600,7 @@ export class MessagesService {
       numberInList: index + 1 + offset,
       threadCount: threadCountMap[msg.id] || 0,
       lastReplyFrom: lastReplyMap[msg.id] || null,
+      lastReplyText: lastReplyTextMap[msg.id] || null, // 🔥 NUEVO: Texto del último mensaje
       displayDate: formatDisplayDate(msg.sentAt),
     }));
   }

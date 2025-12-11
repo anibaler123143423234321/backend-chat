@@ -6,6 +6,7 @@ import { MessagesModule } from '../messages/messages.module';
 import { TemporaryConversationsModule } from '../temporary-conversations/temporary-conversations.module';
 import { User } from '../users/entities/user.entity';
 import { PollsModule } from '../polls/polls.module';
+import { RoomFavoritesModule } from '../room-favorites/room-favorites.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { PollsModule } from '../polls/polls.module';
     forwardRef(() => MessagesModule),
     TemporaryConversationsModule,
     PollsModule,
+    RoomFavoritesModule,
   ],
   providers: [SocketGateway],
   exports: [SocketGateway],

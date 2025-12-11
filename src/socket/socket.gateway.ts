@@ -460,6 +460,7 @@ export class SocketGateway
 
         // 🔥 CLUSTER FIX: Unir socket a sala personal para recibir DMs desde otros nodos
         await client.join(username); // Para mensajes dirigidos a "username"
+        await client.join(username.toLowerCase()); // 🔥 FIX: Para mensajes dirigidos a "username" normalizado
         await client.join(`user:${username}`); // Prefijo estándar por si acaso (opcional)
 
         // ?? OPTIMIZACIN: Actualizar ndice normalizado para bsquedas rpidas
@@ -1180,12 +1181,19 @@ export class SocketGateway
             });
             // console.log(`⌨️ Typing broadcast a sala ${data.roomCode}`);
         } else {
-            // Broadcast dirigido al usuario (gestionado por Redis)
-            this.server.to(data.to).emit('userTyping', {
-                from: data.from,
-                isTyping: data.isTyping,
-            });
-            // console.log(`⌨️ Typing broadcast a usuario ${data.to}`);
+            // 🔥 CLUSTER FIX: Broadcast dirigido al usuario (gestionado por Redis)
+            // Enviar a variantes normalizadas también para asegurar entrega
+            const targetRooms = [data.to, data.to?.toLowerCase?.()].filter(Boolean);
+
+            console.log(`⌨️ Typing broadcast a salas: ${JSON.stringify(targetRooms)}, from: ${data.from}, isTyping: ${data.isTyping}`);
+
+            for (const room of targetRooms) {
+                this.server.to(room).emit('userTyping', {
+                    from: data.from,
+                    to: data.to,  // 🔥 FIX: Incluir 'to' para que el frontend valide correctamente
+                    isTyping: data.isTyping,
+                });
+            }
         }
     }
 
@@ -1204,6 +1212,13 @@ export class SocketGateway
         if (!data.id && this.isDuplicateMessage(data)) {
             console.timeEnd(msgPerfLabel);
             return; // Ignorar el mensaje duplicado
+        }
+
+        // 🔥 FIX: Ignorar mensajes de hilo - se manejan en handleThreadMessage
+        if (data.threadId) {
+            console.log(`⚠️ handleMessage: Ignorando mensaje con threadId=${data.threadId} (debe usar handleThreadMessage)`);
+            console.timeEnd(msgPerfLabel);
+            return;
         }
 
         // Log removido para optimización - datos del mensaje
@@ -3028,21 +3043,29 @@ export class SocketGateway
             );
 
             if (message) {
-                // Notificar al remitente que su mensaje fue le�do
-                const senderUser = this.users.get(data.from);
-                if (senderUser && senderUser.socket.connected) {
-                    senderUser.socket.emit('messageRead', {
+                // 🔥 CLUSTER FIX: Usar server.to() en lugar de socket.emit()
+                const senderRoom = data.from?.toLowerCase?.();
+                const readerRoom = data.username?.toLowerCase?.();
+
+                const readPayload = {
+                    messageId: data.messageId,
+                    readBy: data.username,
+                    readAt: message.readAt,
+                };
+
+                // Notificar al remitente que su mensaje fue leído
+                if (senderRoom) {
+                    console.log(`👁️ Emitiendo messageRead a sala: ${senderRoom}`);
+                    this.server.to(senderRoom).emit('messageRead', readPayload);
+                }
+
+                // Confirmar al lector también
+                if (readerRoom && readerRoom !== senderRoom) {
+                    this.server.to(readerRoom).emit('messageReadConfirmed', {
                         messageId: data.messageId,
-                        readBy: data.username,
                         readAt: message.readAt,
                     });
                 }
-
-                // Confirmar al lector
-                client.emit('messageReadConfirmed', {
-                    messageId: data.messageId,
-                    readAt: message.readAt,
-                });
             }
         } catch (error) {
             console.error('Error al marcar mensaje como le�do:', error);
@@ -3131,21 +3154,14 @@ export class SocketGateway
             );
 
             if (message) {
-                // Notificar a todos los usuarios de la sala que el mensaje fue le�do
-                const roomUsers = this.roomUsers.get(data.roomCode);
-                if (roomUsers) {
-                    roomUsers.forEach((member) => {
-                        const memberUser = this.users.get(member);
-                        if (memberUser && memberUser.socket.connected) {
-                            memberUser.socket.emit('roomMessageRead', {
-                                messageId: data.messageId,
-                                readBy: message.readBy, // Enviar el array completo de lectores
-                                readAt: message.readAt,
-                                roomCode: data.roomCode,
-                            });
-                        }
-                    });
-                }
+                // 🔥 CLUSTER FIX: Usar server.to() en lugar de socket.emit()
+                console.log(`👁️ Emitiendo roomMessageRead a sala: ${data.roomCode}`);
+                this.server.to(data.roomCode).emit('roomMessageRead', {
+                    messageId: data.messageId,
+                    readBy: message.readBy, // Enviar el array completo de lectores
+                    readAt: message.readAt,
+                    roomCode: data.roomCode,
+                });
             }
         } catch (error) {
             console.error('Error al marcar mensaje de sala como le�do:', error);
@@ -3208,37 +3224,39 @@ export class SocketGateway
             // El mensaje ya debe estar guardado en BD por el frontend antes de emitir este evento
             // Solo necesitamos reenviar el mensaje a todos los usuarios relevantes
 
+            // 🔥 DEBUG: Logging para diagnosticar problemas de entrega en cluster
+            console.log('🧵 handleThreadMessage recibido:', {
+                from: data.from,
+                to: data.to,
+                isGroup: data.isGroup,
+                roomCode: data.roomCode,
+                threadId: data.threadId,
+            });
+
             // Determinar destinatarios basados en si es grupo o no
             if (data.isGroup && data.roomCode) {
-                // Mensaje de hilo en grupo: enviar a todos los miembros de la sala
-                const roomUsers = this.roomUsers.get(data.roomCode);
-
-                if (roomUsers && roomUsers.size > 0) {
-                    // console.log(
-                    //     `?? Enviando threadMessage a ${roomUsers.size} usuarios en sala ${data.roomCode}`,
-                    // );
-
-                    roomUsers.forEach((member) => {
-                        const user = this.users.get(member);
-                        if (user && user.socket.connected) {
-                            user.socket.emit('threadMessage', data);
-                        }
-                    });
-                }
+                // 🔥 CLUSTER FIX: Broadcast a sala Redis de grupo
+                console.log(`🧵 Emitiendo threadMessage a sala de grupo: ${data.roomCode}`);
+                this.server.to(data.roomCode).emit('threadMessage', data);
             } else {
-                // Mensaje de hilo individual: enviar al remitente y destinatario
-                const sender = this.users.get(data.from);
-                const recipient = this.users.get(data.to);
+                // 🔥 CLUSTER FIX: Enviar a ambos participantes mediante Redis
+                // 🔥 FIX: Solo enviar a la versión LOWERCASE para evitar eventos duplicados
+                const fromRoom = data.from?.toLowerCase?.();
+                const toRoom = data.to?.toLowerCase?.();
 
-                if (sender && sender.socket.connected) {
-                    sender.socket.emit('threadMessage', data);
+                console.log(`🧵 Emitiendo threadMessage a sala FROM: ${fromRoom}`);
+                console.log(`🧵 Emitiendo threadMessage a sala TO: ${toRoom}`);
+
+                // Emitir al remitente
+                if (fromRoom) {
+                    this.server.to(fromRoom).emit('threadMessage', data);
                 }
 
-                if (recipient && recipient.socket.connected) {
-                    recipient.socket.emit('threadMessage', data);
+                // Emitir al destinatario (si es diferente)
+                if (toRoom && toRoom !== fromRoom) {
+                    this.server.to(toRoom).emit('threadMessage', data);
                 }
             }
-
             // console.log('? threadMessage reenviado exitosamente');
         } catch (error) {
             console.error('? Error al manejar threadMessage:', error);
@@ -3276,64 +3294,25 @@ export class SocketGateway
             };
 
             if (isGroup && roomCode) {
-                // Actualizaci�n en grupo/sala - enviar a todos los miembros de la sala
-                const roomUsers = this.roomUsers.get(roomCode);
-                if (roomUsers) {
-                    roomUsers.forEach((member) => {
-                        const memberUser = this.users.get(member);
-                        if (memberUser && memberUser.socket.connected) {
-                            memberUser.socket.emit('threadCountUpdated', updatePayload);
-                        }
-                    });
-                }
+                // 🔥 CLUSTER FIX: Broadcast a sala Redis de grupo
+                console.log(`🔢 Emitiendo threadCountUpdated a sala de grupo: ${roomCode}`);
+                this.server.to(roomCode).emit('threadCountUpdated', updatePayload);
             } else {
-                // Actualizaci�n en conversaci�n 1-a-1
-                // ?? B�squeda case-insensitive del destinatario
-                let recipientUser = this.users.get(to);
-                if (!recipientUser && to) {
-                    const toNormalized = to.toLowerCase().trim();
-                    const foundUsername = Array.from(this.users.keys()).find(
-                        (key) => key?.toLowerCase().trim() === toNormalized,
-                    );
-                    if (foundUsername) {
-                        recipientUser = this.users.get(foundUsername);
-                        // console.log(
-                        //     `? Destinatario encontrado con b�squeda case-insensitive: ${foundUsername}`,
-                        // );
-                    }
+                // 🔥 CLUSTER FIX: Broadcast directed via Redis for 1:1
+                // 🔥 FIX: Solo enviar a la versión LOWERCASE para evitar eventos duplicados
+                // (Los usuarios están unidos a ambas versiones de su nombre, pero solo necesitamos emitir a una)
+                const toRoom = to?.toLowerCase?.();
+                const fromRoom = from?.toLowerCase?.();
+
+                console.log(`🔢 Emitiendo threadCountUpdated a sala TO: ${toRoom}`);
+                console.log(`🔢 Emitiendo threadCountUpdated a sala FROM: ${fromRoom}`);
+
+                if (toRoom) {
+                    this.server.to(toRoom).emit('threadCountUpdated', updatePayload);
                 }
 
-                if (recipientUser && recipientUser.socket.connected) {
-                    // console.log(`? Enviando threadCountUpdated al destinatario: ${to}`);
-                    recipientUser.socket.emit('threadCountUpdated', updatePayload);
-                } else {
-                    // console.log(`?? Destinatario no encontrado o no conectado: ${to}`);
-                }
-
-                // ?? B�squeda case-insensitive del remitente
-                let senderUser = this.users.get(from);
-                if (!senderUser && from) {
-                    const fromNormalized = from.toLowerCase().trim();
-                    const foundUsername = Array.from(this.users.keys()).find(
-                        (key) => key?.toLowerCase().trim() === fromNormalized,
-                    );
-                    if (foundUsername) {
-                        senderUser = this.users.get(foundUsername);
-                        // console.log(
-                        //     `? Remitente encontrado con b�squeda case-insensitive: ${foundUsername}`,
-                        // );
-                    }
-                }
-
-                if (senderUser && senderUser.socket.connected && from !== to) {
-                    // console.log(`? Enviando threadCountUpdated al remitente: ${from}`);
-                    senderUser.socket.emit('threadCountUpdated', updatePayload);
-                } else if (from === to) {
-                    // console.log(
-                    //   `?? Remitente y destinatario son el mismo usuario, no se env�a duplicado`,
-                    // );
-                } else {
-                    // console.log(`?? Remitente no encontrado o no conectado: ${from}`);
+                if (fromRoom && fromRoom !== toRoom) {
+                    this.server.to(fromRoom).emit('threadCountUpdated', updatePayload);
                 }
             }
 
@@ -3355,6 +3334,7 @@ export class SocketGateway
             emoji: string;
             roomCode?: string;
             to?: string;
+            threadId?: number; // 🔥 Para reacciones en mensajes de hilo
         },
     ) {
         // console.log(
@@ -3372,72 +3352,40 @@ export class SocketGateway
             );
 
             if (message) {
-                // console.log(
-                //     `? Reacci�n guardada, emitiendo evento reactionUpdated...`,
-                // );
+                // 🔥 CLUSTER FIX: Usar server.to().emit() en lugar de socket.emit()
 
-                // Emitir la actualizaci�n a todos los usuarios relevantes
+                // Preparar payload
+                const reactionPayload = {
+                    messageId: data.messageId,
+                    reactions: message.reactions,
+                    roomCode: data.roomCode || null,
+                    to: data.to || null,
+                    threadId: data.threadId || null, // 🔥 Para saber si es reacción en hilo
+                };
+
                 if (data.roomCode) {
-                    // console.log(
-                    //     `?? Es mensaje de sala (${data.roomCode}), notificando a miembros...`,
-                    // );
-                    const roomUsers = this.roomUsers.get(data.roomCode);
-                    // console.log(
-                    //     `?? Usuarios en sala:`,
-                    //     roomUsers ? Array.from(roomUsers) : 'No hay usuarios',
-                    // );
-
-                    if (roomUsers) {
-                        let notifiedCount = 0;
-                        roomUsers.forEach((member) => {
-                            const memberUser = this.users.get(member);
-                            if (memberUser && memberUser.socket.connected) {
-                                memberUser.socket.emit('reactionUpdated', {
-                                    messageId: data.messageId,
-                                    reactions: message.reactions,
-                                    roomCode: data.roomCode,
-                                });
-                                notifiedCount++;
-                            }
-                        });
-                        // console.log(
-                        //     `? Notificados ${notifiedCount} usuarios en sala ${data.roomCode}`,
-                        // );
-                    } else {
-                        // console.log(
-                        //     `?? No se encontraron usuarios en la sala ${data.roomCode}`,
-                        // );
-                    }
+                    // 🔥 CLUSTER: Broadcast a sala de grupo via Redis
+                    console.log(`👍 Emitiendo reactionUpdated a sala de grupo: ${data.roomCode}`);
+                    this.server.to(data.roomCode).emit('reactionUpdated', reactionPayload);
                 } else if (data.to) {
-                    // console.log(`?? Es mensaje 1-a-1, notificando a ${data.to}...`);
+                    // 🔥 CLUSTER: Broadcast a participantes del chat 1:1 via Redis
+                    const toRoom = data.to?.toLowerCase?.();
+                    const fromRoom = data.username?.toLowerCase?.();
 
-                    // Si es un mensaje 1-a-1, notificar al otro usuario
-                    const otherUser = this.users.get(data.to);
-                    if (otherUser && otherUser.socket.connected) {
-                        otherUser.socket.emit('reactionUpdated', {
-                            messageId: data.messageId,
-                            reactions: message.reactions,
-                            to: data.to,
-                        });
-                        // console.log(`? Notificado usuario ${data.to}`);
-                    } else {
-                        // console.log(`?? Usuario ${data.to} no encontrado o desconectado`);
+                    console.log(`👍 Emitiendo reactionUpdated a sala TO: ${toRoom}`);
+                    console.log(`👍 Emitiendo reactionUpdated a sala FROM: ${fromRoom}`);
+
+                    if (toRoom) {
+                        this.server.to(toRoom).emit('reactionUpdated', reactionPayload);
                     }
-
-                    // Tambi�n notificar al usuario que reaccion�
-                    client.emit('reactionUpdated', {
-                        messageId: data.messageId,
-                        reactions: message.reactions,
-                        to: data.to,
-                    });
-                    // console.log(`? Notificado usuario que reaccion� (${data.username})`);
+                    if (fromRoom && fromRoom !== toRoom) {
+                        this.server.to(fromRoom).emit('reactionUpdated', reactionPayload);
+                    }
                 } else {
-                    // console.log(`?? No hay roomCode ni to, no se puede notificar`);
+                    console.log(`⚠️ reactionUpdated: No hay roomCode ni to, no se puede notificar`);
                 }
             } else {
-                // console.log(
-                //     `? No se pudo guardar la reacci�n (mensaje no encontrado)`,
-                // );
+                console.log(`❌ No se pudo guardar la reacción (mensaje no encontrado)`);
             }
         } catch (error) {
             console.error('? Error al alternar reacci�n:', error);
