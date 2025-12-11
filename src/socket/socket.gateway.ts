@@ -473,6 +473,15 @@ export class SocketGateway
                 //  CLUSTER FIX: Remover usuario de Redis para tracking global
                 await this.removeOnlineUserFromRedis(username);
 
+                // 🔥 CLUSTER FIX: Limpiar socket ID de Redis
+                if (this.isRedisReady()) {
+                    try {
+                        await this.redisClient.del(`socket:user:${username}`);
+                    } catch (err) {
+                        console.error(`Error limpiando socket Redis de ${username}:`, err.message);
+                    }
+                }
+
                 break;
             }
         }
@@ -496,18 +505,41 @@ export class SocketGateway
 
         const { username, userData, assignedConversations } = data;
 
-        //  FIX: Verificar si el usuario ya tiene una conexión activa
-        // Esto previene sockets huérfanos cuando el usuario se reconecta rápidamente
+        // 🔥 CLUSTER FIX: Tracking global de sockets via Redis
+        // Antes usábamos this.users (local), ahora verificamos en Redis para detectar
+        // conexiones duplicadas en CUALQUIER cluster
+        if (this.isRedisReady()) {
+            try {
+                const redisKey = `socket:user:${username}`;
+                const existingSocketId = await this.redisClient.get(redisKey);
+
+                if (existingSocketId && existingSocketId !== client.id) {
+                    // El usuario ya tiene un socket activo en algún cluster
+                    // Emitir evento global para desconectarlo (via Redis adapter)
+                    console.log(`⚠️ ${username} ya conectado en otro cluster (socket: ${existingSocketId}), forzando desconexión`);
+                    this.server.to(existingSocketId).emit('forceDisconnect', {
+                        reason: 'Nueva conexión detectada',
+                        newSocketId: client.id
+                    });
+                }
+
+                // Guardar nuevo socket ID en Redis con TTL de 24 horas
+                await this.redisClient.set(redisKey, client.id, { EX: 86400 });
+            } catch (err) {
+                console.error(`Error en tracking Redis de ${username}:`, err.message);
+            }
+        }
+
+        // Verificación local adicional (para el mismo cluster)
         const existingUser = this.users.get(username);
         if (existingUser && existingUser.socket !== client) {
-            // El usuario ya está conectado con otro socket, desconectar el anterior
             try {
                 if (existingUser.socket.connected) {
-                    console.log(`⚠️ ${username} ya conectado, desconectando socket anterior`);
+                    console.log(`⚠️ ${username} ya conectado localmente, desconectando socket anterior`);
                     existingUser.socket.disconnect(true);
                 }
             } catch (err) {
-                console.error(`Error desconectando socket anterior de ${username}:`, err.message);
+                console.error(`Error desconectando socket local de ${username}:`, err.message);
             }
         }
 
@@ -517,6 +549,7 @@ export class SocketGateway
         await client.join(username); // Para mensajes dirigidos a "username"
         await client.join(username.toLowerCase()); //  FIX: Para mensajes dirigidos a "username" normalizado
         await client.join(`user:${username}`); // Prefijo estándar por si acaso (opcional)
+        await client.join(client.id); // 🔥 NUEVO: Unir a sala con su propio socket ID para recibir forceDisconnect
 
         // ?? OPTIMIZACIN: Actualizar ndice normalizado para bsquedas rpidas
         this.usernameIndex.set(username.toLowerCase().trim(), username);
