@@ -1078,19 +1078,16 @@ export class SocketGateway
             message: `Se te ha asignado una conversaci�n: ${data.conversationName}`,
         };
 
-        if (user1Connection && user1Connection.socket.connected) {
-            user1Connection.socket.emit('newConversationAssigned', {
-                ...notificationData,
-                otherUser: data.user2,
-            });
-        }
+        // 🚀 CLUSTER FIX: Usar server.to() para que pase por Redis Adapter
+        this.server.to(data.user1).emit('newConversationAssigned', {
+            ...notificationData,
+            otherUser: data.user2,
+        });
 
-        if (user2Connection && user2Connection.socket.connected) {
-            user2Connection.socket.emit('newConversationAssigned', {
-                ...notificationData,
-                otherUser: data.user1,
-            });
-        }
+        this.server.to(data.user2).emit('newConversationAssigned', {
+            ...notificationData,
+            otherUser: data.user1,
+        });
 
         //  NUEVO: Actualizar la lista de usuarios de ambos participantes para que se vean mutuamente
         // Esto asegura que ambos usuarios vean al otro en su lista inmediatamente despu�s de la asignaci�n
@@ -1210,20 +1207,13 @@ export class SocketGateway
         // );
 
         // Notificar a todos los participantes
+        // 🚀 CLUSTER FIX: Usar server.to() para que pase por Redis Adapter
         const participants = data.participants || [];
         participants.forEach((participantName) => {
-            const participantConnection = this.users.get(participantName);
-            if (participantConnection && participantConnection.socket.connected) {
-                participantConnection.socket.emit('conversationRemoved', {
-                    conversationId: data.conversationId,
-                    conversationName: data.conversationName,
-                });
-                // console.log(
-                //     `? Notificando remoci�n a ${participantName} - Conversaci�n: ${data.conversationName}`,
-                // );
-            } else {
-                // console.log(`?? Usuario no encontrado o no conectado: ${participantName}`);
-            }
+            this.server.to(participantName).emit('conversationRemoved', {
+                conversationId: data.conversationId,
+                conversationName: data.conversationName,
+            });
         });
     }
 
@@ -1241,17 +1231,15 @@ export class SocketGateway
         //     `?? WS: conversationUpdated - ${data.conversationName} (ID: ${data.conversationId})`,
         // );
 
-        // Notificar a todos los participantes que la conversaci�n fue actualizada
+        // Notificar a todos los participantes que la conversación fue actualizada
+        // 🚀 CLUSTER FIX: Usar server.to() para que pase por Redis Adapter
         if (data.participants && Array.isArray(data.participants)) {
             data.participants.forEach((participantName) => {
-                const participantConnection = this.users.get(participantName);
-                if (participantConnection && participantConnection.socket.connected) {
-                    participantConnection.socket.emit('conversationDataUpdated', {
-                        conversationId: data.conversationId,
-                        conversationName: data.conversationName,
-                        message: `La conversaci�n "${data.conversationName}" ha sido actualizada`,
-                    });
-                }
+                this.server.to(participantName).emit('conversationDataUpdated', {
+                    conversationId: data.conversationId,
+                    conversationName: data.conversationName,
+                    message: `La conversación "${data.conversationName}" ha sido actualizada`,
+                });
             });
         }
 
@@ -1807,13 +1795,12 @@ export class SocketGateway
                         };
 
                         // Emitir a ambos participantes (remitente y destinatario)
+                        // 🚀 CLUSTER FIX: Usar server.to() para que pase por Redis Adapter
                         const participants = [from, recipientUsername];
                         participants.forEach(participantName => {
-                            const participantConnection = this.users.get(participantName);
-                            if (participantConnection && participantConnection.socket.connected) {
-                                participantConnection.socket.emit('assignedConversationUpdated', conversationUpdateData);
-                                // console.log(`? Evento assignedConversationUpdated emitido a ${participantName}`);
-                            }
+                            // Usar server.to() en lugar de socket.emit() directo para cluster
+                            this.server.to(participantName).emit('assignedConversationUpdated', conversationUpdateData);
+                            // console.log(`✅ Evento assignedConversationUpdated emitido a ${participantName} vía Redis`);
                         });
                     }
 
@@ -3697,15 +3684,13 @@ export class SocketGateway
             fileName?: string;
         },
     ) {
-        const userConnection = this.users.get(username);
-        if (userConnection && userConnection.socket.connected) {
-            const payload = {
-                roomCode,
-                count,
-                lastMessage,
-            };
-            userConnection.socket.emit('unreadCountUpdate', payload);
-        }
+        // 🚀 CLUSTER FIX: Usar server.to() para que pase por Redis Adapter
+        const payload = {
+            roomCode,
+            count,
+            lastMessage,
+        };
+        this.server.to(username).emit('unreadCountUpdate', payload);
     }
 
     //  NUEVO: Emitir reset de contador cuando usuario entra a sala
@@ -3714,12 +3699,10 @@ export class SocketGateway
         //     `?? Emitiendo reset de contador no le�do - Sala: ${roomCode}, Usuario: ${username}`,
         // );
 
-        const userConnection = this.users.get(username);
-        if (userConnection && userConnection.socket.connected) {
-            userConnection.socket.emit('unreadCountReset', {
-                roomCode,
-            });
-        }
+        // 🚀 CLUSTER FIX: Usar server.to() para que pase por Redis Adapter
+        this.server.to(username).emit('unreadCountReset', {
+            roomCode,
+        });
     }
 
     /**
