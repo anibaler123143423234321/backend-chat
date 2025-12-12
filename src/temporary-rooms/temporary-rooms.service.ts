@@ -614,15 +614,12 @@ export class TemporaryRoomsService {
         description: room.description,
         roomCode: room.roomCode,
         currentMembers: room.currentMembers,
-        maxCapacity: room.maxCapacity, // 🔥 Agregado para mostrar capacidad máxima
+        maxCapacity: room.maxCapacity,
         isActive: room.isActive,
         isAssignedByAdmin: room.isAssignedByAdmin,
         settings: room.settings,
         pinnedMessageId: room.pinnedMessageId,
-        createdAt: room.createdAt,
-        updatedAt: room.updatedAt,
-        lastMessage,
-        lastMessageAt: lastMessage?.sentAt,
+        lastMessage: lastMessage ? { sentAt: lastMessage.sentAt } : null,
       };
     }).filter(room => room !== null); // Eliminar nulos del filtrado
 
@@ -634,11 +631,11 @@ export class TemporaryRoomsService {
       (room) => !favoriteRoomCodes.includes(room.roomCode),
     );
 
-    // Función de ordenamiento unificada: Por fecha más reciente (mensaje o actualización)
+    // Función de ordenamiento unificada: Por fecha más reciente del último mensaje
     const sortByLastMessage = (rooms) => {
       return rooms.sort((a, b) => {
-        const timeA = new Date(a.lastMessage?.sentAt || a.updatedAt || a.createdAt).getTime();
-        const timeB = new Date(b.lastMessage?.sentAt || b.updatedAt || b.createdAt).getTime();
+        const timeA = new Date(a.lastMessage?.sentAt || 0).getTime();
+        const timeB = new Date(b.lastMessage?.sentAt || 0).getTime();
         return timeB - timeA;
       });
     };

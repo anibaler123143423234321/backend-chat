@@ -105,7 +105,7 @@ export class RoomFavoritesService {
             id: fav.room.id,
             name: fav.room.name,
             roomCode: fav.roomCode,
-            members: fav.room.members,
+            description: fav.room.description, // 🔥 Picture/imagen del grupo
             isFavorite: true,
             lastMessage: lastMessage ? {
               id: lastMessage.id,
