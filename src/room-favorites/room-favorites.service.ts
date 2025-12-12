@@ -105,10 +105,6 @@ export class RoomFavoritesService {
             id: fav.room.id,
             name: fav.room.name,
             roomCode: fav.roomCode,
-            description: fav.room.description,
-            maxCapacity: fav.room.maxCapacity,
-            currentMembers: fav.room.currentMembers,
-            isActive: fav.room.isActive,
             members: fav.room.members,
             isFavorite: true,
             lastMessage: lastMessage ? {

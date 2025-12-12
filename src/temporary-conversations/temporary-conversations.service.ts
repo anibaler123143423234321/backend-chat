@@ -449,11 +449,16 @@ export class TemporaryConversationsService {
         } catch (error) {
           console.error(`Error al enriquecer conversaci�n ${conv.id}:`, error);
         }
-
+        // 🔥 OPTIMIZADO: Retornar solo campos esenciales
         return {
-          ...conv,
+          id: conv.id,
+          name: conv.name,
+          linkId: conv.linkId,
+          participants: conv.participants,
+          assignedUsers: conv.assignedUsers,
+          settings: conv.settings,
           unreadCount,
-          lastMessage,
+          lastMessage: lastMessage ? { sentAt: lastMessage.sentAt } : null,
         };
       }),
     );
