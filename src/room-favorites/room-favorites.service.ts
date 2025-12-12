@@ -110,12 +110,7 @@ export class RoomFavoritesService {
             currentMembers: fav.room.currentMembers,
             isActive: fav.room.isActive,
             members: fav.room.members,
-            createdAt: fav.room.createdAt,
-            updatedAt: fav.room.updatedAt,
             isFavorite: true,
-            favoriteCreatedAt: fav.createdAt,
-            lastMessageTime: lastMessage?.sentAt,
-            lastMessageAt: lastMessage?.sentAt, // Alias extra por si acaso
             lastMessage: lastMessage ? {
               id: lastMessage.id,
               sentAt: lastMessage.sentAt,
@@ -127,4 +122,3 @@ export class RoomFavoritesService {
     return enrichedFavorites;
   }
 }
-
