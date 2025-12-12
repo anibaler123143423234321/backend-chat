@@ -614,7 +614,6 @@ export class TemporaryRoomsService {
         description: room.description,
         roomCode: room.roomCode,
         currentMembers: room.currentMembers,
-        maxCapacity: room.maxCapacity,
         isActive: room.isActive,
         isAssignedByAdmin: room.isAssignedByAdmin,
         settings: room.settings,
