@@ -100,13 +100,62 @@ export class SocketGateway
     private BROADCAST_USERLIST_THROTTLE = 10000; // 🚀 10 segundos (antes: 5s)
     private pendingBroadcastUserList = false;
 
-    // ?? NUEVO: M�todo p�blico para verificar si un usuario est� conectado
+    // ?? NUEVO: Mtodo pblico para verificar si un usuario est conectado
     public isUserOnline(username: string): boolean {
         return this.users.has(username);
     }
 
+    //  NUEVO: Método para verificar estado online buscando por displayName
+    // Solo busca en Redis (fuente única de verdad para cluster mode)
+    public async isUserOnlineByDisplayName(displayName: string): Promise<boolean> {
+        if (!displayName) return false;
+
+        // Si Redis no está listo, fallback a búsqueda local
+        if (!this.isRedisReady()) {
+            const normalizedName = displayName.trim().toLowerCase();
+            for (const [username, user] of this.users.entries()) {
+                if (username.toLowerCase().trim() === normalizedName) return true;
+                const userData = user.userData;
+                if (userData?.nombre && userData?.apellido) {
+                    const userDisplayName = `${userData.nombre} ${userData.apellido}`.toLowerCase().trim();
+                    if (userDisplayName === normalizedName) return true;
+                }
+            }
+            return false;
+        }
+
+        const normalizedName = displayName.trim().toLowerCase();
+
+        try {
+            const usersHash = await this.redisClient.hGetAll(this.REDIS_ONLINE_USERS_KEY);
+            for (const [username, jsonData] of Object.entries(usersHash)) {
+                // Comparar username
+                if (username.toLowerCase().trim() === normalizedName) {
+                    return true;
+                }
+
+                // Parsear y comparar displayName
+                try {
+                    const userData = JSON.parse(jsonData as string);
+                    if (userData.nombre && userData.apellido) {
+                        const userDisplayName = `${userData.nombre} ${userData.apellido}`.toLowerCase().trim();
+                        if (userDisplayName === normalizedName) {
+                            return true;
+                        }
+                    }
+                } catch {
+                    // Si no se puede parsear, continuar
+                }
+            }
+        } catch (error) {
+            console.error('❌ Error buscando usuario online en Redis:', error.message);
+        }
+
+        return false;
+    }
+
     /**
-     * ?? OPTIMIZACI�N: B�squeda case-insensitive r�pida usando �ndice
+     * ?? OPTIMIZACIN: Bsqueda case-insensitive rpida usando ndice
      * ANTES: O(n) iterando sobre todos los usuarios
      * AHORA: O(1) lookup en el �ndice
      */

@@ -567,10 +567,10 @@ export class TemporaryRoomsService {
       ])
       .where('room.isActive = :isActive', { isActive: true });
 
-    // Aplicar b�squeda si existe
+    // Aplicar búsqueda si existe (nombre de sala, código O contenido del mensaje)
     if (search && search.trim()) {
       queryBuilder.andWhere(
-        '(room.name LIKE :search OR room.roomCode LIKE :search)',
+        '(room.name LIKE :search OR room.roomCode LIKE :search OR message.message LIKE :search)',
         { search: `%${search}%` },
       );
     }
@@ -872,38 +872,41 @@ export class TemporaryRoomsService {
         });
 
         // 2. Mapear usuarios combinando datos de BD y estado online
-        userList = allUsernames.map((username, index) => {
-          // Buscar datos en la respuesta de BD
-          const dbUser = dbUsers.find((u) => u.username === username);
+        // Usando Promise.all para soportar llamadas async a isUserOnlineByDisplayName
+        userList = await Promise.all(
+          allUsernames.map(async (username, index) => {
+            // Buscar datos en la respuesta de BD
+            const dbUser = dbUsers.find((u) => u.username === username);
 
-          // Verificar estado online en tiempo real
-          const isOnline = this.socketGateway
-            ? this.socketGateway.isUserOnline(username)
-            : false;
+            // Verificar estado online en tiempo real (buscar por displayName, soporta cluster)
+            const isOnline = this.socketGateway
+              ? await this.socketGateway.isUserOnlineByDisplayName(username)
+              : false;
 
-          if (dbUser) {
-            return {
-              id: dbUser.id,
-              displayName: dbUser.nombre && dbUser.apellido
-                ? `${dbUser.nombre} ${dbUser.apellido} `
-                : dbUser.username,
-              isOnline: isOnline,
-              role: dbUser.role,
-              numeroAgente: dbUser.numeroAgente,
-              picture: null, // TODO: La foto viene del backend Java, no disponible en chat_users
-              email: dbUser.email,
-            };
-          } else {
-            // Fallback para usuarios que no están en la BD (ej. usuarios temporales antiguos)
-            return {
-              id: index + 1, // ID temporal
-              displayName: username === 'Usuario' ? `Usuario ${index + 1} ` : username,
-              isOnline: isOnline,
-              role: 'GUEST',
-              numeroAgente: null
-            };
-          }
-        });
+            if (dbUser) {
+              return {
+                id: dbUser.id,
+                displayName: dbUser.nombre && dbUser.apellido
+                  ? `${dbUser.nombre} ${dbUser.apellido} `
+                  : dbUser.username,
+                isOnline: isOnline,
+                role: dbUser.role,
+                numeroAgente: dbUser.numeroAgente,
+                picture: null, // TODO: La foto viene del backend Java, no disponible en chat_users
+                email: dbUser.email,
+              };
+            } else {
+              // Fallback para usuarios que no están en la BD (ej. usuarios temporales antiguos)
+              return {
+                id: index + 1, // ID temporal
+                displayName: username === 'Usuario' ? `Usuario ${index + 1} ` : username,
+                isOnline: isOnline,
+                role: 'GUEST',
+                numeroAgente: null
+              };
+            }
+          })
+        );
       } catch (error) {
         console.error('? Error al enriquecer usuarios de sala:', error);
         // Fallback en caso de error de BD
