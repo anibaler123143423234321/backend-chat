@@ -79,7 +79,7 @@ export class MessagesController {
     );
   }
 
-  // 🔥 NUEVO: Obtener mensajes alrededor de un messageId específico (para jump-to-message)
+  //  NUEVO: Obtener mensajes alrededor de un messageId específico (para jump-to-message)
   @Get('room/:roomCode/around/:messageId')
   async findAroundMessage(
     @Param('roomCode') roomCode: string,
@@ -125,7 +125,7 @@ export class MessagesController {
     );
   }
 
-  // 🔥 NUEVO: Obtener mensajes alrededor de un messageId para chats individuales
+  //  NUEVO: Obtener mensajes alrededor de un messageId para chats individuales
   @Get('user/:from/:to/around/:messageId')
   async findAroundMessageForUser(
     @Param('from') from: string,
@@ -281,7 +281,7 @@ export class MessagesController {
     return { success: true };
   }
 
-  // 🔥 NUEVO: Obtener conteo de mensajes no leídos para un usuario en una sala
+  //  NUEVO: Obtener conteo de mensajes no leídos para un usuario en una sala
   @Get('unread-count/:roomCode/:username')
   async getUnreadCountForUserInRoom(
     @Param('roomCode') roomCode: string,
@@ -294,7 +294,7 @@ export class MessagesController {
     return { roomCode, username, unreadCount };
   }
 
-  // 🔥 NUEVO: Obtener conteo de mensajes no leídos para múltiples salas
+  //  NUEVO: Obtener conteo de mensajes no leídos para múltiples salas
   @Post('unread-counts')
   async getUnreadCountsForUserInRooms(
     @Body('roomCodes') roomCodes: string[],
@@ -308,7 +308,7 @@ export class MessagesController {
     return { username, unreadCounts };
   }
 
-  // 🔥 NUEVO: Obtener todos los conteos de mensajes no leídos para un usuario
+  //  NUEVO: Obtener todos los conteos de mensajes no leídos para un usuario
   @Get('unread-counts')
   async getAllUnreadCountsForUser(@Query('username') username: string) {
     // console.log(`📊 GET /unread-counts llamado para usuario: ${username}`);

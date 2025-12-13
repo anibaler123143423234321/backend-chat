@@ -8,7 +8,7 @@ import { Repository, IsNull, Not, Like } from 'typeorm';
 import { TemporaryConversation } from './entities/temporary-conversation.entity';
 import { CreateTemporaryConversationDto } from './dto/create-temporary-conversation.dto';
 import { Message } from '../messages/entities/message.entity';
-import { User } from '../users/entities/user.entity'; // 🔥 Importar entidad User
+import { User } from '../users/entities/user.entity'; //  Importar entidad User
 import { randomBytes } from 'crypto';
 import { getPeruDate } from '../utils/date.utils';
 
@@ -19,7 +19,7 @@ export class TemporaryConversationsService {
     private temporaryConversationRepository: Repository<TemporaryConversation>,
     @InjectRepository(Message)
     private messageRepository: Repository<Message>,
-    @InjectRepository(User) // 🔥 Inyectar repositorio de User
+    @InjectRepository(User) //  Inyectar repositorio de User
     private userRepository: Repository<User>,
   ) { }
 
@@ -63,7 +63,7 @@ export class TemporaryConversationsService {
     // Normalizar username para comparación (remover acentos y convertir a minúsculas)
     const usernameNormalized = this.normalizeUsername(username);
 
-    // 🔥 ROLES que pueden ver TODAS las conversaciones (sin filtrar por participante)
+    //  ROLES que pueden ver TODAS las conversaciones (sin filtrar por participante)
     const adminRoles = ['SUPERADMIN', 'ADMIN', 'PROGRAMADOR', 'DESARROLLADOR', 'JEFEPISO'];
     const isAdminRole = role && adminRoles.includes(role.toUpperCase());
 
@@ -80,7 +80,7 @@ export class TemporaryConversationsService {
       });
     }
 
-    // 🔥 BÚSQUEDA: Filtrar por nombre o participantes si hay término de búsqueda
+    //  BÚSQUEDA: Filtrar por nombre o participantes si hay término de búsqueda
     if (search && search.trim()) {
       const searchNormalized = this.normalizeUsername(search);
       conversationsToEnrich = conversationsToEnrich.filter((conv) => {
@@ -94,7 +94,7 @@ export class TemporaryConversationsService {
       });
     }
 
-    // 🔥 PAGINACIÓN: Calcular total antes de paginar
+    //  PAGINACIÓN: Calcular total antes de paginar
     const total = conversationsToEnrich.length;
     const totalPages = Math.ceil(total / limit);
     const offset = (page - 1) * limit;
@@ -258,12 +258,12 @@ export class TemporaryConversationsService {
     };
   }
 
-  // 🔥 NUEVO: Método con paginación para conversaciones asignadas
+  //  NUEVO: Método con paginación para conversaciones asignadas
   async findAssignedConversations(
     username?: string,
     page: number = 1,
     limit: number = 10,
-    search?: string, // 🔥 NUEVO: Parámetro de búsqueda
+    search?: string, //  NUEVO: Parámetro de búsqueda
   ): Promise<{
     conversations: any[];
     total: number;
@@ -292,7 +292,7 @@ export class TemporaryConversationsService {
       });
     }
 
-    // 🔥 NUEVO: Aplicar filtro de búsqueda por nombre o participantes
+    //  NUEVO: Aplicar filtro de búsqueda por nombre o participantes
     if (search && search.trim()) {
       const searchNormalized = this.normalizeUsername(search);
       filteredConversations = filteredConversations.filter((conv) => {
@@ -449,7 +449,7 @@ export class TemporaryConversationsService {
         } catch (error) {
           console.error(`Error al enriquecer conversaci�n ${conv.id}:`, error);
         }
-        // 🔥 OPTIMIZADO: Retornar solo campos esenciales
+        //  OPTIMIZADO: Retornar solo campos esenciales
         return {
           id: conv.id,
           name: conv.name,
@@ -579,7 +579,7 @@ export class TemporaryConversationsService {
           }
 
           // Contar mensajes no leídos (mensajes enviados por otros usuarios que el usuario actual no ha leído)
-          // 🔥 Filtrar solo mensajes dirigidos al usuario actual (case-insensitive)
+          //  Filtrar solo mensajes dirigidos al usuario actual (case-insensitive)
           const usernameNormalized = username?.toLowerCase().trim();
           const filteredConditions = messageConditions.filter(
             (cond) =>
@@ -592,7 +592,7 @@ export class TemporaryConversationsService {
             where: filteredConditions,
           });
 
-          // 🔥 Filtrar mensajes no leídos (case-insensitive en readBy)
+          //  Filtrar mensajes no leídos (case-insensitive en readBy)
           unreadCount = allMessages.filter((msg) => {
             if (!msg.readBy || msg.readBy.length === 0) {
               return true; // No ha sido leído por nadie
@@ -605,7 +605,7 @@ export class TemporaryConversationsService {
           }).length;
         }
 
-        // 🔥 Obtener información del otro participante (role y numeroAgente)
+        //  Obtener información del otro participante (role y numeroAgente)
         const otherParticipants = participants.filter((p) => p !== username);
         let otherParticipantRole = null;
         let otherParticipantNumeroAgente = null;
@@ -626,8 +626,8 @@ export class TemporaryConversationsService {
         return {
           ...conv,
           unreadCount,
-          role: otherParticipantRole, // 🔥 Incluir role del otro participante
-          numeroAgente: otherParticipantNumeroAgente, // 🔥 Incluir numeroAgente del otro participante
+          role: otherParticipantRole, //  Incluir role del otro participante
+          numeroAgente: otherParticipantNumeroAgente, //  Incluir numeroAgente del otro participante
         };
       }),
     );

@@ -1553,7 +1553,7 @@ export class SocketGateway
                             const mentions = this.detectMentions(message);
                             // console.log(`?? Menciones detectadas en mensaje:`, mentions);
 
-                            // 🔥 FIX: Obtener nombre de la sala para mostrar en toast del frontend
+                            //  FIX: Obtener nombre de la sala para mostrar en toast del frontend
                             const cachedRoom = await this.getCachedRoom(finalRoomCode);
                             const roomName = cachedRoom?.name || to; // Fallback al destinatario si no hay nombre
 
@@ -1566,7 +1566,7 @@ export class SocketGateway
                                 group: to,
                                 groupName: to,
                                 roomCode: finalRoomCode,
-                                roomName, // 🔥 NUEVO: Nombre real de la sala para mostrar en toast
+                                roomName, //  NUEVO: Nombre real de la sala para mostrar en toast
                                 message,
                                 isGroup: true,
                                 time: time || formatPeruTime(),
@@ -3319,7 +3319,7 @@ export class SocketGateway
         @MessageBody()
         data: { messageId: number; username: string; roomCode: string },
     ) {
-        // 🔥 DEDUPLICACIÓN: Bloquear eventos duplicados del frontend viejo (cacheado)
+        //  DEDUPLICACIÓN: Bloquear eventos duplicados del frontend viejo (cacheado)
         const dedupeKey = `markRead:${data.messageId}:${data.username}`;
 
         try {
@@ -3523,7 +3523,7 @@ export class SocketGateway
             threadId?: number; //  Para reacciones en mensajes de hilo
         },
     ) {
-        // 🔥 DEDUPLICACIÓN: Evitar procesamiento múltiple del mismo evento
+        //  DEDUPLICACIÓN: Evitar procesamiento múltiple del mismo evento
         const dedupeKey = `reaction:${data.messageId}:${data.username}:${data.emoji}`;
 
         try {

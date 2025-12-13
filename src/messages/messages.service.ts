@@ -29,12 +29,12 @@ export class MessagesService {
   async create(createMessageDto: CreateMessageDto): Promise<Message> {
     // Log eliminado para optimización
 
-    // 🔥 REMOVIDO: La deduplicación por from+message+time era demasiado agresiva
+    //  REMOVIDO: La deduplicación por from+message+time era demasiado agresiva
     // Causaba que mensajes legítimos con texto igual (ej: "hola") fueran ignorados
     // La deduplicación debe hacerse a nivel de socket con hash de tiempo más preciso
     const {
       id, // Excluir id del DTO - la BD auto-genera
-      conversationId, // 🔥 CRÍTICO: Extraer explícitamente para guardarlo
+      conversationId, //  CRÍTICO: Extraer explícitamente para guardarlo
       from,
       to,
       message: messageText,
@@ -45,13 +45,13 @@ export class MessagesService {
       ...restDto
     } = createMessageDto;
 
-    // 🔥 CRÍTICO: SIEMPRE generar sentAt en el servidor con zona horaria de Perú
+    //  CRÍTICO: SIEMPRE generar sentAt en el servidor con zona horaria de Perú
     // NO aceptar sentAt del frontend para evitar problemas de zona horaria y duplicados
     const peruDate = getPeruDate();
 
     // Log eliminado para optimización
 
-    // 🔥 NO incluir 'id' - dejar que la BD auto-genere
+    //  NO incluir 'id' - dejar que la BD auto-genere
     const message = this.messageRepository.create({
       from,
       to,
@@ -59,31 +59,31 @@ export class MessagesService {
       isGroup,
       roomCode,
       threadId,
-      conversationId, // 🔥 CRÍTICO: Incluir conversationId explícitamente
+      conversationId, //  CRÍTICO: Incluir conversationId explícitamente
       ...restDto,
-      sentAt: peruDate, // 🔥 SIEMPRE usar getPeruDate() del servidor
-      time: formatPeruTime(peruDate), // 🔥 Calcular time automáticamente
+      sentAt: peruDate, //  SIEMPRE usar getPeruDate() del servidor
+      time: formatPeruTime(peruDate), //  Calcular time automáticamente
     });
 
     const savedMessage = await this.messageRepository.save(message);
 
-    // 🔥 DEBUG: Verificar que se guardó correctamente
+    //  DEBUG: Verificar que se guardó correctamente
     // console.log('✅ DEBUG mensaje guardado:', {
     //   id: savedMessage.id,
     //   from: savedMessage.from,
     //   fromId: savedMessage.fromId,
-    //   conversationId: savedMessage.conversationId, // 🔥 Verificar conversationId
+    //   conversationId: savedMessage.conversationId, //  Verificar conversationId
     //   senderRole: savedMessage.senderRole,
     //   senderNumeroAgente: savedMessage.senderNumeroAgente,
     // });
 
-    // 🔥 NOTA: La actualización de contadores y último mensaje ahora se maneja
+    //  NOTA: La actualización de contadores y último mensaje ahora se maneja
     // directamente en socket.gateway.ts cuando se distribuyen los mensajes
 
     return savedMessage;
   }
 
-  // 🔥 NUEVO: Obtener todos los conteos de mensajes no leídos para un usuario
+  //  NUEVO: Obtener todos los conteos de mensajes no leídos para un usuario
   // 🚀 OPTIMIZADO: Una sola consulta SQL agregada en lugar de N consultas
   async getAllUnreadCountsForUser(
     username: string,
@@ -174,8 +174,8 @@ export class MessagesService {
     offset: number = 0,
   ): Promise<Message[]> {
     // Cargar mensajes en orden ASC por ID (cronológico)
-    // 🔥 Excluir mensajes de hilos (threadId debe ser null)
-    // 🔥 INCLUIR mensajes eliminados para mostrarlos como "Mensaje eliminado por..."
+    //  Excluir mensajes de hilos (threadId debe ser null)
+    //  INCLUIR mensajes eliminados para mostrarlos como "Mensaje eliminado por..."
     const messages = await this.messageRepository.find({
       where: { roomCode, threadId: IsNull() },
       order: { id: 'ASC' },
@@ -183,7 +183,7 @@ export class MessagesService {
       skip: offset,
     });
 
-    // 🔥 OPTIMIZACIÓN: Obtener threadCounts en un solo query en lugar de N queries
+    //  OPTIMIZACIÓN: Obtener threadCounts en un solo query en lugar de N queries
     const messageIds = messages.map((m) => m.id);
     const threadCountMap: Record<number, number> = {};
     const lastReplyMap: Record<number, string> = {};
@@ -214,11 +214,11 @@ export class MessagesService {
 
       // Agrupar por threadId (solo el primero de cada grupo es el más reciente)
       const seenThreadIds = new Set<number>();
-      const lastReplyTextMap: Record<number, string> = {}; // 🔥 NUEVO: Mapa para texto del último mensaje
+      const lastReplyTextMap: Record<number, string> = {}; //  NUEVO: Mapa para texto del último mensaje
       lastReplies.forEach((reply) => {
         if (!seenThreadIds.has(reply.threadId)) {
           lastReplyMap[reply.threadId] = reply.from;
-          lastReplyTextMap[reply.threadId] = reply.message || ''; // 🔥 Guardar texto
+          lastReplyTextMap[reply.threadId] = reply.message || ''; //  Guardar texto
           seenThreadIds.add(reply.threadId);
         }
       });
@@ -227,7 +227,7 @@ export class MessagesService {
       for (const message of messages) {
         message.threadCount = threadCountMap[message.id] || 0;
         message.lastReplyFrom = lastReplyMap[message.id] || null;
-        (message as any).lastReplyText = lastReplyTextMap[message.id] || null; // 🔥 NUEVO: Texto del último mensaje
+        (message as any).lastReplyText = lastReplyTextMap[message.id] || null; //  NUEVO: Texto del último mensaje
         (message as any).displayDate = formatDisplayDate(message.sentAt);
       }
     }
@@ -328,26 +328,26 @@ export class MessagesService {
 
       // Agrupar por threadId y tomar el primero (más reciente)
       const seenThreadIds = new Set<number>();
-      const lastReplyTextMap: Record<number, string> = {}; // 🔥 NUEVO
+      const lastReplyTextMap: Record<number, string> = {}; //  NUEVO
       lastReplies.forEach((reply) => {
         if (!seenThreadIds.has(reply.threadId)) {
           lastReplyMap[reply.threadId] = reply.from;
-          lastReplyTextMap[reply.threadId] = reply.message || ''; // 🔥 Guardar texto
+          lastReplyTextMap[reply.threadId] = reply.message || ''; //  Guardar texto
           seenThreadIds.add(reply.threadId);
         }
       });
 
-      // 🔥 Guardar mapa de texto para uso posterior
+      //  Guardar mapa de texto para uso posterior
       (this as any)._lastReplyTextMap = lastReplyTextMap;
     }
 
-    // 🔥 Obtener el mapa de texto (puede estar vacío)
+    //  Obtener el mapa de texto (puede estar vacío)
     const lastReplyTextMap: Record<number, string> = (this as any)._lastReplyTextMap || {};
 
-    // 🔥 Invertir el orden para que se muestren cronológicamente (más antiguos primero)
+    //  Invertir el orden para que se muestren cronológicamente (más antiguos primero)
     const reversedMessages = messages.reverse();
 
-    // 🔥 Calcular información de paginación
+    //  Calcular información de paginación
     const page = Math.floor(offset / limit) + 1;
     const totalPages = Math.ceil(total / limit);
     const hasMore = offset + messages.length < total;
@@ -358,7 +358,7 @@ export class MessagesService {
       numberInList: index + 1 + offset,
       threadCount: threadCountMap[msg.id] || 0,
       lastReplyFrom: lastReplyMap[msg.id] || null,
-      lastReplyText: lastReplyTextMap[msg.id] || null, // 🔥 NUEVO: Texto del último mensaje
+      lastReplyText: lastReplyTextMap[msg.id] || null, //  NUEVO: Texto del último mensaje
       displayDate: formatDisplayDate(msg.sentAt),
     }));
 
@@ -377,9 +377,9 @@ export class MessagesService {
     limit: number = 15,
     offset: number = 0,
   ): Promise<Message[]> {
-    // 🔥 CORREGIDO: Usar búsqueda case-insensitive para nombres de usuarios
+    //  CORREGIDO: Usar búsqueda case-insensitive para nombres de usuarios
     // Esto asegura que solo se retornen mensajes privados entre los dos usuarios específicos
-    // 🔥 INCLUIR mensajes eliminados para mostrarlos como "Mensaje eliminado por..."
+    //  INCLUIR mensajes eliminados para mostrarlos como "Mensaje eliminado por..."
     const messages = await this.messageRepository
       .createQueryBuilder('message')
       .where(
@@ -396,7 +396,7 @@ export class MessagesService {
       .getMany();
 
     // Calcular el threadCount real para cada mensaje y el último usuario que respondió
-    // 🔥 OPTIMIZACIÓN: Usar consultas agregadas en lugar de N queries
+    //  OPTIMIZACIÓN: Usar consultas agregadas en lugar de N queries
     const messageIds = messages.map((m) => m.id);
     const threadCountMap: Record<number, number> = {};
     const lastReplyMap: Record<number, string> = {};
@@ -532,23 +532,23 @@ export class MessagesService {
 
       // Agrupar por threadId y tomar el primero (más reciente)
       const seenThreadIds = new Set<number>();
-      const lastReplyTextMap: Record<number, string> = {}; // 🔥 NUEVO
+      const lastReplyTextMap: Record<number, string> = {}; //  NUEVO
       lastReplies.forEach((reply) => {
         if (!seenThreadIds.has(reply.threadId)) {
           lastReplyMap[reply.threadId] = reply.from;
-          lastReplyTextMap[reply.threadId] = reply.message || ''; // 🔥 Guardar texto
+          lastReplyTextMap[reply.threadId] = reply.message || ''; //  Guardar texto
           seenThreadIds.add(reply.threadId);
         }
       });
 
-      // 🔥 Guardar mapa de texto para uso posterior
+      //  Guardar mapa de texto para uso posterior
       (this as any)._lastReplyTextMapUser = lastReplyTextMap;
     }
 
-    // 🔥 Obtener el mapa de texto (puede estar vacío)
+    //  Obtener el mapa de texto (puede estar vacío)
     const lastReplyTextMap: Record<number, string> = (this as any)._lastReplyTextMapUser || {};
 
-    // 🔥 Invertir el orden para que se muestren cronológicamente (más antiguos primero)
+    //  Invertir el orden para que se muestren cronológicamente (más antiguos primero)
     const reversedMessages = messages.reverse();
 
     // Agregar numeración secuencial y threadCount
@@ -557,13 +557,13 @@ export class MessagesService {
       numberInList: index + 1 + offset,
       threadCount: threadCountMap[msg.id] || 0,
       lastReplyFrom: lastReplyMap[msg.id] || null,
-      lastReplyText: lastReplyTextMap[msg.id] || null, // 🔥 NUEVO: Texto del último mensaje
+      lastReplyText: lastReplyTextMap[msg.id] || null, //  NUEVO: Texto del último mensaje
       displayDate: formatDisplayDate(msg.sentAt),
     }));
   }
 
   async findRecentMessages(limit: number = 20): Promise<Message[]> {
-    // 🔥 Excluir mensajes de hilos (threadId debe ser null)
+    //  Excluir mensajes de hilos (threadId debe ser null)
     return await this.messageRepository.find({
       where: { isDeleted: false, threadId: IsNull() },
       order: { sentAt: 'DESC' },
@@ -585,7 +585,7 @@ export class MessagesService {
         message.readBy = [];
       }
 
-      // 🔥 Normalizar para verificar si ya leyó
+      //  Normalizar para verificar si ya leyó
       const alreadyRead = message.readBy.some(
         (u) => u.toLowerCase().trim() === username.toLowerCase().trim(),
       );
@@ -601,7 +601,7 @@ export class MessagesService {
     return null;
   }
 
-  // 🔥 NUEVO: Marcar todos los mensajes de una sala como leídos por un usuario
+  //  NUEVO: Marcar todos los mensajes de una sala como leídos por un usuario
   async markAllMessagesAsReadInRoom(
     roomCode: string,
     username: string,
@@ -758,7 +758,7 @@ export class MessagesService {
       //   `➕ Agregando nueva reacción de ${username} con emoji ${emoji}`,
       // );
 
-      // 🔥 Crear timestamp en hora de Perú (UTC-5)
+      //  Crear timestamp en hora de Perú (UTC-5)
       const now = new Date();
       const peruTime = new Date(now.getTime() - 5 * 60 * 60 * 1000);
 
@@ -787,7 +787,7 @@ export class MessagesService {
     isAdmin: boolean = false,
     deletedBy?: string,
   ): Promise<boolean> {
-    // 🔥 Si es ADMIN, puede eliminar cualquier mensaje
+    //  Si es ADMIN, puede eliminar cualquier mensaje
     const message = isAdmin
       ? await this.messageRepository.findOne({ where: { id: messageId } })
       : await this.messageRepository.findOne({
@@ -795,7 +795,7 @@ export class MessagesService {
       });
 
     if (message) {
-      // 🔥 NUEVO: Validar si el mensaje pertenece a una sala asignada por admin (solo para usuarios normales)
+      //  NUEVO: Validar si el mensaje pertenece a una sala asignada por admin (solo para usuarios normales)
       if (!isAdmin && message.roomCode) {
         const room = await this.temporaryRoomRepository.findOne({
           where: { roomCode: message.roomCode },
@@ -816,7 +816,7 @@ export class MessagesService {
       message.isDeleted = true;
       message.deletedAt = new Date();
 
-      // 🔥 Si es ADMIN, guardar quién eliminó el mensaje
+      //  Si es ADMIN, guardar quién eliminó el mensaje
       if (isAdmin && deletedBy) {
         message.deletedBy = deletedBy;
       }
@@ -840,12 +840,12 @@ export class MessagesService {
     //   `✏️ Intentando editar mensaje ID ${messageId} por usuario "${username}"`,
     // );
 
-    // 🔥 Primero intentar búsqueda exacta
+    //  Primero intentar búsqueda exacta
     let message = await this.messageRepository.findOne({
       where: { id: messageId, from: username },
     });
 
-    // 🔥 Si no se encuentra, intentar búsqueda case-insensitive
+    //  Si no se encuentra, intentar búsqueda case-insensitive
     if (!message) {
       // console.log(
       //   `⚠️ No se encontró con búsqueda exacta, intentando case-insensitive...`,
@@ -889,7 +889,7 @@ export class MessagesService {
       // Actualizar texto del mensaje
       message.message = newText;
 
-      // 🔥 Actualizar campos multimedia si se proporcionan
+      //  Actualizar campos multimedia si se proporcionan
       if (mediaType !== undefined) message.mediaType = mediaType;
       if (mediaData !== undefined) message.mediaData = mediaData;
       if (fileName !== undefined) message.fileName = fileName;
@@ -925,7 +925,7 @@ export class MessagesService {
     return { totalMessages, unreadMessages };
   }
 
-  // 🔥 NUEVO: Obtener conteo de mensajes no leídos por usuario en una sala específica
+  //  NUEVO: Obtener conteo de mensajes no leídos por usuario en una sala específica
   async getUnreadCountForUserInRoom(
     roomCode: string,
     username: string,
@@ -948,7 +948,7 @@ export class MessagesService {
       //   `📊 Mensajes encontrados en sala ${roomCode}: ${messages.length}`,
       // );
 
-      // 🔥 DEBUG: Mostrar algunos mensajes para entender el formato
+      //  DEBUG: Mostrar algunos mensajes para entender el formato
       if (messages.length > 0) {
         // console.log(`📊 DEBUG - Primeros 3 mensajes en sala ${roomCode}:`);
         // messages.slice(0, 3).forEach((msg, index) => {
@@ -998,7 +998,7 @@ export class MessagesService {
     }
   }
 
-  // 🔥 NUEVO: Obtener conteo de mensajes no leídos para múltiples salas
+  //  NUEVO: Obtener conteo de mensajes no leídos para múltiples salas
   async getUnreadCountsForUserInRooms(
     roomCodes: string[],
     username: string,
@@ -1031,7 +1031,7 @@ export class MessagesService {
       return [];
     }
 
-    // 🔥 Buscar TODOS los mensajes del usuario
+    //  Buscar TODOS los mensajes del usuario
     // El problema es que algunos mensajes tienen "from" como username (73583958)
     // y otros como nombre completo (BAGNER ANIBAL CHUQUIMIA)
     // Por eso buscamos TODOS los mensajes y luego filtramos
@@ -1176,7 +1176,7 @@ export class MessagesService {
     limit: number = 100,
     offset: number = 0,
   ): Promise<Message[]> {
-    // 🔥 CORREGIDO: Usar ID en lugar de sentAt para ordenamiento consistente
+    //  CORREGIDO: Usar ID en lugar de sentAt para ordenamiento consistente
     // sentAt puede estar corrupto, así que usamos ID que es más confiable
     return await this.messageRepository.find({
       where: { threadId, isDeleted: false },
@@ -1198,7 +1198,7 @@ export class MessagesService {
     }
   }
 
-  // 🔥 NUEVO: Buscar mensaje de videollamada por videoRoomID
+  //  NUEVO: Buscar mensaje de videollamada por videoRoomID
   async findByVideoRoomID(videoRoomID: string): Promise<Message | null> {
     return await this.messageRepository.findOne({
       where: { videoRoomID },
@@ -1206,7 +1206,7 @@ export class MessagesService {
     });
   }
 
-  // 🔥 NUEVO: Fallback para mensajes antiguos sin videoRoomID
+  //  NUEVO: Fallback para mensajes antiguos sin videoRoomID
   // Buscar la última videollamada por roomCode
   async findLatestVideoCallByRoomCode(roomCode: string): Promise<Message | null> {
     return await this.messageRepository.findOne({
@@ -1215,12 +1215,12 @@ export class MessagesService {
     });
   }
 
-  // 🔥 NUEVO: Actualizar mensaje
+  //  NUEVO: Actualizar mensaje
   async update(messageId: number, updateData: Partial<Message>): Promise<void> {
     await this.messageRepository.update(messageId, updateData);
   }
 
-  // 🔥 NUEVO: Obtener mensajes alrededor de un messageId específico (para jump-to-message)
+  //  NUEVO: Obtener mensajes alrededor de un messageId específico (para jump-to-message)
   async findAroundMessage(
     roomCode: string,
     targetMessageId: number,
@@ -1326,7 +1326,7 @@ export class MessagesService {
     };
   }
 
-  // 🔥 NUEVO: Obtener mensajes alrededor de un messageId para chats individuales
+  //  NUEVO: Obtener mensajes alrededor de un messageId para chats individuales
   async findAroundMessageForUser(
     from: string,
     to: string,

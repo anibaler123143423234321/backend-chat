@@ -48,7 +48,7 @@ export class TemporaryRoomsController {
     @Query('username') username: string,
     @Query('page') page: string = '1',
     @Query('limit') limit: string = '10',
-    @Query('search') search?: string, // 🔥 NUEVO: Parámetro de búsqueda
+    @Query('search') search?: string, //  NUEVO: Parámetro de búsqueda
   ) {
     if (!username) {
       throw new Error('Username es requerido');

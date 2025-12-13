@@ -149,7 +149,7 @@ export class MessagesService {
   async create(createMessageDto: CreateMessageDto): Promise<Message> {
     const message = await this.messageRepository.save(createMessageDto);
     
-    // 🔥 IMPORTANTE: Invalidar cache al crear nuevo mensaje
+    //  IMPORTANTE: Invalidar cache al crear nuevo mensaje
     const roomCode = createMessageDto.roomCode;
     if (roomCode) {
       // Eliminar todos los caches de esta sala
@@ -351,7 +351,7 @@ FLUSHALL
 - MySQL puede manejar más usuarios
 - Mejor experiencia de usuario
 
-## 🔥 Implementaciones Recomendadas
+##  Implementaciones Recomendadas
 
 ### Prioridad Alta
 1. ✅ Cachear usuarios online

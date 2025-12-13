@@ -9,11 +9,11 @@ import {
 export class CreateMessageDto {
   @IsString()
   @IsOptional()
-  id?: string; // 🔥 NUEVO: ID del mensaje para detección de duplicados
+  id?: string; //  NUEVO: ID del mensaje para detección de duplicados
 
   @IsNumber()
   @IsOptional()
-  conversationId?: number; // 🔥 NUEVO: ID de la conversación asignada
+  conversationId?: number; //  NUEVO: ID de la conversación asignada
 
   @IsString()
   from: string;
@@ -102,7 +102,7 @@ export class CreateMessageDto {
   @IsOptional()
   threadCount?: number;
 
-  // 🔥 NUEVO: Campos para videollamadas
+  //  NUEVO: Campos para videollamadas
   @IsString()
   @IsOptional()
   type?: string;
@@ -118,7 +118,7 @@ export class CreateMessageDto {
   @IsOptional()
   metadata?: any;
 
-  // 🔥 Campo para mensajes reenviados
+  //  Campo para mensajes reenviados
   @IsBoolean()
   @IsOptional()
   isForwarded?: boolean;
