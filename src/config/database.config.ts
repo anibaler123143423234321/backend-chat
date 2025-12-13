@@ -18,8 +18,13 @@ export const databaseConfig: TypeOrmModuleOptions = {
   logging: false,
 
   extra: {
-    connectionLimit: 15, // esto sí es válido
+    //  OPTIMIZADO para 200+ usuarios concurrentes
+    connectionLimit: 50, // Aumentado de 15 para soportar alto volumen
+    queueLimit: 0, // Sin límite de cola (espera infinita si no hay conexiones)
+    acquireTimeout: 30000, // 30 segundos máximo para obtener conexión
     charset: 'utf8mb4',
     waitForConnections: true,
+    enableKeepAlive: true, // Mantiene conexiones activas
+    keepAliveInitialDelay: 5000, // Ping cada 5 segundos
   },
 };
