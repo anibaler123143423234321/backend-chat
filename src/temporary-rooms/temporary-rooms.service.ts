@@ -54,7 +54,7 @@ export class TemporaryRoomsService {
     // console.log('Usuario ID:', userId);
     // console.log('Nombre del creador:', creatorUsername);
 
-    //  VALIDAR: Verificar si ya existe una sala activa con el mismo nombre
+    // 🔥 VALIDAR: Verificar si ya existe una sala activa con el mismo nombre
     const existingRoom = await this.temporaryRoomRepository.findOne({
       where: { name: createDto.name, isActive: true },
     });
@@ -106,7 +106,7 @@ export class TemporaryRoomsService {
       isActive: savedRoom.isActive,
     };
 
-    //  Notificar a todos los ADMIN y JEFEPISO que se creó una nueva sala
+    // 🔥 Notificar a todos los ADMIN y JEFEPISO que se creó una nueva sala
     if (this.socketGateway) {
       this.socketGateway.broadcastRoomCreated(savedRoom);
     }
@@ -126,7 +126,7 @@ export class TemporaryRoomsService {
     username: string, // Este es el displayName que envía el frontend
     page: number = 1,
     limit: number = 10,
-    search?: string, //  NUEVO: Parámetro de búsqueda
+    search?: string, // 🔥 NUEVO: Parámetro de búsqueda
   ): Promise<{
     rooms: any[];
     total: number;
@@ -137,11 +137,11 @@ export class TemporaryRoomsService {
     // El frontend envía el displayName (nombre completo) en el parámetro username
     const displayName = username;
 
-    //  Obtener roomCodes de favoritos para excluirlos
+    // 🔥 Obtener roomCodes de favoritos para excluirlos
     let favoriteRoomCodes: string[] = [];
     try {
       favoriteRoomCodes = await this.roomFavoritesService.getUserFavoriteRoomCodes(displayName);
-      console.log(` [findUserRooms] Favoritos de ${displayName}:`, favoriteRoomCodes, '- Estos serán excluidos');
+      console.log(`🔥 [findUserRooms] Favoritos de ${displayName}:`, favoriteRoomCodes, '- Estos serán excluidos');
     } catch (error) {
       console.error('Error al obtener favoritos:', error);
     }
@@ -158,10 +158,10 @@ export class TemporaryRoomsService {
       return members.includes(displayName);
     });
 
-    //  Excluir grupos que son favoritos - así siempre devuelve 10 NO-favoritos
+    // 🔥 Excluir grupos que son favoritos - así siempre devuelve 10 NO-favoritos
     userRooms = userRooms.filter((room) => !favoriteRoomCodes.includes(room.roomCode));
 
-    //  Aplicar filtro de búsqueda por nombre o roomCode
+    // 🔥 Aplicar filtro de búsqueda por nombre o roomCode
     if (search && search.trim()) {
       const searchLower = search.toLowerCase().trim();
       userRooms = userRooms.filter((room) =>
@@ -231,7 +231,7 @@ export class TemporaryRoomsService {
     );
 
     // ?? ORDENAR por lastMessage.sentAt (m�s reciente primero)
-    //  ORDENAR por lastActivity (más reciente primero)
+    // 🔥 ORDENAR por lastActivity (más reciente primero)
     const sortedEnrichedRooms = enrichedRooms.sort((a, b) => {
       const aDate = a.lastActivity || a.createdAt;
       const bDate = b.lastActivity || b.createdAt;
@@ -363,7 +363,7 @@ export class TemporaryRoomsService {
 
     const room = await this.findByRoomCode(roomCode);
 
-    //  NUEVO: Validar si el usuario está asignado por un admin
+    // 🔥 NUEVO: Validar si el usuario está asignado por un admin
     if (
       room.isAssignedByAdmin &&
       room.assignedMembers &&
@@ -495,7 +495,7 @@ export class TemporaryRoomsService {
     await this.temporaryRoomRepository.remove(room);
     // console.log('✅ Sala eliminada permanentemente');
 
-    //  Notificar a todos los usuarios conectados que la sala fue eliminada
+    // 🔥 Notificar a todos los usuarios conectados que la sala fue eliminada
     if (this.socketGateway) {
       this.socketGateway.broadcastRoomDeleted(roomCode, id);
     }
@@ -567,10 +567,10 @@ export class TemporaryRoomsService {
       ])
       .where('room.isActive = :isActive', { isActive: true });
 
-    // Aplicar búsqueda si existe (nombre de sala, código O contenido del mensaje)
+    // Aplicar búsqueda si existe (busca en nombre, código, mensaje y remitente)
     if (search && search.trim()) {
       queryBuilder.andWhere(
-        '(room.name LIKE :search OR room.roomCode LIKE :search OR message.message LIKE :search)',
+        '(room.name LIKE :search OR room.roomCode LIKE :search OR message.message LIKE :search OR message.from LIKE :search)',
         { search: `%${search}%` },
       );
     }
@@ -606,7 +606,7 @@ export class TemporaryRoomsService {
         : null;
 
 
-      //  OPTIMIZACIÓN: NO devolver arrays pesados de members/connectedMembers
+      // 🔥 OPTIMIZACIÓN: NO devolver arrays pesados de members/connectedMembers
       // Solo devolver contadores para reducir payload ~83%
       return {
         id: room.id,
@@ -618,7 +618,7 @@ export class TemporaryRoomsService {
         isAssignedByAdmin: room.isAssignedByAdmin,
         settings: room.settings,
         pinnedMessageId: room.pinnedMessageId,
-        lastMessage: lastMessage ? { sentAt: lastMessage.sentAt } : null,
+        lastMessage: lastMessage,
       };
     }).filter(room => room !== null); // Eliminar nulos del filtrado
 
@@ -639,20 +639,20 @@ export class TemporaryRoomsService {
       });
     };
 
-    //  MODIFICADO: Solo ordenar los NO-favoritos (favoritos van a su propia API)
+    // 🔥 MODIFICADO: Solo ordenar los NO-favoritos (favoritos van a su propia API)
     const sortedNonFavorites = sortByLastMessage(nonFavoritesWithMessage);
 
-    //  MODIFICADO: Solo paginar los NO-favoritos
+    // 🔥 MODIFICADO: Solo paginar los NO-favoritos
     const pageNum = Number(page);
     const limitNum = Number(limit);
     const skip = (pageNum - 1) * limitNum;
     const paginatedRooms = sortedNonFavorites.slice(skip, skip + limitNum);
 
-    // console.log(` [getAdminRooms] Total grupos: ${allRoomsWithLastMessage.length}, Favoritos: ${favoritesWithMessage.length}, No-favoritos: ${nonFavoritesWithMessage.length}, Devolviendo: ${paginatedRooms.length}`);
+    // console.log(`🔥 [getAdminRooms] Total grupos: ${allRoomsWithLastMessage.length}, Favoritos: ${favoritesWithMessage.length}, No-favoritos: ${nonFavoritesWithMessage.length}, Devolviendo: ${paginatedRooms.length}`);
 
     return {
-      data: paginatedRooms, //  Solo NO-favoritos
-      total: nonFavoritesWithMessage.length, //  Total de NO-favoritos
+      data: paginatedRooms, // 🔥 Solo NO-favoritos
+      total: nonFavoritesWithMessage.length, // 🔥 Total de NO-favoritos
       page: Number(page),
       limit: Number(limit),
       totalPages: Math.ceil(nonFavoritesWithMessage.length / limit),
@@ -693,7 +693,7 @@ export class TemporaryRoomsService {
     const updatedRoom = await this.temporaryRoomRepository.save(room);
     // console.log('✅ Sala desactivada:', updatedRoom.name);
 
-    //  Notificar a todos los usuarios conectados que la sala fue desactivada
+    // 🔥 Notificar a todos los usuarios conectados que la sala fue desactivada
     if (this.socketGateway) {
       this.socketGateway.broadcastRoomDeleted(roomCode, id);
     }
@@ -872,41 +872,38 @@ export class TemporaryRoomsService {
         });
 
         // 2. Mapear usuarios combinando datos de BD y estado online
-        // Usando Promise.all para soportar llamadas async a isUserOnlineByDisplayName
-        userList = await Promise.all(
-          allUsernames.map(async (username, index) => {
-            // Buscar datos en la respuesta de BD
-            const dbUser = dbUsers.find((u) => u.username === username);
+        userList = allUsernames.map((username, index) => {
+          // Buscar datos en la respuesta de BD
+          const dbUser = dbUsers.find((u) => u.username === username);
 
-            // Verificar estado online en tiempo real (buscar por displayName, soporta cluster)
-            const isOnline = this.socketGateway
-              ? await this.socketGateway.isUserOnlineByDisplayName(username)
-              : false;
+          // Verificar estado online en tiempo real
+          const isOnline = this.socketGateway
+            ? this.socketGateway.isUserOnline(username)
+            : false;
 
-            if (dbUser) {
-              return {
-                id: dbUser.id,
-                displayName: dbUser.nombre && dbUser.apellido
-                  ? `${dbUser.nombre} ${dbUser.apellido} `
-                  : dbUser.username,
-                isOnline: isOnline,
-                role: dbUser.role,
-                numeroAgente: dbUser.numeroAgente,
-                picture: null, // TODO: La foto viene del backend Java, no disponible en chat_users
-                email: dbUser.email,
-              };
-            } else {
-              // Fallback para usuarios que no están en la BD (ej. usuarios temporales antiguos)
-              return {
-                id: index + 1, // ID temporal
-                displayName: username === 'Usuario' ? `Usuario ${index + 1} ` : username,
-                isOnline: isOnline,
-                role: 'GUEST',
-                numeroAgente: null
-              };
-            }
-          })
-        );
+          if (dbUser) {
+            return {
+              id: dbUser.id,
+              displayName: dbUser.nombre && dbUser.apellido
+                ? `${dbUser.nombre} ${dbUser.apellido} `
+                : dbUser.username,
+              isOnline: isOnline,
+              role: dbUser.role,
+              numeroAgente: dbUser.numeroAgente,
+              picture: null, // TODO: La foto viene del backend Java, no disponible en chat_users
+              email: dbUser.email,
+            };
+          } else {
+            // Fallback para usuarios que no están en la BD (ej. usuarios temporales antiguos)
+            return {
+              id: index + 1, // ID temporal
+              displayName: username === 'Usuario' ? `Usuario ${index + 1} ` : username,
+              isOnline: isOnline,
+              role: 'GUEST',
+              numeroAgente: null
+            };
+          }
+        });
       } catch (error) {
         console.error('? Error al enriquecer usuarios de sala:', error);
         // Fallback en caso de error de BD
