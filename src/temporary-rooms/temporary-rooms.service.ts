@@ -884,24 +884,19 @@ export class TemporaryRoomsService {
           if (dbUser) {
             return {
               id: dbUser.id,
-              username: dbUser.username,
               displayName: dbUser.nombre && dbUser.apellido
                 ? `${dbUser.nombre} ${dbUser.apellido} `
                 : dbUser.username,
               isOnline: isOnline,
-              // ?? CAMPOS ENRIQUECIDOS
               role: dbUser.role,
               numeroAgente: dbUser.numeroAgente,
-              picture: null, // No tenemos picture en la entidad User por ahora
-              nombre: dbUser.nombre,
-              apellido: dbUser.apellido,
-              email: dbUser.email
+              picture: null, // TODO: La foto viene del backend Java, no disponible en chat_users
+              email: dbUser.email,
             };
           } else {
-            // Fallback para usuarios que no est�n en la BD (ej. usuarios temporales antiguos)
+            // Fallback para usuarios que no están en la BD (ej. usuarios temporales antiguos)
             return {
               id: index + 1, // ID temporal
-              username: username,
               displayName: username === 'Usuario' ? `Usuario ${index + 1} ` : username,
               isOnline: isOnline,
               role: 'GUEST',
