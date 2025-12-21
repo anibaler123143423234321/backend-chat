@@ -79,7 +79,7 @@ export class MessagesController {
     );
   }
 
-  //  NUEVO: Obtener mensajes alrededor de un messageId específico (para jump-to-message)
+  // 🔥 NUEVO: Obtener mensajes alrededor de un messageId específico (para jump-to-message)
   @Get('room/:roomCode/around/:messageId')
   async findAroundMessage(
     @Param('roomCode') roomCode: string,
@@ -125,7 +125,7 @@ export class MessagesController {
     );
   }
 
-  //  NUEVO: Obtener mensajes alrededor de un messageId para chats individuales
+  // 🔥 NUEVO: Obtener mensajes alrededor de un messageId para chats individuales
   @Get('user/:from/:to/around/:messageId')
   async findAroundMessageForUser(
     @Param('from') from: string,
@@ -160,7 +160,16 @@ export class MessagesController {
     return { success: !!message, message };
   }
 
-  // Marcar mÃºltiples mensajes como leÃ­dos
+  /**
+   * 🔥 NUEVO: Obtener lista completa de usuarios que leyeron un mensaje
+   * Usado cuando el usuario hace clic en "visto por X personas"
+   */
+  @Get(':messageId/read-by')
+  async getMessageReadBy(@Param('messageId') messageId: string) {
+    return this.messagesService.getMessageReadBy(parseInt(messageId));
+  }
+
+  // Marcar múltiples mensajes como leídos
   @Patch('mark-read')
   async markMultipleAsRead(@Body() markReadDto: MarkReadDto) {
     if (markReadDto.messageIds && markReadDto.messageIds.length > 0) {
@@ -262,6 +271,23 @@ export class MessagesController {
     );
   }
 
+  // 🔥 NUEVO: Búsqueda global de mensajes (tipo WhatsApp) con paginación
+  // Busca en todos los chats y grupos donde el usuario participa
+  @Get('search-all/:username')
+  async searchAllMessages(
+    @Param('username') username: string,
+    @Query('q') searchTerm: string,
+    @Query('limit') limit: string = '15',
+    @Query('offset') offset: string = '0',
+  ) {
+    return await this.messagesService.searchAllMessages(
+      username,
+      searchTerm,
+      parseInt(limit),
+      parseInt(offset),
+    );
+  }
+
   @Get('thread/:threadId')
   async findThreadMessages(
     @Param('threadId') threadId: string,
@@ -275,13 +301,57 @@ export class MessagesController {
     );
   }
 
+  // 🔥 NUEVO: Cargar mensajes alrededor de un mensaje específico (para búsqueda tipo WhatsApp)
+  @Get('around/:messageId')
+  async getMessagesAroundMessage(
+    @Param('messageId') messageId: string,
+    @Query('before') before: string = '25',
+    @Query('after') after: string = '25',
+  ) {
+    return await this.messagesService.getMessagesAroundMessage(
+      parseInt(messageId),
+      parseInt(before),
+      parseInt(after),
+    );
+  }
+
+  // 🔥 NUEVO: Obtener hilos padres de un grupo (roomCode)
+  @Get('room/:roomCode/threads')
+  async findThreadsByRoom(
+    @Param('roomCode') roomCode: string,
+    @Query('limit') limit: string = '50',
+    @Query('offset') offset: string = '0',
+  ) {
+    return await this.messagesService.findThreadsByRoom(
+      roomCode,
+      parseInt(limit),
+      parseInt(offset),
+    );
+  }
+
+  // 🔥 NUEVO: Obtener hilos padres de un chat directo (from/to)
+  @Get('user/:from/:to/threads')
+  async findThreadsByUser(
+    @Param('from') from: string,
+    @Param('to') to: string,
+    @Query('limit') limit: string = '50',
+    @Query('offset') offset: string = '0',
+  ) {
+    return await this.messagesService.findThreadsByUser(
+      from,
+      to,
+      parseInt(limit),
+      parseInt(offset),
+    );
+  }
+
   @Patch(':id/increment-thread')
   async incrementThreadCount(@Param('id') id: string) {
     await this.messagesService.incrementThreadCount(parseInt(id));
     return { success: true };
   }
 
-  //  NUEVO: Obtener conteo de mensajes no leídos para un usuario en una sala
+  // 🔥 NUEVO: Obtener conteo de mensajes no leídos para un usuario en una sala
   @Get('unread-count/:roomCode/:username')
   async getUnreadCountForUserInRoom(
     @Param('roomCode') roomCode: string,
@@ -294,7 +364,7 @@ export class MessagesController {
     return { roomCode, username, unreadCount };
   }
 
-  //  NUEVO: Obtener conteo de mensajes no leídos para múltiples salas
+  // 🔥 NUEVO: Obtener conteo de mensajes no leídos para múltiples salas
   @Post('unread-counts')
   async getUnreadCountsForUserInRooms(
     @Body('roomCodes') roomCodes: string[],
@@ -308,7 +378,7 @@ export class MessagesController {
     return { username, unreadCounts };
   }
 
-  //  NUEVO: Obtener todos los conteos de mensajes no leídos para un usuario
+  // 🔥 NUEVO: Obtener todos los conteos de mensajes no leídos para un usuario
   @Get('unread-counts')
   async getAllUnreadCountsForUser(@Query('username') username: string) {
     // console.log(`📊 GET /unread-counts llamado para usuario: ${username}`);

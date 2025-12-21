@@ -81,7 +81,7 @@ export class RoomFavoritesService {
     return favorites.map(f => f.roomCode);
   }
 
-  //  NUEVO: Obtener favoritos con datos completos de la sala (JOIN)
+  // 🔥 NUEVO: Obtener favoritos con datos completos de la sala (JOIN)
   async getUserFavoritesWithRoomData(username: string): Promise<any[]> {
     const favorites = await this.roomFavoriteRepository.find({
       where: { username },
@@ -105,7 +105,7 @@ export class RoomFavoritesService {
             id: fav.room.id,
             name: fav.room.name,
             roomCode: fav.roomCode,
-            description: fav.room.description, //  Picture/imagen del grupo
+            description: fav.room.description, // 🔥 Picture/imagen del grupo
             isFavorite: true,
             lastMessage: lastMessage ? {
               id: lastMessage.id,

@@ -123,7 +123,7 @@ export class Message {
   @Column({ type: 'json', nullable: true })
   reactions: { emoji: string; username: string; timestamp: Date }[]; // Array de reacciones
 
-  //  NUEVO: Campos para videollamadas
+  // 🔥 NUEVO: Campos para videollamadas
   @Column({ type: 'varchar', length: 50, nullable: true })
   type: string; // 'text', 'video_call', 'audio_call', etc.
 
@@ -142,12 +142,12 @@ export class Message {
   room: TemporaryRoom;
 
   @Column({ type: 'int', nullable: true })
-  conversationId: number; //  NUEVO: ID de la conversación asignada (TemporaryConversation)
+  conversationId: number; // 🔥 NUEVO: ID de la conversación asignada (TemporaryConversation)
 
   @Column({ type: 'int', nullable: true })
   roomId: number;
 
-  //  Campo simple para indicar mensaje reenviado
+  // 🔥 Campo simple para indicar mensaje reenviado
   @Column({ type: 'boolean', default: false })
   isForwarded: boolean; // Indica si el mensaje fue reenviado
 

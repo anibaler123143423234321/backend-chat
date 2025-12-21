@@ -28,7 +28,7 @@ export function getPeruDate(): Date {
 export function formatPeruTime(date?: Date): string {
   const peruDate = date || getPeruDate();
 
-  //  CRÍTICO: Usar getUTCHours() y getUTCMinutes() porque peruDate es un Date ajustado a UTC
+  // 🔥 CRÍTICO: Usar getUTCHours() y getUTCMinutes() porque peruDate es un Date ajustado a UTC
   // El objeto Date internamente sigue siendo UTC, pero con el tiempo ajustado a Perú
   const hours = peruDate.getUTCHours().toString().padStart(2, '0');
   const minutes = peruDate.getUTCMinutes().toString().padStart(2, '0');

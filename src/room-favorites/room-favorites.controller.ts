@@ -61,7 +61,7 @@ export class RoomFavoritesController {
     return { roomCodes };
   }
 
-  //  NUEVO: Obtener favoritos con datos completos de la sala
+  // 🔥 NUEVO: Obtener favoritos con datos completos de la sala
   @Get('full/:username')
   async getUserFavoritesWithData(@Param('username') username: string) {
     return await this.roomFavoritesService.getUserFavoritesWithRoomData(username);

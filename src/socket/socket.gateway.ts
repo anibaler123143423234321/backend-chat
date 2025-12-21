@@ -27,15 +27,14 @@ import { getPeruDate, formatPeruTime } from '../utils/date.utils';
     },
     transports: ['websocket', 'polling'],
     path: '/socket.io/',
-    //  OPTIMIZADO: Configuraciones de optimizaciN para reducir consumo de CPU (200+ usuarios)
-    // 🚀 Ajustado a ULTRA-AGRESIVO (5s/10s) a pedido del usuario (Estilo Gaming)
-    pingTimeout: 10000,
-    pingInterval: 5000,
-    maxHttpBufferSize: 10 * 1024 * 1024, // 10MB - lmite de tamao de mensaje
-    connectTimeout: 45000, // 45 segundos - timeout de conexin inicial
+    // ✅ CONFIGURACIÓN ESTABLE: Tolerante a redes lentas y pestañas inactivas
+    pingTimeout: 60000,    // 60 segundos - tiempo para esperar respuesta de ping
+    pingInterval: 25000,   // 25 segundos - cada cuánto enviar ping
+    maxHttpBufferSize: 10 * 1024 * 1024, // 10MB - límite de tamaño de mensaje
+    connectTimeout: 45000, // 45 segundos - timeout de conexión inicial
     upgradeTimeout: 10000, // 10 segundos - timeout de upgrade de polling a websocket
-    //  OPTIMIZADO: Deshabilitar compresi�n HTTP para reducir CPU
-    httpCompression: false,
+    // ✅ Permitir reconexión después de desconexión temporal
+    allowEIO3: true,       // Compatibilidad con clientes Engine.IO v3
 })
 @Injectable()
 export class SocketGateway
@@ -100,62 +99,13 @@ export class SocketGateway
     private BROADCAST_USERLIST_THROTTLE = 10000; // 🚀 10 segundos (antes: 5s)
     private pendingBroadcastUserList = false;
 
-    // ?? NUEVO: Mtodo pblico para verificar si un usuario est conectado
+    // ?? NUEVO: M�todo p�blico para verificar si un usuario est� conectado
     public isUserOnline(username: string): boolean {
         return this.users.has(username);
     }
 
-    //  NUEVO: Método para verificar estado online buscando por displayName
-    // Solo busca en Redis (fuente única de verdad para cluster mode)
-    public async isUserOnlineByDisplayName(displayName: string): Promise<boolean> {
-        if (!displayName) return false;
-
-        // Si Redis no está listo, fallback a búsqueda local
-        if (!this.isRedisReady()) {
-            const normalizedName = displayName.trim().toLowerCase();
-            for (const [username, user] of this.users.entries()) {
-                if (username.toLowerCase().trim() === normalizedName) return true;
-                const userData = user.userData;
-                if (userData?.nombre && userData?.apellido) {
-                    const userDisplayName = `${userData.nombre} ${userData.apellido}`.toLowerCase().trim();
-                    if (userDisplayName === normalizedName) return true;
-                }
-            }
-            return false;
-        }
-
-        const normalizedName = displayName.trim().toLowerCase();
-
-        try {
-            const usersHash = await this.redisClient.hGetAll(this.REDIS_ONLINE_USERS_KEY);
-            for (const [username, jsonData] of Object.entries(usersHash)) {
-                // Comparar username
-                if (username.toLowerCase().trim() === normalizedName) {
-                    return true;
-                }
-
-                // Parsear y comparar displayName
-                try {
-                    const userData = JSON.parse(jsonData as string);
-                    if (userData.nombre && userData.apellido) {
-                        const userDisplayName = `${userData.nombre} ${userData.apellido}`.toLowerCase().trim();
-                        if (userDisplayName === normalizedName) {
-                            return true;
-                        }
-                    }
-                } catch {
-                    // Si no se puede parsear, continuar
-                }
-            }
-        } catch (error) {
-            console.error('❌ Error buscando usuario online en Redis:', error.message);
-        }
-
-        return false;
-    }
-
     /**
-     * ?? OPTIMIZACIN: Bsqueda case-insensitive rpida usando ndice
+     * ?? OPTIMIZACI�N: B�squeda case-insensitive r�pida usando �ndice
      * ANTES: O(n) iterando sobre todos los usuarios
      * AHORA: O(1) lookup en el �ndice
      */
@@ -1452,60 +1402,38 @@ export class SocketGateway
         const user = this.users.get(from);
         const finalRoomCode = messageRoomCode || user?.currentRoom;
 
-        //  GUARDAR MENSAJE EN BD (o usar existente)
-        let savedMessage = null;
+        // 🚀 OPTIMIZACIÓN: GUARDADO NO BLOQUEANTE
+        // Generar datos del mensaje INMEDIATAMENTE sin esperar BD
+        const peruDate = getPeruDate();
+        const calculatedTime = formatPeruTime(peruDate);
 
-        if (data.id) {
-            // 🚀 FIX: Mensaje ya guardado por frontend (Individual)
-            // Construimos objeto savedMessage simulado con los datos recibidos
-            savedMessage = {
-                ...data,
-                id: data.id,
-                sentAt: data.sentAt || new Date(), // Usar fecha del cliente o actual
-                conversationId: data.conversationId, // Importante para asignados
-                senderRole, // Asegurar que estos campos estén
-                senderNumeroAgente
-            };
-            // console.log(`🚀 SKIP DB: Mensaje ${data.id} ya guardado por frontend.`);
-        } else {
-            // Mensaje de grupo o sin ID: guardar en BD
-            try {
-                savedMessage = await this.saveMessageToDatabase({
-                    ...data,
-                    roomCode: finalRoomCode, //  Usar roomCode correcto
-                    senderRole, //  Incluir role del remitente
-                    senderNumeroAgente, //  Incluir numeroAgente del remitente
-                });
+        // 🚀 ID temporal para emisión inmediata (se actualizará cuando BD responda)
+        const tempId = data.id || `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-                //  NUEVO: Si el mensaje es una encuesta, crear la entidad Poll
-                if (savedMessage && data.isPoll && data.poll) {
-                    try {
-                        const poll = await this.pollsService.createPoll(
-                            {
-                                question: data.poll.question,
-                                options: data.poll.options,
-                            },
-                            savedMessage.id,
-                            from,
-                        );
-                        // Encuesta creada exitosamente
-                    } catch (pollError) {
-                        console.error('? Error al crear encuesta:', pollError);
-                    }
-                }
-            } catch (error) {
-                console.error(`❌ Error al guardar mensaje en BD:`, error);
-                console.timeEnd(msgPerfLabel);
-                return; // No continuar si falló el guardado
-            }
-        }
+        // Mensaje "optimista" para emisión inmediata
+        const optimisticMessage = {
+            ...data,
+            id: tempId,
+            sentAt: data.sentAt || peruDate,
+            time: data.time || calculatedTime,
+            senderRole,
+            senderNumeroAgente,
+            roomCode: finalRoomCode,
+        };
 
-        //  PERFORMANCE LOGGING - Fin de parte crítica (guardado en BD)
+        //  PERFORMANCE LOGGING - Fin de parte crítica (preparación)
         console.timeEnd(msgPerfLabel);
 
-        // 🚀 OPTIMIZADO: Broadcast NO BLOQUEANTE
+        // 🚀 GUARDADO EN BD EN PARALELO (no bloquea la emisión)
+        // Solo si no tiene ID real (no guardado por frontend)
+        if (!data.id) {
+            // Guardar en background sin await
+            this.saveMessageInBackground(data, finalRoomCode, senderRole, senderNumeroAgente, tempId, from);
+        }
+
+        // 🚀 OPTIMIZADO: Broadcast INMEDIATO (sin esperar BD)
         // Capturar variables necesarias para el closure
-        const msgContext = { savedMessage, isGroup, to, from, message, time, mediaType, mediaData, fileName, fileSize, replyToMessageId, replyToSender, replyToText, senderRole, senderNumeroAgente, finalRoomCode, data };
+        const msgContext = { savedMessage: optimisticMessage, isGroup, to, from, message, time: calculatedTime, mediaType, mediaData, fileName, fileSize, replyToMessageId, replyToSender, replyToText, senderRole, senderNumeroAgente, finalRoomCode, data };
 
         setImmediate(async () => {
             try {
@@ -1553,24 +1481,24 @@ export class SocketGateway
                             const mentions = this.detectMentions(message);
                             // console.log(`?? Menciones detectadas en mensaje:`, mentions);
 
-                            //  FIX: Obtener nombre de la sala para mostrar en toast del frontend
+                            // 🔥 FIX: Obtener nombre de la sala para mostrar en toast del frontend
                             const cachedRoom = await this.getCachedRoom(finalRoomCode);
                             const roomName = cachedRoom?.name || to; // Fallback al destinatario si no hay nombre
 
                             // 🚀 OPTIMIZADO: Crear objeto base UNA vez fuera del loop (reduce allocations)
                             const baseGroupMessage = {
-                                id: savedMessage?.id,
+                                id: msgContext.savedMessage?.id,
                                 from: from || 'Usuario Desconocido',
                                 senderRole,
                                 senderNumeroAgente,
                                 group: to,
                                 groupName: to,
                                 roomCode: finalRoomCode,
-                                roomName, //  NUEVO: Nombre real de la sala para mostrar en toast
+                                roomName, // 🔥 NUEVO: Nombre real de la sala para mostrar en toast
                                 message,
                                 isGroup: true,
                                 time: time || formatPeruTime(),
-                                sentAt: savedMessage?.sentAt,
+                                sentAt: msgContext.savedMessage?.sentAt,
                                 mediaType,
                                 mediaData,
                                 fileName,
@@ -1609,7 +1537,7 @@ export class SocketGateway
                                             text: message,
                                             from: from,
                                             time: time || formatPeruTime(),
-                                            sentAt: savedMessage?.sentAt || new Date().toISOString(),
+                                            sentAt: msgContext.savedMessage?.sentAt || new Date().toISOString(),
                                         };
 
                                         if (!isViewingThisRoom) {
@@ -1664,7 +1592,7 @@ export class SocketGateway
                             if (false && groupRoomCode) {
                                 // 🚀 CLUSTER FIX: Broadcast optimizado si tenemos roomCode
                                 this.server.to(groupRoomCode).emit('message', {
-                                    id: savedMessage?.id,
+                                    id: msgContext.savedMessage?.id,
                                     from: from || 'Usuario Desconocido',
                                     senderRole,
                                     senderNumeroAgente,
@@ -1674,7 +1602,7 @@ export class SocketGateway
                                     message,
                                     isGroup: true,
                                     time: time || formatPeruTime(),
-                                    sentAt: savedMessage?.sentAt,
+                                    sentAt: msgContext.savedMessage?.sentAt,
                                     mediaType,
                                     mediaData,
                                     fileName,
@@ -1701,7 +1629,7 @@ export class SocketGateway
 
                                     // Usar broadcast dirigido a la sala del usuario (client.join(username))
                                     this.server.to(member).emit('message', {
-                                        id: savedMessage?.id,
+                                        id: msgContext.savedMessage?.id,
                                         from: from || 'Usuario Desconocido',
                                         senderRole,
                                         senderNumeroAgente,
@@ -1711,7 +1639,7 @@ export class SocketGateway
                                         message,
                                         isGroup: true,
                                         time: time || formatPeruTime(),
-                                        sentAt: savedMessage?.sentAt,
+                                        sentAt: msgContext.savedMessage?.sentAt,
                                         mediaType,
                                         mediaData,
                                         fileName,
@@ -1754,7 +1682,7 @@ export class SocketGateway
 
                     // Preparar el objeto del mensaje para enviar
                     const messageToSend = {
-                        id: savedMessage?.id, // Incluir ID del mensaje guardado en BD
+                        id: msgContext.savedMessage?.id, // Incluir ID del mensaje guardado en BD
                         from: from || 'Usuario Desconocido',
                         senderRole, // Incluir role del remitente
                         senderNumeroAgente, // Incluir numeroAgente del remitente
@@ -1762,7 +1690,7 @@ export class SocketGateway
                         message,
                         isGroup: false,
                         time: time || formatPeruTime(),
-                        sentAt: savedMessage?.sentAt, //  Incluir sentAt para extraer hora correcta en frontend
+                        sentAt: msgContext.savedMessage?.sentAt, //  Incluir sentAt para extraer hora correcta en frontend
                         mediaType,
                         mediaData,
                         fileName,
@@ -1770,7 +1698,7 @@ export class SocketGateway
                         replyToMessageId,
                         replyToSender,
                         replyToText,
-                        conversationId: savedMessage?.conversationId, //  Incluir conversationId para chats asignados
+                        conversationId: msgContext.savedMessage?.conversationId, //  Incluir conversationId para chats asignados
                         //  NUEVO: Campos de videollamada
                         type: data.type,
                         videoCallUrl: data.videoCallUrl,
@@ -1800,13 +1728,13 @@ export class SocketGateway
 
                     //  Emitir evento de monitoreo a todos los ADMIN/JEFEPISO
                     this.broadcastMonitoringMessage({
-                        id: savedMessage?.id,
+                        id: msgContext.savedMessage?.id,
                         from: from || 'Usuario Desconocido',
                         to: recipientUsername,
                         message,
                         isGroup: false,
                         time: time || formatPeruTime(),
-                        sentAt: savedMessage?.sentAt, //  Incluir sentAt para extraer hora correcta en frontend
+                        sentAt: msgContext.savedMessage?.sentAt, //  Incluir sentAt para extraer hora correcta en frontend
                         mediaType,
                         mediaData,
                         fileName,
@@ -1838,7 +1766,7 @@ export class SocketGateway
                         const conversationUpdateData = {
                             conversationId: data.conversationId,
                             lastMessage: messageText,
-                            lastMessageTime: savedMessage?.sentAt || new Date().toISOString(),
+                            lastMessageTime: msgContext.savedMessage?.sentAt || new Date().toISOString(),
                             lastMessageFrom: from,
                             lastMessageMediaType: mediaType
                         };
@@ -1860,6 +1788,70 @@ export class SocketGateway
         }); // Fin de setImmediate
     }
 
+    // 🚀 NUEVO: Guardado en background (no bloqueante)
+    // Guarda el mensaje en BD sin bloquear la emisión al usuario
+    private saveMessageInBackground(
+        data: any,
+        finalRoomCode: string,
+        senderRole: string,
+        senderNumeroAgente: string,
+        tempId: string,
+        from: string
+    ): void {
+        // Ejecutar en el siguiente tick del event loop
+        setImmediate(async () => {
+            const bgPerfLabel = `🔄 saveMessageInBackground [${tempId}]`;
+            console.time(bgPerfLabel);
+
+            try {
+                const savedMessage = await this.saveMessageToDatabase({
+                    ...data,
+                    roomCode: finalRoomCode,
+                    senderRole,
+                    senderNumeroAgente,
+                });
+
+                if (savedMessage) {
+                    // 🚀 Emitir actualización con ID real para sincronización
+                    // Solo si el ID temporal era diferente al real
+                    if (tempId !== savedMessage.id?.toString()) {
+                        const updatePayload = {
+                            tempId,
+                            realId: savedMessage.id,
+                            roomCode: finalRoomCode,
+                        };
+
+                        // Notificar a la sala para que actualicen el ID temporal
+                        if (data.isGroup && finalRoomCode) {
+                            this.server.to(finalRoomCode).emit('messageIdUpdate', updatePayload);
+                        }
+                    }
+
+                    // 🚀 Si es encuesta, crearla después de guardar
+                    if (data.isPoll && data.poll) {
+                        try {
+                            await this.pollsService.createPoll(
+                                {
+                                    question: data.poll.question,
+                                    options: data.poll.options,
+                                },
+                                savedMessage.id,
+                                from,
+                            );
+                        } catch (pollError) {
+                            console.error('❌ Error al crear encuesta:', pollError);
+                        }
+                    }
+                }
+
+                console.timeEnd(bgPerfLabel);
+            } catch (error) {
+                console.error(`❌ Error en saveMessageInBackground:`, error);
+                console.timeEnd(bgPerfLabel);
+            }
+        });
+    }
+
     private async saveMessageToDatabase(data: any) {
         const {
             to,
@@ -1869,7 +1861,7 @@ export class SocketGateway
             fromId,
             senderRole, //  Extraer role del remitente
             senderNumeroAgente, //  Extraer numeroAgente del remitente
-            roomCode, //  CR�TICO: Extraer roomCode del data
+            roomCode, //  CRÍTICO: Extraer roomCode del data
             mediaType,
             mediaData,
             fileName,
@@ -3319,7 +3311,7 @@ export class SocketGateway
         @MessageBody()
         data: { messageId: number; username: string; roomCode: string },
     ) {
-        //  DEDUPLICACIÓN: Bloquear eventos duplicados del frontend viejo (cacheado)
+        // 🔥 DEDUPLICACIÓN: Bloquear eventos duplicados del frontend viejo (cacheado)
         const dedupeKey = `markRead:${data.messageId}:${data.username}`;
 
         try {
@@ -3402,76 +3394,101 @@ export class SocketGateway
         @ConnectedSocket() _client: Socket,
         @MessageBody() data: any,
     ) {
-        // console.log(
-        //     `?? WS: threadMessage - De: ${data.from}, threadId: ${data.threadId}`,
-        // );
+        // 🚀 OPTIMIZADO: Ahora el backend maneja TODO el flujo de mensajes de hilo
+        // Antes: Frontend hacía POST /messages + PATCH /increment-thread + 2 eventos WS
+        // Ahora: Frontend solo emite 'threadMessage', backend hace el resto
 
         try {
-            // El mensaje ya debe estar guardado en BD por el frontend antes de emitir este evento
-            // Solo necesitamos reenviar el mensaje a todos los usuarios relevantes
+            const { threadId, from, to, isGroup, roomCode } = data;
 
-            //  DEBUG: Logging para diagnosticar problemas de entrega en cluster
             console.log('🧵 handleThreadMessage recibido:', {
-                from: data.from,
-                to: data.to,
-                isGroup: data.isGroup,
-                roomCode: data.roomCode,
-                threadId: data.threadId,
+                from,
+                to,
+                isGroup,
+                roomCode,
+                threadId,
+                hasId: !!data.id,
             });
 
-            // Determinar destinatarios basados en si es grupo o no
-            if (data.isGroup && data.roomCode) {
-                //  CLUSTER FIX: Broadcast a sala Redis de grupo
-                console.log(`🧵 Emitiendo threadMessage a sala de grupo: ${data.roomCode}`);
-                this.server.to(data.roomCode).emit('threadMessage', data);
-            } else {
-                //  CLUSTER FIX: Enviar a ambos participantes mediante Redis
-                //  FIX: Solo enviar a la versión LOWERCASE para evitar eventos duplicados
-                const fromRoom = data.from?.toLowerCase?.();
-                const toRoom = data.to?.toLowerCase?.();
+            let savedMessage = data;
 
-                console.log(`🧵 Emitiendo threadMessage a sala FROM: ${fromRoom}`);
-                console.log(`🧵 Emitiendo threadMessage a sala TO: ${toRoom}`);
+            // 🚀 PASO 1: Guardar mensaje en BD si no tiene ID (no fue guardado por frontend)
+            if (!data.id && threadId) {
+                try {
+                    // Obtener info del remitente
+                    const senderUser = this.users.get(from);
+                    let senderRole = senderUser?.userData?.role || null;
+                    let senderNumeroAgente = senderUser?.userData?.numeroAgente || null;
 
-                // Emitir al remitente
-                if (fromRoom) {
-                    this.server.to(fromRoom).emit('threadMessage', data);
-                }
+                    // Buscar en caché si no tenemos la info
+                    if (!senderRole || !senderNumeroAgente) {
+                        const cachedUserInfo = this.userCache.get(from);
+                        if (cachedUserInfo && (Date.now() - cachedUserInfo.cachedAt < this.CACHE_TTL)) {
+                            senderRole = senderRole || cachedUserInfo.role;
+                            senderNumeroAgente = senderNumeroAgente || cachedUserInfo.numeroAgente;
+                        }
+                    }
 
-                // Emitir al destinatario (si es diferente)
-                if (toRoom && toRoom !== fromRoom) {
-                    this.server.to(toRoom).emit('threadMessage', data);
+                    // Guardar mensaje de hilo en BD
+                    savedMessage = await this.messagesService.create({
+                        ...data,
+                        threadId,
+                        senderRole,
+                        senderNumeroAgente,
+                    });
+
+                    console.log(`🧵 Mensaje de hilo guardado con ID: ${savedMessage?.id}`);
+                } catch (saveError) {
+                    console.error('❌ Error al guardar mensaje de hilo:', saveError);
+                    // Continuar con el data original para no bloquear la UI
                 }
             }
-            // console.log('? threadMessage reenviado exitosamente');
-        } catch (error) {
-            console.error('? Error al manejar threadMessage:', error);
-        }
-    }
 
-    @SubscribeMessage('threadCountUpdated')
-    async handleThreadCountUpdated(
-        @ConnectedSocket() client: Socket,
-        @MessageBody() data: any,
-    ) {
-        // console.log(
-        //   `?? WS: threadCountUpdated - MessageID: ${data.messageId}, LastReply: ${data.lastReplyFrom}, From: ${data.from}, To: ${data.to}`,
-        // );
+            // 🚀 PASO 2: Incrementar threadCount del mensaje padre (1 query optimizado)
+            if (threadId) {
+                try {
+                    await this.messagesService.incrementThreadCount(threadId);
+                    console.log(`🔢 threadCount incrementado para mensaje ${threadId}`);
+                } catch (incError) {
+                    console.error('❌ Error al incrementar threadCount:', incError);
+                }
+            }
 
-        try {
-            const { messageId, lastReplyFrom, isGroup, roomCode, to, from } = data;
+            // 🚀 PASO 3: Preparar payload con datos actualizados
+            const messagePayload = {
+                ...data,
+                id: savedMessage?.id || data.id,
+                sentAt: savedMessage?.sentAt || data.sentAt,
+                time: savedMessage?.time || data.time,
+            };
 
-            //  Preparar el payload completo con toda la información necesaria
+            // 🚀 PASO 4: Emitir threadMessage a destinatarios
+            if (isGroup && roomCode) {
+                console.log(`🧵 Emitiendo threadMessage a sala de grupo: ${roomCode}`);
+                this.server.to(roomCode).emit('threadMessage', messagePayload);
+            } else {
+                const fromRoom = from?.toLowerCase?.();
+                const toRoom = to?.toLowerCase?.();
+
+                if (fromRoom) {
+                    this.server.to(fromRoom).emit('threadMessage', messagePayload);
+                }
+                if (toRoom && toRoom !== fromRoom) {
+                    this.server.to(toRoom).emit('threadMessage', messagePayload);
+                }
+            }
+
+            // 🚀 PASO 5: Emitir threadCountUpdated automáticamente (antes era otro evento separado)
             let roomName = '';
             if (isGroup && roomCode) {
-                // Buscar el nombre de la sala en BD
                 const room = await this.getCachedRoom(roomCode);
                 roomName = room?.name || '';
             }
 
             const updatePayload = {
-                messageId,
-                lastReplyFrom,
+                messageId: threadId,
+                lastReplyFrom: from,
+                lastReplyText: data.message?.substring(0, 100), // Preview del mensaje
                 from,
                 to,
                 isGroup,
@@ -3480,32 +3497,68 @@ export class SocketGateway
             };
 
             if (isGroup && roomCode) {
-                //  CLUSTER FIX: Broadcast a sala Redis de grupo
-                console.log(`🔢 Emitiendo threadCountUpdated a sala de grupo: ${roomCode}`);
                 this.server.to(roomCode).emit('threadCountUpdated', updatePayload);
             } else {
-                //  CLUSTER FIX: Broadcast directed via Redis for 1:1
-                //  FIX: Solo enviar a la versión LOWERCASE para evitar eventos duplicados
-                // (Los usuarios están unidos a ambas versiones de su nombre, pero solo necesitamos emitir a una)
-                const toRoom = to?.toLowerCase?.();
                 const fromRoom = from?.toLowerCase?.();
-
-                console.log(`🔢 Emitiendo threadCountUpdated a sala TO: ${toRoom}`);
-                console.log(`🔢 Emitiendo threadCountUpdated a sala FROM: ${fromRoom}`);
-
+                const toRoom = to?.toLowerCase?.();
                 if (toRoom) {
                     this.server.to(toRoom).emit('threadCountUpdated', updatePayload);
                 }
-
                 if (fromRoom && fromRoom !== toRoom) {
                     this.server.to(fromRoom).emit('threadCountUpdated', updatePayload);
                 }
             }
 
-            // console.log(`? Contador de hilo actualizado correctamente`);
+            console.log('✅ threadMessage procesado completamente');
         } catch (error) {
-            console.error('? Error al actualizar contador de hilo:', error);
-            client.emit('error', { message: 'Error al actualizar contador de hilo' });
+            console.error('❌ Error al manejar threadMessage:', error);
+        }
+    }
+
+    @SubscribeMessage('threadCountUpdated')
+    async handleThreadCountUpdated(
+        @ConnectedSocket() _client: Socket,
+        @MessageBody() data: any,
+    ) {
+        // 🚀 NOTA: Este handler ahora es principalmente para compatibilidad con frontends antiguos
+        // La lógica principal de actualización de threadCount se hace en handleThreadMessage
+        // Este handler solo reenvía el evento a los destinatarios
+
+        try {
+            const { messageId, lastReplyFrom, isGroup, roomCode, to, from, lastReplyText } = data;
+
+            let roomName = '';
+            if (isGroup && roomCode) {
+                const room = await this.getCachedRoom(roomCode);
+                roomName = room?.name || '';
+            }
+
+            const updatePayload = {
+                messageId,
+                lastReplyFrom,
+                lastReplyText,
+                from,
+                to,
+                isGroup,
+                roomCode,
+                roomName,
+            };
+
+            if (isGroup && roomCode) {
+                this.server.to(roomCode).emit('threadCountUpdated', updatePayload);
+            } else {
+                const toRoom = to?.toLowerCase?.();
+                const fromRoom = from?.toLowerCase?.();
+
+                if (toRoom) {
+                    this.server.to(toRoom).emit('threadCountUpdated', updatePayload);
+                }
+                if (fromRoom && fromRoom !== toRoom) {
+                    this.server.to(fromRoom).emit('threadCountUpdated', updatePayload);
+                }
+            }
+        } catch (error) {
+            console.error('❌ Error al reenviar threadCountUpdated:', error);
         }
     }
     // ==================== REACCIONES A MENSAJES ====================
@@ -3523,7 +3576,7 @@ export class SocketGateway
             threadId?: number; //  Para reacciones en mensajes de hilo
         },
     ) {
-        //  DEDUPLICACIÓN: Evitar procesamiento múltiple del mismo evento
+        // 🔥 DEDUPLICACIÓN: Evitar procesamiento múltiple del mismo evento
         const dedupeKey = `reaction:${data.messageId}:${data.username}:${data.emoji}`;
 
         try {

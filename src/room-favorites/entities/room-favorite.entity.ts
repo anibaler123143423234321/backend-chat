@@ -40,7 +40,7 @@ export class RoomFavorite {
   @UpdateDateColumn()
   updatedAt: Date;
 
-  //  Relación con la sala para obtener datos completos
+  // 🔥 Relación con la sala para obtener datos completos
   // Nota: createForeignKeyConstraints: false evita el error con datos huérfanos existentes
   @ManyToOne(() => TemporaryRoom, { eager: false, createForeignKeyConstraints: false })
   @JoinColumn({ name: 'roomId', referencedColumnName: 'id' })
