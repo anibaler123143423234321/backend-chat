@@ -1452,23 +1452,21 @@ export class SocketGateway
                         // Es una sala temporal
                         let roomUsers = this.roomUsers.get(finalRoomCode);
                         // console.log(
-                        //     `?? Enviando a sala temporal: ${finalRoomCode}, Miembros en memoria: ${roomUsers?.size || 0}`,
+                        //     `🔔 Enviando a sala temporal: ${finalRoomCode}, Miembros en memoria: ${roomUsers?.size || 0}`,
                         // );
 
-                        // 🚀 OPTIMIZADO: Usar caché de salas en lugar de consultar BD en cada mensaje
-                        // Solo sincronizar si NO tenemos usuarios en memoria
-                        if (!roomUsers || roomUsers.size === 0) {
-                            const room = await this.getCachedRoom(finalRoomCode);
-                            if (room && room.connectedMembers) {
-                                // Combinar usuarios en memoria con usuarios de BD
-                                const allUsers = new Set([
-                                    ...(roomUsers ? Array.from(roomUsers) : []),
-                                    ...room.connectedMembers.filter((username) =>
-                                        this.users.has(username),
-                                    ),
-                                ]);
-                                roomUsers = allUsers;
-                            }
+                        // 🚀 CLUSTER FIX: SIEMPRE obtener miembros de la BD/caché
+                        // Los usuarios locales (this.users) solo representan conexiones de ESTE nodo
+                        // En un cluster, los usuarios pueden estar en otros nodos
+                        const room = await this.getCachedRoom(finalRoomCode);
+                        if (room && room.connectedMembers && room.connectedMembers.length > 0) {
+                            // 🚀 CLUSTER FIX: Usar TODOS los miembros de la BD, NO filtrar por conexión local
+                            // Redis Adapter se encargará de dirigir los mensajes al nodo correcto
+                            roomUsers = new Set([
+                                ...(roomUsers ? Array.from(roomUsers) : []),
+                                ...room.connectedMembers, // 🔥 NO filtrar por this.users.has()
+                            ]);
+                            // console.log(`🔔 CLUSTER FIX: roomUsers actualizado desde BD: ${roomUsers.size} miembros`);
                         }
 
                         if (roomUsers && roomUsers.size > 0) {
@@ -1523,41 +1521,35 @@ export class SocketGateway
                             // Log de éxito (asumido por Redis broadcast)
                             // console.log(`🚀 DEBUG: Mensaje de grupo enviado a sala ${finalRoomCode} (Redis Broadcast)`);
 
-                            // ?? NUEVO: Actualizar ltimo mensaje para todos los usuarios (excepto el remitente)
-                            // Esto asegura que el ltimo mensaje se actualice en tiempo real en la lista de salas
+                            // 🚀 CLUSTER FIX: Actualizar último mensaje para todos los usuarios (excepto el remitente)
+                            // Usar Redis broadcast en lugar de verificar conexión local
                             roomUsers.forEach((member) => {
                                 if (member !== from) {
+                                    // 🚀 CLUSTER FIX: Verificar currentRoom en memoria local si está disponible,
+                                    // pero SIEMPRE emitir el evento vía Redis para alcanzar otros nodos
                                     const memberUser = this.users.get(member);
-                                    if (memberUser && memberUser.socket && memberUser.socket.connected) {
-                                        // Verificar si el usuario est viendo esta sala actualmente
-                                        const isViewingThisRoom = memberUser.currentRoom === finalRoomCode;
-                                        // console.log(`?? DEBUG - Usuario ${member}: currentRoom="${memberUser.currentRoom}", roomCode="${finalRoomCode}", isViewingThisRoom=${isViewingThisRoom}`);
+                                    const isViewingThisRoom = memberUser?.currentRoom === finalRoomCode;
 
-                                        const lastMessageData = {
-                                            text: message,
-                                            from: from,
-                                            time: time || formatPeruTime(),
-                                            sentAt: msgContext.savedMessage?.sentAt || new Date().toISOString(),
-                                        };
+                                    const lastMessageData = {
+                                        text: message,
+                                        from: from,
+                                        time: time || formatPeruTime(),
+                                        sentAt: msgContext.savedMessage?.sentAt || new Date().toISOString(),
+                                        mediaType,
+                                        fileName,
+                                    };
 
-                                        if (!isViewingThisRoom) {
-                                            // Usuario NO est viendo esta sala, enviar actualizacin con contador
-                                            this.emitUnreadCountUpdateForUser(
-                                                finalRoomCode,
-                                                member,
-                                                1, // Incrementar contador
-                                                lastMessageData,
-                                            );
-                                        } else {
-                                            // Usuario S est viendo esta sala, solo actualizar ltimo mensaje sin incrementar contador
-                                            this.emitUnreadCountUpdateForUser(
-                                                finalRoomCode,
-                                                member,
-                                                0, // No incrementar contador
-                                                lastMessageData,
-                                            );
-                                        }
-                                    }
+                                    // 🚀 CLUSTER FIX: Siempre emitir vía Redis (server.to) para alcanzar usuarios en otros nodos
+                                    // Si el usuario está en este nodo Y está viendo la sala, no incrementar contador
+                                    // Si no sabemos dónde está (otro nodo), asumir que NO está viendo la sala e incrementar
+                                    const shouldIncrement = !isViewingThisRoom;
+
+                                    this.emitUnreadCountUpdateForUser(
+                                        finalRoomCode,
+                                        member,
+                                        shouldIncrement ? 1 : 0,
+                                        lastMessageData,
+                                    );
                                 }
                             });
                         } else {
