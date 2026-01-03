@@ -7,6 +7,7 @@ import {
     JoinColumn,
 } from 'typeorm';
 import { Poll } from './poll.entity';
+import { PollOption } from './poll-option.entity';
 
 @Entity('poll_votes')
 export class PollVote {
@@ -16,8 +17,12 @@ export class PollVote {
     @Column({ type: 'varchar', length: 255 })
     username: string; // Usuario que votó
 
+    @ManyToOne(() => PollOption, (option) => option.votes, { onDelete: 'CASCADE' })
+    @JoinColumn({ name: 'optionId' })
+    option: PollOption;
+
     @Column({ type: 'int' })
-    optionIndex: number; // Índice de la opción votada (0, 1, 2, ...)
+    optionId: number;
 
     // Relación muchos a uno con Poll
     @ManyToOne(() => Poll, (poll) => poll.votes, { onDelete: 'CASCADE' })

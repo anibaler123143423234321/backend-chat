@@ -10,6 +10,7 @@ import {
 } from 'typeorm';
 import { Message } from '../../messages/entities/message.entity';
 import { PollVote } from './poll-vote.entity';
+import { PollOption } from './poll-option.entity';
 
 @Entity('polls')
 export class Poll {
@@ -19,8 +20,8 @@ export class Poll {
     @Column({ type: 'varchar', length: 500 })
     question: string;
 
-    @Column({ type: 'json' })
-    options: string[]; // Array de opciones ["Opción 1", "Opción 2", ...]
+    @OneToMany(() => PollOption, (option) => option.poll, { cascade: true })
+    options: PollOption[];
 
     @Column({ type: 'varchar', length: 255 })
     createdBy: string; // Username del creador

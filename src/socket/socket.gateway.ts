@@ -3902,16 +3902,21 @@ export class SocketGateway
             const updatedPoll = await this.pollsService.getPollWithVotes(poll.id);
 
             // Preparar datos de la encuesta para el frontend
+            // Mapear entidades PollOption a estructura simple para frontend
+            const optionsText = updatedPoll.options.map(o => o.text);
+
             const pollData = {
                 question: updatedPoll.question,
-                options: updatedPoll.options,
-                votes: updatedPoll.votes.map(v => ({
-                    username: v.username,
-                    optionIndex: v.optionIndex,
-                })),
+                options: optionsText,
+                votes: updatedPoll.options.flatMap((option, index) =>
+                    option.votes ? option.votes.map(v => ({
+                        username: v.username,
+                        optionIndex: index
+                    })) : []
+                ),
             };
 
-            // Emitir actualizaci�n en tiempo real
+            // Emitir actualizacin en tiempo real
             if (data.roomCode) {
                 // Es una sala de grupo
                 const roomUsers = this.roomUsers.get(data.roomCode);
