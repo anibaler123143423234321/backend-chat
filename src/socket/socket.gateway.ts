@@ -28,8 +28,8 @@ import { getPeruDate, formatPeruTime } from '../utils/date.utils';
     transports: ['websocket', 'polling'],
     path: '/socket.io/',
     // ✅ CONFIGURACIÓN ESTABLE: Tolerante a redes lentas y pestañas inactivas
-    pingTimeout: 60000,    // 60 segundos - tiempo para esperar respuesta de ping
-    pingInterval: 25000,   // 25 segundos - cada cuánto enviar ping
+    pingTimeout: 7000,     // 7 segundos - tiempo para esperar respuesta de ping (Total ~22s)
+    pingInterval: 15000,   // 15 segundos - cada cuánto enviar ping
     maxHttpBufferSize: 10 * 1024 * 1024, // 10MB - límite de tamaño de mensaje
     connectTimeout: 45000, // 45 segundos - timeout de conexión inicial
     upgradeTimeout: 10000, // 10 segundos - timeout de upgrade de polling a websocket
@@ -134,8 +134,41 @@ export class SocketGateway
         return false;
     }
 
+    // 🔥 NUEVO: Obtener Set de usuarios online para verificaciones batch (más eficiente)
+    // Consulta Redis una sola vez y retorna un Set para O(1) lookups
+    public async getOnlineUsersSet(): Promise<Set<string>> {
+        const onlineSet = new Set<string>();
+
+        // 1. Añadir usuarios de memoria local
+        for (const username of this.users.keys()) {
+            onlineSet.add(username);
+            onlineSet.add(username.toLowerCase().trim());
+        }
+
+        // 2. Añadir usuarios de Redis (para cluster)
+        if (this.isRedisReady()) {
+            try {
+                const usersHash = await this.redisClient.hGetAll(this.REDIS_ONLINE_USERS_KEY);
+                for (const username of Object.keys(usersHash)) {
+                    onlineSet.add(username);
+                    onlineSet.add(username.toLowerCase().trim());
+                }
+            } catch (error) {
+                console.error(`❌ Error obteniendo usuarios online de Redis:`, error.message);
+            }
+        }
+
+        return onlineSet;
+    }
+
+    // 🔥 NUEVO: Verificar si un usuario está online usando un Set pre-cargado
+    // Útil cuando ya tenemos la lista de Redis y queremos evitar re-consultar
+    public isUserOnlineWithSet(username: string, onlineSet: Set<string>): boolean {
+        return onlineSet.has(username) || onlineSet.has(username.toLowerCase().trim());
+    }
+
     /**
-     * ?? OPTIMIZACI�N: B�squeda case-insensitive r�pida usando �ndice
+     * ?? OPTIMIZACIN: Bsqueda case-insensitive rpida usando ndice
      * ANTES: O(n) iterando sobre todos los usuarios
      * AHORA: O(1) lookup en el �ndice
      */
@@ -1028,6 +1061,9 @@ export class SocketGateway
                 // 🚀 OPTIMIZACIÓN: UNA sola query para todos los participantes offline
                 if (participantsToFind.length > 0) {
                     try {
+                        // 🔥 CLUSTER FIX: Obtener Set de usuarios online (incluye Redis)
+                        const onlineUsersSet = await this.getOnlineUsersSet();
+
                         const dbUsers = await this.userRepository
                             .createQueryBuilder('user')
                             .where(
@@ -1046,9 +1082,9 @@ export class SocketGateway
                                     ? `${dbUser.nombre} ${dbUser.apellido}`
                                     : dbUser.username;
 
-                            const isUserConnected =
-                                this.users.has(fullName) ||
-                                this.users.has(dbUser.username);
+                            // 🔥 CLUSTER FIX: Verificar estado online usando Set que incluye Redis
+                            const isUserConnected = this.isUserOnlineWithSet(fullName, onlineUsersSet) ||
+                                this.isUserOnlineWithSet(dbUser.username, onlineUsersSet);
 
                             usersToSend.push({
                                 id: dbUser.id || null,
@@ -2343,11 +2379,14 @@ export class SocketGateway
             allUsernames = connectedUsernamesList;
         }
 
-        // Crear lista con TODOS los usuarios a�adidos a la sala y su estado de conexi�n
+        // 🔥 CLUSTER FIX: Obtener Set de usuarios online (incluye Redis)
+        const onlineUsersSet = await this.getOnlineUsersSet();
+
+        // Crear lista con TODOS los usuarios añadidos a la sala y su estado de conexión
         const roomUsersList = allUsernames.map((username) => {
             const user = this.users.get(username);
-            // CORREGIDO: Determinar isOnline bas�ndose en si el usuario est� conectado globalmente
-            const isOnline = this.users.has(username) && user?.socket?.connected;
+            // 🔥 CLUSTER FIX: Verificar estado online usando Set que incluye Redis
+            const isOnline = this.isUserOnlineWithSet(username, onlineUsersSet);
             return {
                 id: user?.userData?.id || null,
                 username: username,
@@ -2594,15 +2633,17 @@ export class SocketGateway
                         if (offlineParticipants.length > 0) {
                             // Log eliminado para optimizaci�n
 
-                            //  PASO 1: Verificar cach� primero
+                            //  PASO 1: Verificar caché primero
+                            // 🔥 CLUSTER FIX: Pre-fetch online users set
+                            const onlineUsersSet = await this.getOnlineUsersSet();
                             const uncachedParticipants: string[] = [];
                             offlineParticipants.forEach((participantName) => {
                                 const cached = this.userCache.get(participantName);
                                 if (cached && Date.now() - cached.cachedAt < this.CACHE_TTL) {
-                                    // Usar datos del cach�
-                                    const isUserConnected =
-                                        this.users.has(cached.username) ||
-                                        this.users.has(participantName);
+                                    // Usar datos del caché
+                                    // 🔥 CLUSTER FIX: Verificar estado online usando Set que incluye Redis
+                                    const isUserConnected = this.isUserOnlineWithSet(cached.username, onlineUsersSet) ||
+                                        this.isUserOnlineWithSet(participantName, onlineUsersSet);
 
                                     adminUsersToSend.push({
                                         id: cached.id || null,
@@ -2654,9 +2695,9 @@ export class SocketGateway
                                                 ? `${dbUser.nombre} ${dbUser.apellido}`
                                                 : dbUser.username;
 
-                                        const isUserConnected =
-                                            this.users.has(fullName) ||
-                                            this.users.has(dbUser.username);
+                                        // 🔥 CLUSTER FIX: Verificar estado online usando Set que incluye Redis
+                                        const isUserConnected = this.isUserOnlineWithSet(fullName, onlineUsersSet) ||
+                                            this.isUserOnlineWithSet(dbUser.username, onlineUsersSet);
 
                                         adminUsersToSend.push({
                                             id: dbUser.id || null,
@@ -2811,15 +2852,18 @@ export class SocketGateway
                                     })
                                     .getMany();
 
+                                // 🔥 CLUSTER FIX: Obtener Set de usuarios online ANTES del forEach
+                                const onlineUsersSet2 = await this.getOnlineUsersSet();
+
                                 dbUsers.forEach((dbUser) => {
                                     const fullName =
                                         dbUser.nombre && dbUser.apellido
                                             ? `${dbUser.nombre} ${dbUser.apellido}`
                                             : dbUser.username;
 
-                                    const isUserConnected =
-                                        this.users.has(fullName) ||
-                                        this.users.has(dbUser.username);
+                                    // 🔥 CLUSTER FIX: Verificar estado online usando Set pre-cargado
+                                    const isUserConnected = this.isUserOnlineWithSet(fullName, onlineUsersSet2) ||
+                                        this.isUserOnlineWithSet(dbUser.username, onlineUsersSet2);
 
                                     usersToSend.push({
                                         id: dbUser.id || null,
@@ -2883,11 +2927,14 @@ export class SocketGateway
             memberCount = connectedUsernamesList.length;
         }
 
-        // Crear lista con TODOS los usuarios a�adidos a la sala y su estado de conexi�n
+        // 🔥 CLUSTER FIX: Obtener Set de usuarios online (incluye Redis)
+        const onlineUsersSet = await this.getOnlineUsersSet();
+
+        // Crear lista con TODOS los usuarios añadidos a la sala y su estado de conexión
         const roomUsersList = allUsernames.map((username) => {
             const user = this.users.get(username);
-            // CORREGIDO: Determinar isOnline bas�ndose en si el usuario est� conectado globalmente
-            const isOnline = this.users.has(username) && user?.socket?.connected;
+            // 🔥 CLUSTER FIX: Verificar estado online usando Set que incluye Redis
+            const isOnline = this.isUserOnlineWithSet(username, onlineUsersSet);
             return {
                 id: user?.userData?.id || null,
                 username: username,
