@@ -99,9 +99,39 @@ export class SocketGateway
     private BROADCAST_USERLIST_THROTTLE = 10000; // 🚀 10 segundos (antes: 5s)
     private pendingBroadcastUserList = false;
 
-    // ?? NUEVO: M�todo p�blico para verificar si un usuario est� conectado
+    // 🔥 NUEVO: Método público para verificar si un usuario está conectado
+    // Primero verifica memoria local, luego Redis (para cluster)
     public isUserOnline(username: string): boolean {
-        return this.users.has(username);
+        // 1. Verificar en memoria local (rápido - O(1))
+        if (this.users.has(username)) {
+            return true;
+        }
+
+        // 2. Para el método síncrono, solo podemos verificar memoria local
+        // Para verificación completa de cluster, usar isUserOnlineAsync
+        return false;
+    }
+
+    // 🔥 NUEVO: Versión async que verifica tanto memoria local como Redis (cluster)
+    public async isUserOnlineAsync(username: string): Promise<boolean> {
+        // 1. Verificar en memoria local (rápido - O(1))
+        if (this.users.has(username)) {
+            return true;
+        }
+
+        // 2. Verificar en Redis para cluster (si está disponible)
+        if (this.isRedisReady()) {
+            try {
+                const userInfo = await this.redisClient.hGet(this.REDIS_ONLINE_USERS_KEY, username);
+                if (userInfo) {
+                    return true;
+                }
+            } catch (error) {
+                console.error(`❌ Error verificando usuario online en Redis:`, error.message);
+            }
+        }
+
+        return false;
     }
 
     /**
