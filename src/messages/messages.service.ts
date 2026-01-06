@@ -1194,20 +1194,33 @@ export class MessagesService {
     }));
   }
 
-  // Obtener mensajes de un hilo específico
+  // Obtener mensajes de un hilo específico con información de paginación
   async findThreadMessages(
     threadId: number,
     limit: number = 100,
     offset: number = 0,
-  ): Promise<Message[]> {
+  ): Promise<{ data: Message[]; total: number; hasMore: boolean; page: number; totalPages: number }> {
     // 🔥 CORREGIDO: Usar ID en lugar de sentAt para ordenamiento consistente
     // sentAt puede estar corrupto, así que usamos ID que es más confiable
-    return await this.messageRepository.find({
+    const [messages, total] = await this.messageRepository.findAndCount({
       where: { threadId, isDeleted: false },
       order: { id: 'ASC' },
       take: limit,
       skip: offset,
     });
+
+    // 🔥 Calcular información de paginación
+    const page = Math.floor(offset / limit) + 1;
+    const totalPages = Math.ceil(total / limit);
+    const hasMore = offset + messages.length < total;
+
+    return {
+      data: messages,
+      total,
+      hasMore,
+      page,
+      totalPages,
+    };
   }
 
   // 🚀 OPTIMIZADO: Incrementar contador de respuestas en hilo con UPDATE directo
