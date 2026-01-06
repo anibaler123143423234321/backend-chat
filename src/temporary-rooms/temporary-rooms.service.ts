@@ -611,14 +611,11 @@ export class TemporaryRoomsService {
       return {
         id: room.id,
         name: room.name,
-        description: room.description,
         roomCode: room.roomCode,
         currentMembers: room.currentMembers,
+        maxCapacity: room.maxCapacity, // 🔥 AGREGADO: maxCapacity para el frontend
         isActive: room.isActive,
         isAssignedByAdmin: room.isAssignedByAdmin,
-        settings: room.settings,
-        pinnedMessageId: room.pinnedMessageId,
-        lastMessage: lastMessage,
       };
     }).filter(room => room !== null); // Eliminar nulos del filtrado
 
