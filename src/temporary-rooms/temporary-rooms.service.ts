@@ -611,6 +611,7 @@ export class TemporaryRoomsService {
       return {
         id: room.id,
         name: room.name,
+        description: room.description, // 🔥 RESTAURADO: description para el frontend es el picture
         roomCode: room.roomCode,
         currentMembers: room.currentMembers,
         maxCapacity: room.maxCapacity, // 🔥 AGREGADO: maxCapacity para el frontend
