@@ -103,6 +103,10 @@ export class SocketGateway
     private userLastActivity = new Map<string, number>(); // username -> timestamp
     private IDLE_TIMEOUT = 30 * 60 * 1000; // 30 minutos sin actividad = desconexión
 
+    // 🚀 DEBOUNCE: Retrasar notificación de offline para evitar flapping
+    private pendingDisconnects = new Map<string, NodeJS.Timeout>(); // username -> timeout
+    private DISCONNECT_DEBOUNCE_MS = 10000; // 10 segundos de gracia antes de marcar offline
+
     // 🔥 NUEVO: Método público para verificar si un usuario está conectado
     // Primero verifica memoria local, luego Redis (para cluster)
     public isUserOnline(username: string): boolean {
@@ -495,84 +499,82 @@ export class SocketGateway
         // Remover usuario del chat si existe
         for (const [username, user] of this.users.entries()) {
             if (user.socket === client) {
-                // console.log(`?? Desconectando usuario: ${username}`);
-
                 // Si el usuario estaba en una sala, solo removerlo de la memoria (NO de la BD)
                 if (user.currentRoom) {
                     const roomCode = user.currentRoom;
-                    // console.log(` Usuario ${username} estaba en sala ${roomCode}`);
-
-                    // NO remover de la base de datos - mantener en el historial
-                    // Solo remover de la memoria para marcarlo como desconectado
                     const roomUsersSet = this.roomUsers.get(roomCode);
                     if (roomUsersSet) {
                         roomUsersSet.delete(username);
-                        // console.log(`? Usuario ${username} removido de sala en memoria`);
-
                         if (roomUsersSet.size === 0) {
                             this.roomUsers.delete(roomCode);
-                            // console.log(
-                            //     `Sala ${roomCode} removida de memoria (sin usuarios)`,
-                            // );
                         }
                     }
-
-                    // Notificar a otros usuarios de la sala que este usuario se desconect�
+                    // Notificar a otros usuarios de la sala que este usuario se desconectó
                     await this.broadcastRoomUsers(roomCode);
                 }
 
-                // Remover usuario del mapa de usuarios conectados
-                this.users.delete(username);
-                this.adminUsers.delete(username); //  NUEVO: Limpiar adminUsers
-                // ?? OPTIMIZACI�N: Limpiar �ndice normalizado
-                this.usernameIndex.delete(username.toLowerCase().trim());
-                // console.log(`? Usuario ${username} removido del mapa de usuarios`);
-
-                // 🚀 OPTIMIZACIÓN: Usar broadcast ligero de cambio de estado
-                // En lugar de obtener conversaciones y hacer broadcastUserList completo,
-                // solo notificar que el usuario se desconectó
+                // Remover usuario del mapa de usuarios conectados (memoria local)
                 const userData = user.userData;
+                this.users.delete(username);
+                this.adminUsers.delete(username);
+                this.usernameIndex.delete(username.toLowerCase().trim());
+
                 const displayName =
                     userData?.nombre && userData?.apellido
                         ? `${userData.nombre} ${userData.apellido}`
                         : username;
 
-                //  LOG: Confirmar desconexión
-                console.log(`👤 handleDisconnect: ${displayName} (${username}) se desconectó`);
+                // 🚀 DEBOUNCE: No marcar offline inmediatamente, esperar 10 segundos
+                // Si el usuario se reconecta antes, cancelamos el timeout y no notificamos offline
+                console.log(`⏳ handleDisconnect: ${displayName} (${username}) desconectado - esperando ${this.DISCONNECT_DEBOUNCE_MS / 1000}s antes de marcar offline`);
 
-                // 🛡️ RACE CONDITION FIX: Verificar si este socket sigue siendo el actual en Redis
-                // Si el ID en Redis es DIFERENTE, significa que ya hay una nueva sesión activa.
-                // En ese caso, NO borramos el estado "Online" ni el socket key.
-                let isCurrentSession = true;
-                if (this.isRedisReady()) {
+                // Guardar referencia al socket ID para verificar después
+                const disconnectedSocketId = client.id;
+
+                // Crear timeout debounce
+                const disconnectTimeout = setTimeout(async () => {
                     try {
-                        const currentRedisSocketId = await this.redisClient.get(`socket:user:${username}`);
-                        // Si hay un socket registrado y NO es este, entonces es uno más nuevo
-                        if (currentRedisSocketId && currentRedisSocketId !== client.id) {
-                            console.log(`🛡️ handleDisconnect: Socket ${client.id} desconectado, pero ${username} tiene nueva sesión (${currentRedisSocketId}). MANTENIENDO ONLINE.`);
-                            isCurrentSession = false;
+                        // 🛡️ RACE CONDITION FIX: Verificar si hay una nueva sesión activa
+                        // Si el usuario se reconectó, NO marcar como offline
+                        if (this.users.has(username)) {
+                            console.log(`✅ DEBOUNCE CANCELADO: ${username} se reconectó antes del timeout`);
+                            this.pendingDisconnects.delete(username);
+                            return;
                         }
-                    } catch (err) {
-                        console.error(`Error verificando sesión Redis para ${username}:`, err);
-                    }
-                }
 
-                if (isCurrentSession) {
-                    // Broadcast ligero: solo notificar cambio de estado offline
-                    this.broadcastUserStatusChange(displayName, false, userData, username);
+                        // Verificar también en Redis si hay una sesión más nueva
+                        if (this.isRedisReady()) {
+                            const currentRedisSocketId = await this.redisClient.get(`socket:user:${username}`);
+                            if (currentRedisSocketId && currentRedisSocketId !== disconnectedSocketId) {
+                                console.log(`🛡️ DEBOUNCE: ${username} tiene nueva sesión (${currentRedisSocketId}). MANTENIENDO ONLINE.`);
+                                this.pendingDisconnects.delete(username);
+                                return;
+                            }
+                        }
 
-                    //  CLUSTER FIX: Remover usuario de Redis para tracking global
-                    await this.removeOnlineUserFromRedis(username);
+                        // El usuario NO se reconectó, ahora sí marcar como offline
+                        console.log(`👤 DEBOUNCE EXPIRADO: ${displayName} (${username}) marcado como OFFLINE`);
 
-                    //  CLUSTER FIX: Limpiar socket ID de Redis
-                    if (this.isRedisReady()) {
-                        try {
+                        // Broadcast ligero: notificar cambio de estado offline
+                        this.broadcastUserStatusChange(displayName, false, userData, username);
+
+                        // CLUSTER FIX: Remover usuario de Redis para tracking global
+                        await this.removeOnlineUserFromRedis(username);
+
+                        // CLUSTER FIX: Limpiar socket ID de Redis
+                        if (this.isRedisReady()) {
                             await this.redisClient.del(`socket:user:${username}`);
-                        } catch (err) {
-                            console.error(`Error limpiando socket Redis de ${username}:`, err.message);
                         }
+
+                        this.pendingDisconnects.delete(username);
+                    } catch (err) {
+                        console.error(`Error en debounce disconnect para ${username}:`, err);
+                        this.pendingDisconnects.delete(username);
                     }
-                }
+                }, this.DISCONNECT_DEBOUNCE_MS);
+
+                // Guardar timeout para poder cancelarlo si el usuario se reconecta
+                this.pendingDisconnects.set(username, disconnectTimeout);
 
                 break;
             }
@@ -637,6 +639,14 @@ export class SocketGateway
             }
         }
 
+        // 🚀 DEBOUNCE: Cancelar timeout de desconexión pendiente si el usuario se reconecta
+        const pendingTimeout = this.pendingDisconnects.get(username);
+        if (pendingTimeout) {
+            clearTimeout(pendingTimeout);
+            this.pendingDisconnects.delete(username);
+            console.log(`✅ DEBOUNCE CANCELADO: ${username} se reconectó antes del timeout`);
+        }
+
         this.users.set(username, { socket: client, userData });
 
         // 🔥 NUEVO: Inicializar timestamp de actividad
@@ -663,11 +673,27 @@ export class SocketGateway
         // ?? OPTIMIZACIN: Actualizar ndice normalizado para bsquedas rpidas
         this.usernameIndex.set(username.toLowerCase().trim(), username);
 
-        // ?? OPTIMIZADO: Guardar o actualizar usuario en la base de datos con numeroAgente y role
+        // 🚀 OPTIMIZADO: Guardar o actualizar usuario en la base de datos con numeroAgente y role
         // Solo si hay cambios significativos (evitar escrituras innecesarias)
         try {
-            // ?? OPTIMIZACI�N: Verificar primero en cach� de usuarios
-            const cachedUser = this.userCache.get(username);
+            // 🚀 REDIS CACHE: Verificar primero en Redis (para cluster) antes de ir a MySQL
+            let cachedUser = this.userCache.get(username);
+
+            // Si no está en memoria local, intentar obtener de Redis
+            if (!cachedUser && this.isRedisReady()) {
+                try {
+                    const redisUserData = await this.redisClient.get(`user:cache:${username}`);
+                    if (redisUserData) {
+                        cachedUser = JSON.parse(redisUserData);
+                        // Restaurar a caché local
+                        this.userCache.set(username, { ...cachedUser, cachedAt: Date.now() });
+                        console.log(`🚀 REDIS CACHE HIT: Datos de ${username} restaurados desde Redis (evitando MySQL)`);
+                    }
+                } catch (err) {
+                    console.error(`Error leyendo caché Redis de ${username}:`, err.message);
+                }
+            }
+
             const needsDbUpdate = !cachedUser ||
                 cachedUser.role !== userData?.role ||
                 cachedUser.numeroAgente !== userData?.numeroAgente;
@@ -715,8 +741,8 @@ export class SocketGateway
                     await this.userRepository.save(dbUser);
                 }
 
-                // ?? OPTIMIZACI�N: Actualizar cach� de usuario
-                this.userCache.set(username, {
+                // 🚀 OPTIMIZACIÓN: Actualizar caché de usuario (local + Redis)
+                const userCacheData = {
                     id: dbUser.id,
                     username: dbUser.username,
                     nombre: dbUser.nombre,
@@ -724,7 +750,21 @@ export class SocketGateway
                     role: dbUser.role,
                     numeroAgente: dbUser.numeroAgente,
                     cachedAt: Date.now(),
-                });
+                };
+                this.userCache.set(username, userCacheData);
+
+                // 🚀 REDIS CACHE: Guardar en Redis para acceso entre clusters (TTL: 30 minutos)
+                if (this.isRedisReady()) {
+                    try {
+                        await this.redisClient.set(
+                            `user:cache:${username}`,
+                            JSON.stringify(userCacheData),
+                            { EX: 1800 } // 30 minutos
+                        );
+                    } catch (err) {
+                        console.error(`Error guardando caché Redis de ${username}:`, err.message);
+                    }
+                }
             }
 
             // ?? NUEVO: Agregar a adminUsers si es admin
