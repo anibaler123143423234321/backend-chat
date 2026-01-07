@@ -215,28 +215,30 @@ export class TemporaryRoomsService {
           }
         } catch (error) {
           console.error(
-            `Error al obtener �ltimo mensaje de sala ${room.roomCode}:`,
+            `Error al obtener ltimo mensaje de sala ${room.roomCode}:`,
             error,
           );
         }
 
-        // ?? OPTIMIZACI�N: Excluir arrays pesados (members, connectedMembers, assignedMembers)
+        // 🔥 OPTIMIZACIÓN: Excluir arrays pesados (members, connectedMembers, assignedMembers)
         const { members, connectedMembers, assignedMembers, ...roomWithoutMembers } = room;
 
         return {
           ...roomWithoutMembers,
-          lastActivity: room.createdAt,
+          lastMessage, // 🔥 Asegurar que se devuelve el último mensaje
+          lastActivity: lastMessage?.sentAt || room.createdAt, // 🔥 CORRECCIÓN: Usar fecha del mensaje si existe
         };
       }),
     );
 
-    // ?? ORDENAR por lastMessage.sentAt (m�s reciente primero)
+    // ?? ORDENAR por lastMessage.sentAt (ms reciente primero)
     // 🔥 ORDENAR por lastActivity (más reciente primero)
     const sortedEnrichedRooms = enrichedRooms.sort((a, b) => {
       const aDate = a.lastActivity || a.createdAt;
       const bDate = b.lastActivity || b.createdAt;
       return new Date(bDate).getTime() - new Date(aDate).getTime();
     });
+
 
     return {
       rooms: sortedEnrichedRooms, // ?? Usar sortedEnrichedRooms
@@ -617,6 +619,9 @@ export class TemporaryRoomsService {
         maxCapacity: room.maxCapacity, // 🔥 AGREGADO: maxCapacity para el frontend
         isActive: room.isActive,
         isAssignedByAdmin: room.isAssignedByAdmin,
+        createdAt: room.createdAt, // 🔥 AGREGADO
+        updatedAt: room.updatedAt, // 🔥 AGREGADO
+        lastMessage: lastMessage, // 🔥 AGREGADO
       };
     }).filter(room => room !== null); // Eliminar nulos del filtrado
 
