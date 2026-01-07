@@ -27,11 +27,11 @@ import { getPeruDate, formatPeruTime } from '../utils/date.utils';
     },
     transports: ['websocket', 'polling'],
     path: '/socket.io/',
-    // ✅ CONFIGURACIÓN ESTABLE: Tolerante a redes lentas y pestañas inactivas
-    pingTimeout: 20000,    // 20 segundos (antes 7s) - mayor tolerancia a lag
-    pingInterval: 25000,   // 25 segundos (antes 15s) - menos tráfico de ping
+    // 🔥 OPTIMIZADO: Timeouts reducidos para detectar desconexiones más rápido
+    pingTimeout: 10000,    // 🔥 10 segundos (antes 20s) - detectar desconexiones más rápido
+    pingInterval: 15000,   // 🔥 15 segundos (antes 25s) - verificar conexiones más frecuentemente
     maxHttpBufferSize: 10 * 1024 * 1024, // 10MB - límite de tamaño de mensaje
-    connectTimeout: 45000, // 45 segundos - timeout de conexión inicial
+    connectTimeout: 30000, // 🔥 30 segundos (antes 45s) - timeout más corto
     upgradeTimeout: 10000, // 10 segundos - timeout de upgrade de polling a websocket
     // ✅ Permitir reconexión después de desconexión temporal
     allowEIO3: true,       // Compatibilidad con clientes Engine.IO v3
@@ -98,6 +98,10 @@ export class SocketGateway
     private lastBroadcastUserList = 0;
     private BROADCAST_USERLIST_THROTTLE = 10000; // 🚀 10 segundos (antes: 5s)
     private pendingBroadcastUserList = false;
+
+    // 🔥 NUEVO: Sistema de inactividad para desconectar usuarios ociosos
+    private userLastActivity = new Map<string, number>(); // username -> timestamp
+    private IDLE_TIMEOUT = 30 * 60 * 1000; // 30 minutos sin actividad = desconexión
 
     // 🔥 NUEVO: Método público para verificar si un usuario está conectado
     // Primero verifica memoria local, luego Redis (para cluster)
@@ -287,6 +291,9 @@ export class SocketGateway
 
         // ?? OPTIMIZADO: Monitorear estad�sticas del sistema cada 60 minutos (antes: 30min)
         setInterval(() => this.logSystemStats(), 60 * 60 * 1000);
+
+        // 🔥 NUEVO: Desconectar usuarios inactivos cada 5 minutos
+        setInterval(() => this.disconnectIdleUsers(), 5 * 60 * 1000);
     }
 
     //  NUEVO: Cargar grupos al iniciar el servidor y configurar Redis Adapter
@@ -631,6 +638,9 @@ export class SocketGateway
         }
 
         this.users.set(username, { socket: client, userData });
+
+        // 🔥 NUEVO: Inicializar timestamp de actividad
+        this.updateUserActivity(username);
 
         //  CLUSTER FIX: Unir socket a sala personal para recibir DMs desde otros nodos
         await client.join(username); // Para mensajes dirigidos a "username"
@@ -4346,7 +4356,7 @@ export class SocketGateway
         // console.log('=======================================================');
     }
 
-    // M�todo p�blico para obtener estad�sticas (�til para endpoints de admin)
+    // Método público para obtener estadísticas (útil para endpoints de admin)
     public getSystemStats() {
         return {
             timestamp: new Date().toISOString(),
@@ -4364,5 +4374,73 @@ export class SocketGateway
                 activeRooms: this.roomUsers.size,
             },
         };
+    }
+
+    // 🔥 NUEVO: Actualizar timestamp de actividad del usuario
+    private updateUserActivity(username: string): void {
+        this.userLastActivity.set(username, Date.now());
+    }
+
+    // 🔥 NUEVO: Desconectar usuarios que han estado inactivos por más de IDLE_TIMEOUT
+    private disconnectIdleUsers(): void {
+        const now = Date.now();
+        let disconnected = 0;
+
+        for (const [username, user] of this.users.entries()) {
+            const lastActivity = this.userLastActivity.get(username);
+
+            // Si no hay registro de actividad, establecer uno ahora (primera vez)
+            if (!lastActivity) {
+                this.userLastActivity.set(username, now);
+                continue;
+            }
+
+            const idleTime = now - lastActivity;
+
+            // Si el usuario ha estado inactivo por más de 30 minutos, desconectarlo
+            if (idleTime > this.IDLE_TIMEOUT) {
+                try {
+                    console.log(`⏰ Desconectando usuario inactivo: ${username} (${Math.round(idleTime / 60000)} min sin actividad)`);
+
+                    // Notificar al cliente antes de desconectar
+                    user.socket.emit('idleDisconnect', {
+                        message: 'Desconectado por inactividad (30 min)',
+                        idleMinutes: Math.round(idleTime / 60000)
+                    });
+
+                    // Dar un pequeño delay para que el mensaje llegue antes de desconectar
+                    setTimeout(() => {
+                        try {
+                            if (user.socket.connected) {
+                                user.socket.disconnect(true);
+                            }
+                        } catch (err) {
+                            // Ignorar errores de desconexión
+                        }
+                    }, 500);
+
+                    disconnected++;
+                } catch (error) {
+                    console.error(`❌ Error desconectando usuario inactivo ${username}:`, error);
+                }
+            }
+        }
+
+        if (disconnected > 0) {
+            console.log(`🧹 Desconectados ${disconnected} usuarios inactivos`);
+        }
+    }
+
+    // 🔥 NUEVO: Handler para heartbeat del cliente
+    @SubscribeMessage('heartbeat')
+    handleHeartbeat(@ConnectedSocket() client: Socket): void {
+        // Encontrar el usuario por socket ID
+        for (const [username, user] of this.users.entries()) {
+            if (user.socket.id === client.id) {
+                this.updateUserActivity(username);
+                // console.log(`💓 Heartbeat recibido de ${username}`);
+                break;
+            }
+        }
     }
 }
