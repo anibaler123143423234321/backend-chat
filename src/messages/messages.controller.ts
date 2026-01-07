@@ -15,6 +15,8 @@ import { MessagesService } from './messages.service';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { MarkReadDto } from './dto/mark-read.dto';
 import { User } from '../users/entities/user.entity';
+import { SocketGateway } from '../socket/socket.gateway';
+import { forwardRef, Inject } from '@nestjs/common';
 
 @Controller('messages')
 export class MessagesController {
@@ -22,6 +24,8 @@ export class MessagesController {
     private readonly messagesService: MessagesService,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @Inject(forwardRef(() => SocketGateway))
+    private readonly socketGateway: SocketGateway,
   ) { }
 
   @Post()
@@ -157,6 +161,12 @@ export class MessagesController {
       parseInt(id),
       username,
     );
+
+    // 🔥 NOTIFICAR AL SOCKET
+    if (message) {
+      this.socketGateway.notifyMessageRead(message, username);
+    }
+
     return { success: !!message, message };
   }
 
@@ -177,6 +187,13 @@ export class MessagesController {
         markReadDto.messageIds,
         markReadDto.username,
       );
+
+      // 🔥 NOTIFICAR AL SOCKET (Batch)
+      if (messages && messages.length > 0) {
+        // Enviar notificaciones individuales (idealmente sería un evento batch)
+        messages.forEach(msg => this.socketGateway.notifyMessageRead(msg, markReadDto.username));
+      }
+
       return { success: true, messagesUpdated: messages.length, messages };
     }
 
@@ -193,6 +210,13 @@ export class MessagesController {
       from,
       to,
     );
+
+    // 🔥 NOTIFICAR AL SOCKET (Batch)
+    // El usuario que lee es "from" (el que llama al endpoint)
+    if (messages && messages.length > 0) {
+      messages.forEach(msg => this.socketGateway.notifyMessageRead(msg, from));
+    }
+
     return { success: true, messagesUpdated: messages.length, messages };
   }
 

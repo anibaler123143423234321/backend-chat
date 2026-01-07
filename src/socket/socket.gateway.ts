@@ -3533,7 +3533,7 @@ export class SocketGateway
 
             // 🚀 PASO 4: Emitir threadMessage a destinatarios
             if (isGroup && roomCode) {
-                console.log(`🧵 Emitiendo threadMessage a sala de grupo: ${roomCode}`);
+                console.log(`🧵 Emitiendo threadMessage a sala de grupo: ${roomCode} (Payload con threadId=${messagePayload.threadId})`);
                 this.server.to(roomCode).emit('threadMessage', messagePayload);
             } else {
                 const fromRoom = from?.toLowerCase?.();
@@ -3581,6 +3581,40 @@ export class SocketGateway
             console.log('✅ threadMessage procesado completamente');
         } catch (error) {
             console.error('❌ Error al manejar threadMessage:', error);
+        }
+    }
+
+    // 🔥 NUEVO: Método público para notificar que un mensaje fue leído (Read Receipt)
+    // Se llama desde MessagesController
+    public async notifyMessageRead(message: any, readByUsername: string) {
+        if (!message) return;
+
+        console.log(`👁️ Notificando lectura de mensaje ${message.id} por ${readByUsername}`);
+
+        const payload = {
+            messageId: message.id,
+            readBy: [readByUsername], // Enviamos array para compatibilidad
+            readAt: new Date(),
+            roomCode: message.roomCode,
+            isGroup: message.isGroup,
+            threadId: message.threadId // Importante para actualizar estado dentro del hilo
+        };
+
+        // 1. Si es grupo, emitir a la sala
+        if (message.isGroup && message.roomCode) {
+            this.server.to(message.roomCode).emit('messageRead', payload);
+        }
+        // 2. Si es DM, emitir a ambos usuarios
+        else {
+            const fromRoom = message.from?.toLowerCase?.();
+            const toRoom = message.to?.toLowerCase?.();
+
+            if (fromRoom) {
+                this.server.to(fromRoom).emit('messageRead', payload);
+            }
+            if (toRoom && toRoom !== fromRoom) {
+                this.server.to(toRoom).emit('messageRead', payload);
+            }
         }
     }
 
