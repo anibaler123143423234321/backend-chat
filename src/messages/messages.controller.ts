@@ -293,11 +293,13 @@ export class MessagesController {
     @Param('threadId') threadId: string,
     @Query('limit') limit: string = '100',
     @Query('offset') offset: string = '0',
+    @Query('order') order: string = 'ASC',
   ) {
     return await this.messagesService.findThreadMessages(
       parseInt(threadId),
       parseInt(limit),
       parseInt(offset),
+      order.toUpperCase() === 'DESC' ? 'DESC' : 'ASC',
     );
   }
 

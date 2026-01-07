@@ -1199,12 +1199,13 @@ export class MessagesService {
     threadId: number,
     limit: number = 100,
     offset: number = 0,
+    order: 'ASC' | 'DESC' = 'ASC',
   ): Promise<{ data: Message[]; total: number; hasMore: boolean; page: number; totalPages: number }> {
     // 🔥 CORREGIDO: Usar ID en lugar de sentAt para ordenamiento consistente
     // sentAt puede estar corrupto, así que usamos ID que es más confiable
     const [messages, total] = await this.messageRepository.findAndCount({
       where: { threadId, isDeleted: false },
-      order: { id: 'ASC' },
+      order: { id: order },
       take: limit,
       skip: offset,
     });
@@ -1214,8 +1215,11 @@ export class MessagesService {
     const totalPages = Math.ceil(total / limit);
     const hasMore = offset + messages.length < total;
 
+    // 🔥 Si ordenamos DESC, revertimos para mantener orden cronológico en el frontend
+    const orderedMessages = order === 'DESC' ? messages.reverse() : messages;
+
     return {
-      data: messages,
+      data: orderedMessages,
       total,
       hasMore,
       page,
