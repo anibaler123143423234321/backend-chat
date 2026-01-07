@@ -28,8 +28,8 @@ import { getPeruDate, formatPeruTime } from '../utils/date.utils';
     transports: ['websocket', 'polling'],
     path: '/socket.io/',
     // ✅ CONFIGURACIÓN ESTABLE: Tolerante a redes lentas y pestañas inactivas
-    pingTimeout: 7000,     // 7 segundos - tiempo para esperar respuesta de ping (Total ~22s)
-    pingInterval: 15000,   // 15 segundos - cada cuánto enviar ping
+    pingTimeout: 20000,    // 20 segundos (antes 7s) - mayor tolerancia a lag
+    pingInterval: 25000,   // 25 segundos (antes 15s) - menos tráfico de ping
     maxHttpBufferSize: 10 * 1024 * 1024, // 10MB - límite de tamaño de mensaje
     connectTimeout: 45000, // 45 segundos - timeout de conexión inicial
     upgradeTimeout: 10000, // 10 segundos - timeout de upgrade de polling a websocket
@@ -247,6 +247,7 @@ export class SocketGateway
             isOnline,
             nombre: userData?.nombre || null,
             apellido: userData?.apellido || null,
+            picture: userData?.picture || null, // 📸 FIX: Enviar foto
         };
 
         //  CLUSTER FIX: Usar server.emit() para broadcast global
@@ -472,6 +473,7 @@ export class SocketGateway
                         isOnline: true,
                         nombre: user.nombre,
                         apellido: user.apellido,
+                        picture: user.picture, // 📸 FIX: Enviar foto
                     });
                     sentCount++;
                 }
