@@ -19,7 +19,7 @@ export const databaseConfig: TypeOrmModuleOptions = {
 
   extra: {
     //  OPTIMIZADO para 200+ usuarios concurrentes
-    connectionLimit: 50, // Aumentado de 15 para soportar alto volumen
+    connectionLimit: 10, // REDUCIDO para Cluster Mode (10 x N_CORES < Max_MySQL)
     queueLimit: 0, // Sin límite de cola (espera infinita si no hay conexiones)
     acquireTimeout: 30000, // 30 segundos máximo para obtener conexión
     charset: 'utf8mb4',
