@@ -3466,37 +3466,42 @@ export class SocketGateway
         @ConnectedSocket() client: Socket,
         @MessageBody() data: { roomCode: string; username: string },
     ) {
-        // console.log(
-        //     `? WS: markRoomMessagesAsRead - Sala ${data.roomCode} le�da por ${data.username}`,
-        // );
-
         try {
-            // Marcar todos los mensajes de la sala como le�dos en la base de datos
-            const updatedCount = await this.messagesService.markAllMessagesAsReadInRoom(
+            // Marcar todos los mensajes de la sala como leídos en la base de datos
+            const { updatedCount, updatedMessages } = await this.messagesService.markAllMessagesAsReadInRoom(
                 data.roomCode,
                 data.username,
             );
 
-            // console.log(
-            //     `? ${updatedCount} mensajes marcados como le�dos en sala ${data.roomCode}`,
-            // );
-
-            // Confirmar al usuario que la acci�n fue exitosa
+            // Confirmar al usuario que la acción fue exitosa
             client.emit('roomMessagesReadConfirmed', {
                 roomCode: data.roomCode,
                 updatedCount,
             });
 
-            // ?? Emitir reset de contador para asegurar que el frontend se actualice
+            // 🔥 NUEVO: Emitir roomMessageRead para cada mensaje a todos los usuarios de la sala
+            // Esto permite que los demás usuarios vean los checks de lectura en tiempo real
+            if (updatedMessages.length > 0) {
+                for (const msg of updatedMessages) {
+                    this.server.to(data.roomCode).emit('roomMessageRead', {
+                        messageId: msg.id,
+                        readBy: msg.readBy,
+                        readAt: msg.readAt,
+                        roomCode: data.roomCode,
+                    });
+                }
+            }
+
+            // Emitir reset de contador para asegurar que el frontend se actualice
             this.emitUnreadCountReset(data.roomCode, data.username);
 
-            // ?? Tambi�n emitir actualizaci�n de contador a 0 expl�citamente
+            // También emitir actualización de contador a 0 explícitamente
             this.emitUnreadCountUpdateForUser(data.roomCode, data.username, 0);
 
         } catch (error) {
-            console.error('Error al marcar mensajes de sala como le�dos:', error);
+            console.error('Error al marcar mensajes de sala como leídos:', error);
             client.emit('error', {
-                message: 'Error al marcar mensajes de sala como le�dos',
+                message: 'Error al marcar mensajes de sala como leídos',
             });
         }
     }

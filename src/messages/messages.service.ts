@@ -625,11 +625,11 @@ export class MessagesService {
     return null;
   }
 
-  // 🔥 NUEVO: Marcar todos los mensajes de una sala como leídos por un usuario
+  // 🔥 MODIFICADO: Marcar todos los mensajes de una sala como leídos y devolver info para real-time
   async markAllMessagesAsReadInRoom(
     roomCode: string,
     username: string,
-  ): Promise<number> {
+  ): Promise<{ updatedCount: number; updatedMessages: { id: number; readBy: string[]; readAt: Date }[] }> {
     try {
       const messages = await this.messageRepository.find({
         where: { roomCode, isDeleted: false },
@@ -637,6 +637,7 @@ export class MessagesService {
 
       let updatedCount = 0;
       const updates = [];
+      const updatedMessages: { id: number; readBy: string[]; readAt: Date }[] = [];
 
       for (const message of messages) {
         // No marcar mensajes propios
@@ -661,6 +662,13 @@ export class MessagesService {
           message.readAt = new Date();
           updates.push(this.messageRepository.save(message));
           updatedCount++;
+
+          // 🔥 NUEVO: Guardar info del mensaje actualizado para emitir en tiempo real
+          updatedMessages.push({
+            id: message.id,
+            readBy: [...message.readBy], // Copia del array
+            readAt: message.readAt,
+          });
         }
       }
 
@@ -668,13 +676,13 @@ export class MessagesService {
         await Promise.all(updates);
       }
 
-      return updatedCount;
+      return { updatedCount, updatedMessages };
     } catch (error) {
       console.error(
         `❌ Error en markAllMessagesAsReadInRoom - Sala: ${roomCode}, Usuario: ${username}:`,
         error,
       );
-      return 0;
+      return { updatedCount: 0, updatedMessages: [] };
     }
   }
 
