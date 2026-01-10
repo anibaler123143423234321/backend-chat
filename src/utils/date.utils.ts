@@ -21,19 +21,23 @@ export function getPeruDate(): Date {
 }
 
 /**
- * Formatea una fecha a string de hora en formato HH:mm (zona horaria de Lima)
+ * Formatea una fecha a string de hora en formato h:mm AM/PM (zona horaria de Lima)
  * @param date Fecha a formatear (opcional, por defecto usa la fecha actual de Perú)
- * @returns String con formato HH:mm
+ * @returns String con formato h:mm AM/PM (ej: 9:46 PM)
  */
 export function formatPeruTime(date?: Date): string {
   const peruDate = date || getPeruDate();
 
   // 🔥 CRÍTICO: Usar getUTCHours() y getUTCMinutes() porque peruDate es un Date ajustado a UTC
   // El objeto Date internamente sigue siendo UTC, pero con el tiempo ajustado a Perú
-  const hours = peruDate.getUTCHours().toString().padStart(2, '0');
+  const hours24 = peruDate.getUTCHours();
   const minutes = peruDate.getUTCMinutes().toString().padStart(2, '0');
 
-  return `${hours}:${minutes}`;
+  // 🔥 NUEVO: Convertir a formato 12 horas con AM/PM
+  const period = hours24 >= 12 ? 'PM' : 'AM';
+  const hours12 = hours24 % 12 || 12; // Convertir 0 a 12 para medianoche
+
+  return `${hours12}:${minutes} ${period}`;
 }
 
 /**

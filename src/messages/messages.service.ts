@@ -203,22 +203,25 @@ export class MessagesService {
         threadCountMap[row.threadId] = parseInt(row.count, 10);
       });
 
-      // Query 2: Obtener último mensaje de cada hilo (incluir texto para preview)
+      // 🚀 OPTIMIZADO: Truncar texto directamente en SQL
       const lastReplies = await this.messageRepository
         .createQueryBuilder('message')
-        .select(['message.threadId', 'message.from', 'message.message', 'message.sentAt'])
+        .select('message.threadId', 'threadId')
+        .addSelect('message.from', 'from')
+        .addSelect('CASE WHEN LENGTH(message.message) > 100 THEN CONCAT(SUBSTRING(message.message, 1, 100), "...") ELSE message.message END', 'message')
+        .addSelect('message.sentAt', 'sentAt')
         .where('message.threadId IN (:...messageIds)', { messageIds })
         .andWhere('message.isDeleted = false')
         .orderBy('message.sentAt', 'DESC')
-        .getMany();
+        .getRawMany();
 
       // Agrupar por threadId (solo el primero de cada grupo es el más reciente)
       const seenThreadIds = new Set<number>();
-      const lastReplyTextMap: Record<number, string> = {}; // 🔥 NUEVO: Mapa para texto del último mensaje
+      const lastReplyTextMap: Record<number, string> = {};
       lastReplies.forEach((reply) => {
         if (!seenThreadIds.has(reply.threadId)) {
           lastReplyMap[reply.threadId] = reply.from;
-          lastReplyTextMap[reply.threadId] = reply.message || ''; // 🔥 Guardar texto
+          lastReplyTextMap[reply.threadId] = reply.message || '';
           seenThreadIds.add(reply.threadId);
         }
       });
@@ -227,7 +230,7 @@ export class MessagesService {
       for (const message of messages) {
         message.threadCount = threadCountMap[message.id] || 0;
         message.lastReplyFrom = lastReplyMap[message.id] || null;
-        (message as any).lastReplyText = lastReplyTextMap[message.id] || null; // 🔥 NUEVO: Texto del último mensaje
+        (message as any).lastReplyText = lastReplyTextMap[message.id] || null; // Ya viene truncado desde SQL
         (message as any).displayDate = formatDisplayDate(message.sentAt);
       }
     }
@@ -313,22 +316,25 @@ export class MessagesService {
         threadCountMap[tc.threadId] = parseInt(tc.count);
       });
 
-      // Obtener último mensaje de cada hilo (incluir texto para preview)
+      // 🚀 OPTIMIZADO: Truncar texto directamente en SQL para evitar transferir datos innecesarios
+      // Esto es más eficiente que truncar en JavaScript porque la BD nunca envía el texto completo
       const lastReplies = await this.messageRepository
         .createQueryBuilder('message')
-        .select(['message.threadId', 'message.from', 'message.message'])
+        .select('message.threadId', 'threadId')
+        .addSelect('message.from', 'from')
+        .addSelect('CASE WHEN LENGTH(message.message) > 100 THEN CONCAT(SUBSTRING(message.message, 1, 100), "...") ELSE message.message END', 'message')
         .where('message.threadId IN (:...messageIds)', { messageIds })
         .andWhere('message.isDeleted = false')
         .orderBy('message.id', 'DESC')
-        .getMany();
+        .getRawMany();
 
       // Agrupar por threadId y tomar el primero (más reciente)
       const seenThreadIds = new Set<number>();
-      const lastReplyTextMap: Record<number, string> = {}; // 🔥 NUEVO
+      const lastReplyTextMap: Record<number, string> = {};
       lastReplies.forEach((reply) => {
         if (!seenThreadIds.has(reply.threadId)) {
           lastReplyMap[reply.threadId] = reply.from;
-          lastReplyTextMap[reply.threadId] = reply.message || ''; // 🔥 Guardar texto
+          lastReplyTextMap[reply.threadId] = reply.message || '';
           seenThreadIds.add(reply.threadId);
         }
       });
@@ -360,7 +366,7 @@ export class MessagesService {
         readByCount, // Solo el conteo, no la lista completa
         threadCount: threadCountMap[msg.id] || 0,
         lastReplyFrom: lastReplyMap[msg.id] || null,
-        lastReplyText: lastReplyTextMap[msg.id] || null,
+        lastReplyText: lastReplyTextMap[msg.id] || null, // Ya viene truncado desde SQL
       };
     });
 
@@ -545,22 +551,24 @@ export class MessagesService {
         threadCountMap[tc.threadId] = parseInt(tc.count);
       });
 
-      // Obtener último mensaje de cada hilo (incluir texto para preview)
+      // 🚀 OPTIMIZADO: Truncar texto directamente en SQL
       const lastReplies = await this.messageRepository
         .createQueryBuilder('message')
-        .select(['message.threadId', 'message.from', 'message.message'])
+        .select('message.threadId', 'threadId')
+        .addSelect('message.from', 'from')
+        .addSelect('CASE WHEN LENGTH(message.message) > 100 THEN CONCAT(SUBSTRING(message.message, 1, 100), "...") ELSE message.message END', 'message')
         .where('message.threadId IN (:...messageIds)', { messageIds })
         .andWhere('message.isDeleted = false')
         .orderBy('message.id', 'DESC')
-        .getMany();
+        .getRawMany();
 
       // Agrupar por threadId y tomar el primero (más reciente)
       const seenThreadIds = new Set<number>();
-      const lastReplyTextMap: Record<number, string> = {}; // 🔥 NUEVO
+      const lastReplyTextMap: Record<number, string> = {};
       lastReplies.forEach((reply) => {
         if (!seenThreadIds.has(reply.threadId)) {
           lastReplyMap[reply.threadId] = reply.from;
-          lastReplyTextMap[reply.threadId] = reply.message || ''; // 🔥 Guardar texto
+          lastReplyTextMap[reply.threadId] = reply.message || '';
           seenThreadIds.add(reply.threadId);
         }
       });
@@ -581,7 +589,7 @@ export class MessagesService {
       numberInList: index + 1 + offset,
       threadCount: threadCountMap[msg.id] || 0,
       lastReplyFrom: lastReplyMap[msg.id] || null,
-      lastReplyText: lastReplyTextMap[msg.id] || null, // 🔥 NUEVO: Texto del último mensaje
+      lastReplyText: lastReplyTextMap[msg.id] || null, // Ya viene truncado desde SQL
       displayDate: formatDisplayDate(msg.sentAt),
     }));
   }
