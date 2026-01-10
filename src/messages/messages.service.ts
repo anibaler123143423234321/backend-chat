@@ -1323,7 +1323,7 @@ export class MessagesService {
       .getMany();
 
     // Revertir para orden cronológico
-    const orderedMessages = messages.reverse();
+    const orderedMessages = await this.enrichMessages(messages.reverse());
 
     return {
       data: orderedMessages,
@@ -1351,7 +1351,68 @@ export class MessagesService {
       .take(limit)
       .getMany();
 
-    const orderedMessages = messages.reverse();
+    const orderedMessages = await this.enrichMessages(messages.reverse());
+
+    return {
+      data: orderedMessages,
+      total: messages.length,
+      hasMore: messages.length === limit,
+    };
+  }
+
+  // 🔥 NUEVO: Obtener mensajes de sala DESPUÉS de un ID específico (para cargando hacia adelante)
+  async findByRoomAfterId(
+    roomCode: string,
+    afterId: number,
+    limit: number = 20,
+  ): Promise<{ data: any[]; total: number; hasMore: boolean }> {
+    const messages = await this.messageRepository
+      .createQueryBuilder('message')
+      .where('message.roomCode = :roomCode', { roomCode })
+      .andWhere('message.id > :afterId', { afterId })
+      .andWhere('message.isDeleted = false')
+      .orderBy('message.id', 'ASC') // Orden ascendente (más viejos primero dentro del rango "futuro")
+      .take(limit)
+      .getMany();
+
+    // No revertir, ya vienen en orden cronológico (ASC)
+    const orderedMessages = await this.enrichMessages(messages);
+
+    orderedMessages.forEach((msg) => {
+      msg.time = formatPeruTime(new Date(msg.sentAt));
+    });
+
+    return {
+      data: orderedMessages,
+      total: messages.length,
+      hasMore: messages.length === limit,
+    };
+  }
+
+  // 🔥 NUEVO: Obtener mensajes privados DESPUÉS de un ID específico
+  async findByUserAfterId(
+    from: string,
+    to: string,
+    afterId: number,
+    limit: number = 20,
+  ): Promise<{ data: any[]; total: number; hasMore: boolean }> {
+    const messages = await this.messageRepository
+      .createQueryBuilder('message')
+      .where(
+        '((LOWER(message.from) = LOWER(:from) AND LOWER(message.to) = LOWER(:to)) OR (LOWER(message.from) = LOWER(:to) AND LOWER(message.to) = LOWER(:from)))',
+        { from, to }
+      )
+      .andWhere('message.id > :afterId', { afterId })
+      .andWhere('message.isDeleted = false')
+      .orderBy('message.id', 'ASC')
+      .take(limit)
+      .getMany();
+
+    const orderedMessages = await this.enrichMessages(messages);
+
+    orderedMessages.forEach((msg) => {
+      msg.time = formatPeruTime(new Date(msg.sentAt));
+    });
 
     return {
       data: orderedMessages,
@@ -1898,29 +1959,12 @@ export class MessagesService {
     // 7. Obtener total de mensajes en la conversación
     const totalInConversation = await baseQuery.clone().getCount();
 
-    // 8. Mapear mensajes con formato completo
-    const messages = allMessages.map((msg) => ({
-      id: msg.id,
-      message: msg.message,
-      from: msg.from,
-      to: msg.to,
-      fromId: msg.fromId,
-      sentAt: msg.sentAt,
-      time: msg.time,
-      mediaType: msg.mediaType,
-      fileName: msg.fileName,
-      mediaData: msg.mediaData,
-      reactions: msg.reactions || [],
-      threadId: msg.threadId,
-      threadCount: msg.threadCount || 0,
-      lastReplyFrom: msg.lastReplyFrom,
-      roomCode: msg.roomCode,
-      isGroup: msg.isGroup,
-      senderRole: msg.senderRole,
-      isRead: msg.isRead,
-      isEdited: msg.isEdited,
-      editedAt: msg.editedAt,
-    }));
+    // 8. Enriquecer mensajes con thread info y formatear hora
+    const messages = await this.enrichMessages(allMessages);
+
+    messages.forEach((msg) => {
+      msg.time = formatPeruTime(new Date(msg.sentAt));
+    });
 
     return {
       messages,
@@ -1933,5 +1977,65 @@ export class MessagesService {
       oldestLoadedId: messages.length > 0 ? messages[0].id : null,
       newestLoadedId: messages.length > 0 ? messages[messages.length - 1].id : null,
     };
+  }
+
+  // 🔥 HELPER: Enriquecer mensajes con información de hilos (respuestas)
+  private async enrichMessages(messages: any[]): Promise<any[]> {
+    if (!messages || messages.length === 0) return [];
+
+    const messageIds = messages.map((m) => m.id);
+    const threadCountMap: Record<number, number> = {};
+    const lastReplyMap: Record<number, string> = {};
+    const lastReplyTextMap: Record<number, string> = {};
+
+    // 1. Thread Counts
+    const threadCounts = await this.messageRepository
+      .createQueryBuilder('message')
+      .select('message.threadId', 'threadId')
+      .addSelect('COUNT(*)', 'count')
+      .where('message.threadId IN (:...messageIds)', { messageIds })
+      .andWhere('message.isDeleted = false')
+      .groupBy('message.threadId')
+      .getRawMany();
+
+    threadCounts.forEach((tc) => {
+      threadCountMap[tc.threadId] = parseInt(tc.count);
+    });
+
+    // 2. Last Replies
+    const lastReplies = await this.messageRepository
+      .createQueryBuilder('message')
+      .select('message.threadId', 'threadId')
+      .addSelect('message.from', 'from')
+      .addSelect(
+        'CASE WHEN LENGTH(message.message) > 100 THEN CONCAT(SUBSTRING(message.message, 1, 100), "...") ELSE message.message END',
+        'message',
+      )
+      .where('message.threadId IN (:...messageIds)', { messageIds })
+      .andWhere('message.isDeleted = false')
+      .orderBy('message.id', 'DESC')
+      .getRawMany();
+
+    // Group by threadId and take first (most recent)
+    const seenThreadIds = new Set<number>();
+    lastReplies.forEach((reply) => {
+      if (!seenThreadIds.has(reply.threadId)) {
+        lastReplyMap[reply.threadId] = reply.from;
+        lastReplyTextMap[reply.threadId] = reply.message || '';
+        seenThreadIds.add(reply.threadId);
+      }
+    });
+
+    // 3. Map messages & Return
+    return messages.map((msg) => {
+      // Asegurar que msg es un objeto plano si es una entidad
+      const msgObj = typeof msg.toJSON === 'function' ? msg.toJSON() : msg;
+      return {
+        ...msgObj,
+        threadCount: threadCountMap[msg.id] || 0,
+        lastReplyFrom: lastReplyMap[msg.id] || null,
+        lastReplyText: lastReplyTextMap[msg.id] || null,
+      };
+    });
   }
 }

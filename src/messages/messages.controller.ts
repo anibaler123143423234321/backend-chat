@@ -8,6 +8,7 @@ import {
   Param,
   Query,
   Patch,
+  ParseIntPipe,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -167,15 +168,30 @@ export class MessagesController {
   async findByUserBeforeId(
     @Param('from') from: string,
     @Param('to') to: string,
-    @Param('messageId') messageId: string,
-    @Query('limit') limit: string = '20',
+    @Param('messageId', ParseIntPipe) messageId: number,
+    @Query('limit') limit = 20,
   ) {
-    return await this.messagesService.findByUserBeforeId(
-      from,
-      to,
-      parseInt(messageId),
-      parseInt(limit),
-    );
+    return this.messagesService.findByUserBeforeId(from, to, messageId, Number(limit));
+  }
+
+  // 🔥 NUEVO: Endpoints para cargar mensajes HACIA ADELANTE (después de un ID)
+  @Get('room/:roomCode/after/:messageId')
+  async findByRoomAfterId(
+    @Param('roomCode') roomCode: string,
+    @Param('messageId', ParseIntPipe) messageId: number,
+    @Query('limit') limit = 20,
+  ) {
+    return this.messagesService.findByRoomAfterId(roomCode, messageId, Number(limit));
+  }
+
+  @Get('user/:from/:to/after/:messageId')
+  async findByUserAfterId(
+    @Param('from') from: string,
+    @Param('to') to: string,
+    @Param('messageId', ParseIntPipe) messageId: number,
+    @Query('limit') limit = 20,
+  ) {
+    return this.messagesService.findByUserAfterId(from, to, messageId, Number(limit));
   }
 
   // 🔥 NUEVO: Obtener mensajes alrededor de un messageId para chats individuales
