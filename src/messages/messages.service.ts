@@ -367,6 +367,7 @@ export class MessagesService {
         threadCount: threadCountMap[msg.id] || 0,
         lastReplyFrom: lastReplyMap[msg.id] || null,
         lastReplyText: lastReplyTextMap[msg.id] || null, // Ya viene truncado desde SQL
+        time: formatPeruTime(new Date(msg.sentAt)), // 🔥 RECALCULAR SIEMPRE para asegurar formato AM/PM
       };
     });
 
@@ -591,6 +592,7 @@ export class MessagesService {
       lastReplyFrom: lastReplyMap[msg.id] || null,
       lastReplyText: lastReplyTextMap[msg.id] || null, // Ya viene truncado desde SQL
       displayDate: formatDisplayDate(msg.sentAt),
+      time: formatPeruTime(new Date(msg.sentAt)), // 🔥 RECALCULAR SIEMPRE para asegurar formato AM/PM
     }));
   }
 
@@ -601,6 +603,67 @@ export class MessagesService {
       order: { sentAt: 'DESC' },
       take: limit,
     });
+  }
+
+  // 🔥 NUEVO: Buscar menciones para un usuario
+  async findMentions(
+    username: string,
+    roomCode?: string,
+    limit: number = 20,
+    offset: number = 0,
+  ): Promise<{ data: any[]; total: number; hasMore: boolean; page: number; totalPages: number }> {
+    const query = this.messageRepository
+      .createQueryBuilder('message')
+      .select([
+        'message.id',
+        'message.from',
+        'message.senderRole',
+        'message.senderNumeroAgente',
+        'message.message',
+        'message.isGroup',
+        'message.groupName',
+        'message.roomCode',
+        'message.sentAt',
+        'message.isRead',
+        'message.threadId', // Importante para saber si es respuesta en hilo
+        'message.replyToMessageId',
+      ])
+      // Buscar mensajes que contengan @username (case insensitive)
+      .where('LOWER(message.message) LIKE LOWER(:mentionPattern)', { mentionPattern: `%@${username}%` })
+      .andWhere('message.isDeleted = :isDeleted', { isDeleted: false });
+
+    // Si se especifica una sala, filtrar por ella (contextual)
+    // Si no, busca en todas (global)
+    if (roomCode) {
+      query.andWhere('message.roomCode = :roomCode', { roomCode });
+    }
+
+    // Ordenar por fecha descendente (lo más reciente primero)
+    query.orderBy('message.sentAt', 'DESC');
+
+    const [messages, total] = await query
+      .take(limit)
+      .skip(offset)
+      .getManyAndCount();
+
+    // Formatear respuesta
+    const data = messages.map((msg) => ({
+      ...msg,
+      displayDate: formatDisplayDate(msg.sentAt),
+      time: formatPeruTime(new Date(msg.sentAt)),
+    }));
+
+    const page = Math.floor(offset / limit) + 1;
+    const totalPages = Math.ceil(total / limit);
+    const hasMore = offset + messages.length < total;
+
+    return {
+      data,
+      total,
+      hasMore,
+      page,
+      totalPages,
+    };
   }
 
   async markAsRead(
@@ -1240,6 +1303,60 @@ export class MessagesService {
       hasMore,
       page,
       totalPages,
+    };
+  }
+
+
+  // 🔥 NUEVO: Obtener mensajes de sala ANTES de un ID específico (para paginación hacia atrás con 'aroundMode')
+  async findByRoomBeforeId(
+    roomCode: string,
+    beforeId: number,
+    limit: number = 20,
+  ): Promise<{ data: any[]; total: number; hasMore: boolean }> {
+    const messages = await this.messageRepository
+      .createQueryBuilder('message')
+      .where('message.roomCode = :roomCode', { roomCode })
+      .andWhere('message.id < :beforeId', { beforeId })
+      .andWhere('message.isDeleted = false')
+      .orderBy('message.id', 'DESC')
+      .take(limit)
+      .getMany();
+
+    // Revertir para orden cronológico
+    const orderedMessages = messages.reverse();
+
+    return {
+      data: orderedMessages,
+      total: messages.length, // Total fetched in this batch
+      hasMore: messages.length === limit,
+    };
+  }
+
+  // 🔥 NUEVO: Obtener mensajes privados ANTES de un ID específico
+  async findByUserBeforeId(
+    from: string,
+    to: string,
+    beforeId: number,
+    limit: number = 20,
+  ): Promise<{ data: any[]; total: number; hasMore: boolean }> {
+    const messages = await this.messageRepository
+      .createQueryBuilder('message')
+      .where(
+        '((LOWER(message.from) = LOWER(:from) AND LOWER(message.to) = LOWER(:to)) OR (LOWER(message.from) = LOWER(:to) AND LOWER(message.to) = LOWER(:from)))',
+        { from, to }
+      )
+      .andWhere('message.id < :beforeId', { beforeId })
+      .andWhere('message.isDeleted = false')
+      .orderBy('message.id', 'DESC')
+      .take(limit)
+      .getMany();
+
+    const orderedMessages = messages.reverse();
+
+    return {
+      data: orderedMessages,
+      total: messages.length,
+      hasMore: messages.length === limit,
     };
   }
 

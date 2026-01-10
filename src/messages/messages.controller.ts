@@ -28,6 +28,25 @@ export class MessagesController {
     private readonly socketGateway: SocketGateway,
   ) { }
 
+  // 🔥 NUEVO: Endpoint para buscar menciones
+  @Get('mentions')
+  async searchMentions(
+    @Query('username') username: string,
+    @Query('roomCode') roomCode?: string,
+    @Query('limit') limit: string = '20',
+    @Query('offset') offset: string = '0',
+  ) {
+    if (!username) {
+      return { data: [], total: 0, hasMore: false };
+    }
+    return await this.messagesService.findMentions(
+      username,
+      roomCode,
+      parseInt(limit),
+      parseInt(offset),
+    );
+  }
+
   @Post()
   async create(@Body() createMessageDto: CreateMessageDto) {
     // Obtener senderRole y senderNumeroAgente de la BD si no vienen en el DTO
@@ -126,6 +145,36 @@ export class MessagesController {
       to,
       parseInt(limit),
       parseInt(offset),
+    );
+  }
+
+  // 🔥 NUEVO: Obtener mensajes de sala ANTES de un ID específico (para paginación hacia atrás)
+  @Get('room/:roomCode/before/:messageId')
+  async findByRoomBeforeId(
+    @Param('roomCode') roomCode: string,
+    @Param('messageId') messageId: string,
+    @Query('limit') limit: string = '20',
+  ) {
+    return await this.messagesService.findByRoomBeforeId(
+      roomCode,
+      parseInt(messageId),
+      parseInt(limit),
+    );
+  }
+
+  // 🔥 NUEVO: Obtener mensajes privados ANTES de un ID específico
+  @Get('user/:from/:to/before/:messageId')
+  async findByUserBeforeId(
+    @Param('from') from: string,
+    @Param('to') to: string,
+    @Param('messageId') messageId: string,
+    @Query('limit') limit: string = '20',
+  ) {
+    return await this.messagesService.findByUserBeforeId(
+      from,
+      to,
+      parseInt(messageId),
+      parseInt(limit),
     );
   }
 
