@@ -11,7 +11,7 @@ import {
 import { Server, Socket } from 'socket.io';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import * as crypto from 'crypto';
 import { TemporaryRoomsService } from '../temporary-rooms/temporary-rooms.service';
 import { MessagesService } from '../messages/messages.service';
@@ -237,6 +237,71 @@ export class SocketGateway
      */
     private invalidateRoomCache(roomCode: string): void {
         this.roomCache.delete(roomCode);
+    }
+
+    /**
+     * 🔥 CLUSTER FIX: Obtener datos de múltiples usuarios desde BD
+     * Resuelve el problema donde usuarios en otras instancias no tenían datos (solo aparecían como strings)
+     */
+    private async getBatchUsersData(usernames: string[]): Promise<any[]> {
+        if (!usernames || usernames.length === 0) return [];
+
+        try {
+            // Normalizar usernames para búsqueda
+            const cleanUsernames = usernames.map(u => u.trim());
+
+            // Buscar en BD usando UserRepository inyectado
+            const users = await this.userRepository.find({
+                where: { username: In(cleanUsernames) },
+                select: ['username', 'nombre', 'apellido'] // ❌ FIX: Remover picture que no existe en User entity
+            });
+
+            // Map de resultados para acceso rápido (case insensitive keys)
+            const usersMap = new Map(users.map(u => [u.username.toLowerCase(), u]));
+
+            // Construir resultado preservando el orden original y manejando faltantes
+            return usernames.map(username => {
+                const lowerUsername = username.toLowerCase().trim();
+                const user = usersMap.get(lowerUsername);
+
+                if (user && user.nombre) {
+                    return {
+                        username: user.username,
+                        nombre: user.nombre,
+                        apellido: user.apellido,
+                        picture: null // No hay campo picture en BD
+                    };
+                }
+
+                // Fallback: intentar obtener de this.users (memoria local) por si acaso es un usuario temporal o data reciente
+                const localUser = this.users.get(username);
+                if (localUser?.userData?.nombre) {
+                    return {
+                        username,
+                        nombre: localUser.userData.nombre,
+                        apellido: localUser.userData.apellido,
+                        picture: localUser.userData.picture || null
+                    };
+                }
+
+                return username; // Fallback final a string si no se encuentra
+            });
+        } catch (error) {
+            console.error('❌ Error obteniendo datos batch de usuarios:', error);
+            // Fallback: intentar obtener de memoria local aunque sea incompleto
+            return usernames.map(username => {
+                const localUser = this.users.get(username);
+                if (localUser?.userData?.nombre) {
+                    return {
+                        username,
+                        nombre: localUser.userData.nombre,
+                        apellido: localUser.userData.apellido,
+                        picture: localUser.userData.picture
+                    };
+                }
+                return username;
+            });
+        }
     }
 
     /**
@@ -3444,18 +3509,8 @@ export class SocketGateway
             );
 
             if (message) {
-                // 🔥 Obtener datos completos de usuarios que leyeron
-                const readByData = await Promise.all(
-                    (message.readBy || []).map(async (username) => {
-                        const userConnection = this.users.get(username);
-                        return userConnection?.userData?.nombre ? {
-                            username,
-                            nombre: userConnection.userData.nombre,
-                            apellido: userConnection.userData.apellido,
-                            picture: userConnection.userData.picture
-                        } : username; // Fallback a string si no hay datos
-                    })
-                );
+                // 🔥 FIX CLUSTER: Obtener datos completos de usuarios desde BD
+                const readByData = await this.getBatchUsersData(message.readBy || []);
 
                 // Broadcast a la sala - SIN log para evitar spam
                 this.server.to(data.roomCode).emit('roomMessageRead', {
@@ -3495,24 +3550,15 @@ export class SocketGateway
             // 🔥 NUEVO: Emitir roomMessageRead para cada mensaje a todos los usuarios de la sala
             // Esto permite que los demás usuarios vean los checks de lectura en tiempo real
             if (updatedMessages.length > 0) {
+                // 🔥 FIX CLUSTER: Procesar mensajes en batch o individualmente pero usando getBatchUsersData
+                // Dado que son muchos mensajes, mejor hacer un loop simple
                 for (const msg of updatedMessages) {
-                    // 🔥 Obtener datos completos de usuarios que leyeron
-                    const readByData = await Promise.all(
-                        (msg.readBy || []).map(async (username) => {
-                            const userConnection = this.users.get(username);
-                            return userConnection?.userData?.nombre ? {
-                                username,
-                                nombre: userConnection.userData.nombre,
-                                apellido: userConnection.userData.apellido,
-                                picture: userConnection.userData.picture
-                            } : username; // Fallback a string si no hay datos
-                        })
-                    );
+                    const readByData = await this.getBatchUsersData(msg.readBy || []);
 
                     this.server.to(data.roomCode).emit('roomMessageRead', {
                         messageId: msg.id,
-                        readBy: msg.readBy, // Array de usernames (compatibilidad)
-                        readByData, // 🔥 NUEVO: Array con datos completos
+                        readBy: msg.readBy,
+                        readByData,
                         readAt: msg.readAt,
                         roomCode: data.roomCode,
                     });
