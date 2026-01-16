@@ -42,6 +42,9 @@ export class TemporaryConversation {
   @Column({ type: 'json', nullable: true })
   participants: string[];
 
+  @Column({ type: 'json', nullable: true })
+  pendingParticipants: string[]; // Solicitudes pendientes de aprobación
+
   @Column({ type: 'boolean', default: false })
   isAssignedByAdmin: boolean; // Indica si fue asignada por un admin
 

@@ -1,6 +1,7 @@
 import {
   Injectable,
   BadRequestException,
+  ForbiddenException,
   Inject,
   forwardRef,
 } from '@nestjs/common';
@@ -172,7 +173,17 @@ export class MessagesService {
     roomCode: string,
     limit: number = 20,
     offset: number = 0,
+    username?: string, // 🔥 Nuevo parámetro para validación
   ): Promise<Message[]> {
+    // 🔥 VALIDACIÓN DE ACCESO
+    if (username) {
+      const room = await this.temporaryRoomRepository.findOne({ where: { roomCode } });
+      if (room && room.pendingMembers && room.pendingMembers.includes(username)) {
+        throw new ForbiddenException(`Tu solicitud para unirte a "${room.name}" está pendiente de aprobación.`);
+      }
+      // Opcional: Validar si es miembro (si queremos ser estrictos)
+    }
+
     // Cargar mensajes en orden ASC por ID (cronológico)
     // 🔥 Excluir mensajes de hilos (threadId debe ser null)
     // 🔥 INCLUIR mensajes eliminados para mostrarlos como "Mensaje eliminado por..."
@@ -249,7 +260,15 @@ export class MessagesService {
     roomCode: string,
     limit: number = 15,
     offset: number = 0,
+    username?: string, // 🔥 Nuevo parámetro para validación
   ): Promise<{ data: any[]; total: number; hasMore: boolean; page: number; totalPages: number }> {
+    // 🔥 VALIDACIÓN DE ACCESO
+    if (username) {
+      const room = await this.temporaryRoomRepository.findOne({ where: { roomCode } });
+      if (room && room.pendingMembers && room.pendingMembers.includes(username)) {
+        throw new ForbiddenException(`Tu solicitud para unirte a "${room.name}" está pendiente de aprobación.`);
+      }
+    }
     // 🚀 OPTIMIZADO: Payload reducido ~60% eliminando campos innecesarios
     // Campos eliminados: fromId, to, roomCode, deletedAt, conversationId, numberInList, displayDate
     // readBy convertido a readByCount (entero)

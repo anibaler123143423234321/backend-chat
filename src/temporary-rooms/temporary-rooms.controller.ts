@@ -152,4 +152,22 @@ export class TemporaryRoomsController {
     return this.temporaryRoomsService.updatePinnedMessage(roomCode, body.messageId);
   }
 
+  @Post(':roomCode/approve-join')
+  approveJoinRequest(
+    @Param('roomCode') roomCode: string,
+    @Body() body: { username: string; approverUsername?: string },
+    @Request() req
+  ) {
+    // Si no viene el aprobador en el body, intentar sacarlo del token
+    const approver = body.approverUsername || req.user?.username || 'Admin';
+    return this.temporaryRoomsService.approveJoinRequest(roomCode, body.username, approver);
+  }
+
+  @Post(':roomCode/reject-join')
+  rejectJoinRequest(
+    @Param('roomCode') roomCode: string,
+    @Body() body: { username: string },
+  ) {
+    return this.temporaryRoomsService.rejectJoinRequest(roomCode, body.username);
+  }
 }

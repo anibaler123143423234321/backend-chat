@@ -81,12 +81,14 @@ export class MessagesController {
     @Param('roomCode') roomCode: string,
     @Query('limit') limit: string = '20',
     @Query('offset') offset: string = '0',
+    @Query('username') username?: string,
   ) {
     // console.log(`ðŸ“‹ Obteniendo mensajes de la sala: ${roomCode}`);
     return await this.messagesService.findByRoom(
       roomCode,
       parseInt(limit),
       parseInt(offset),
+      username,
     );
   }
 
@@ -95,11 +97,13 @@ export class MessagesController {
     @Param('roomCode') roomCode: string,
     @Query('limit') limit: string = '20',
     @Query('offset') offset: string = '0',
+    @Query('username') username?: string,
   ) {
     return await this.messagesService.findByRoomOrderedById(
       roomCode,
       parseInt(limit),
       parseInt(offset),
+      username,
     );
   }
 

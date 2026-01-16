@@ -4412,4 +4412,54 @@ export class SocketGateway
         };
     }
 
+    // 🔥 NUEVO: Notificar a todos los administradores de una solicitud de ingreso
+    public notifyAdminJoinRequest(roomCode: string, username: string) {
+        // Emitir a todos los sockets conectados que pertenezcan a administradores
+        this.adminUsers.forEach((adminData, adminUsername) => {
+            if (adminData.socket?.connected) {
+                adminData.socket.emit('adminJoinRequest', {
+                    roomCode,
+                    username,
+                    timestamp: new Date().toISOString()
+                });
+            }
+        });
+
+        // Broadcast general a canal de admins (si existiera lógica de room 'admin')
+        // this.server.to('admin-room').emit('adminJoinRequest', { roomCode, username });
+    }
+
+    // 🔥 NUEVO: Notificar al usuario que su solicitud fue aprobada
+    public notifyUserApproved(roomCode: string, username: string) {
+        // Enviar evento al room personal del usuario (creado en handleRegister)
+        this.server.to(username).emit('userApproved', {
+            roomCode,
+            username,
+            message: 'Tu solicitud ha sido aprobada. Ahora puedes unirte a la sala.',
+            timestamp: new Date().toISOString()
+        });
+
+        // Intento adicional con lowercase por si acaso
+        this.server.to(username.toLowerCase()).emit('userApproved', {
+            roomCode,
+            username,
+            status: 'APPROVED'
+        });
+
+        console.log(`✅ Notificación de aprobación enviada a ${username} para sala ${roomCode}`);
+    }
+
+    // 3. Notificar a usuario que fue rechazado
+    public notifyUserRejected(roomCode: string, username: string) {
+        const user = this.getUserCaseInsensitive(username);
+
+        if (user && user.socket && user.socket.connected) {
+            user.socket.emit('joinRequestRejected', {
+                roomCode,
+                message: 'Tu solicitud para unirte ha sido rechazada por un administrador.',
+                timestamp: new Date().toISOString()
+            });
+        }
+    }
+
 }

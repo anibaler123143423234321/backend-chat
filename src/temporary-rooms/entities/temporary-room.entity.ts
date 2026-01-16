@@ -43,6 +43,9 @@ export class TemporaryRoom {
   connectedMembers: string[]; // Usuarios actualmente conectados
 
   @Column({ type: 'json', nullable: true })
+  pendingMembers: string[]; // Solicitudes pendientes de aprobación
+
+  @Column({ type: 'json', nullable: true })
   assignedMembers: string[]; // Usuarios asignados por admin (no pueden salir)
 
   @Column({ type: 'boolean', default: false })

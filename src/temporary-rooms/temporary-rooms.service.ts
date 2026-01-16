@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
   Inject,
   forwardRef,
 } from '@nestjs/common';
@@ -281,49 +282,51 @@ export class TemporaryRoomsService {
     joinDto: JoinRoomDto,
     username: string,
   ): Promise<TemporaryRoom> {
-    // console.log('🔍 Buscando sala con código:', joinDto.roomCode);
-    // console.log('👤 Usuario que se une:', username);
-
     const room = await this.findByRoomCode(joinDto.roomCode);
-    // console.log('🏠 Sala encontrada:', room);
 
-    if (!room.members) {
-      room.members = [];
-    }
-    if (!room.connectedMembers) {
-      room.connectedMembers = [];
-    }
+    if (!room.members) room.members = [];
+    if (!room.connectedMembers) room.connectedMembers = [];
+    if (!room.pendingMembers) room.pendingMembers = [];
 
-    // ?? MODIFICADO: Verificar si el usuario ya estaba en la sala ANTES (en members)
     const wasAlreadyMember = room.members.includes(username);
+    const isPending = room.pendingMembers.includes(username);
 
-    // console.log(`?? joinRoom - Usuario: ${username}, Sala: ${room.name}, Ya era miembro: ${wasAlreadyMember}, Capacidad: ${room.members.length}/${room.maxCapacity}`);
-
-    // ?? IMPORTANTE: Verificar capacidad ANTES de agregar
-    // Solo contar si el usuario NO era miembro antes
-    if (!wasAlreadyMember && room.members.length >= room.maxCapacity) {
-      console.error(
-        `? Sala llena: ${room.members.length}/${room.maxCapacity} - No se puede agregar a ${username}`,
-      );
-      throw new BadRequestException(
-        `La sala ha alcanzado su capacidad m�xima (${room.maxCapacity} usuarios)`,
-      );
+    // Si ya está pendiente, notificar al usuario
+    if (isPending) {
+      throw new BadRequestException('Tu solicitud para unirte a esta sala está pendiente de aprobación.');
     }
 
-    // Agregar al historial si no está
+    // Si NO es miembro y NO está pendiente, agregarlo a pendientes (NO a members)
+    // EXCEPCIÓN: Si el usuario es el CREADOR, entra directo
+    // EXCEPCIÓN: Si la sala es pública o no requiere aprobación (podríamos agregar un flag isPublic)
+    // POR AHORA: Aplicamos lógica de aprobación para evitar "ghost users"
+
+    // Verificar si es el creador (si tenemos userId en algún lado, pero aquí solo llega username)
+    // Asumiremos que si no es miembro, va a pendiente.
     if (!wasAlreadyMember) {
-      room.members.push(username);
-      // console.log(
-      //   `? Usuario ${username} agregado a members. Total: ${room.members.length}/${room.maxCapacity}`,
-      // );
+      // Verificar capacidad (considerando miembros + pendientes?)
+      if (room.members.length >= room.maxCapacity) {
+        throw new BadRequestException(`La sala ha alcanzado su capacidad máxima (${room.maxCapacity} usuarios)`);
+      }
+
+      // AGREGAR A PENDIENTES
+      room.pendingMembers.push(username);
+      await this.temporaryRoomRepository.save(room);
+
+      // Notificar a Admins (si hubiera lógica en gateway)
+      if (this.socketGateway && this.socketGateway.notifyAdminJoinRequest) {
+        this.socketGateway.notifyAdminJoinRequest(room.roomCode, username);
+      }
+
+      throw new BadRequestException('Solicitud enviada. Esperando aprobación de un administrador.');
     }
+
+    // --- FLUJO NORMAL PARA MIEMBROS YA APROBADOS ---
 
     // Verificar si el usuario ya estaba conectado
     const wasAlreadyConnected = room.connectedMembers.includes(username);
 
-    // Si el usuario ya está conectado, no hacer nada
     if (wasAlreadyConnected) {
-      // console.log('👤 Usuario ya está conectado en la sala');
       return room;
     }
 
@@ -331,33 +334,86 @@ export class TemporaryRoomsService {
     const genericUserIndex = room.connectedMembers.indexOf('Usuario');
     if (genericUserIndex !== -1) {
       room.connectedMembers[genericUserIndex] = username;
-      // console.log('🔄 Reemplazando "Usuario" genérico con:', username);
     } else {
-      // Agregar a usuarios conectados
       room.connectedMembers.push(username);
     }
 
-    // ?? MODIFICADO: currentMembers debe ser el total de usuarios A�ADIDOS (members), no solo conectados
     room.currentMembers = room.members.length;
-    // console.log(`?? Guardando sala - Members: ${room.members.length}, Connected: ${room.connectedMembers.length}`);
-    // console.log('👥 Usuarios conectados en la sala:', room.connectedMembers);
-    // console.log('📜 Historial de usuarios:', room.members);
     await this.temporaryRoomRepository.save(room);
 
-    // ?? MODIFICADO: Solo notificar si el usuario fue REALMENTE AGREGADO (no estaba en members antes)
-    if (!wasAlreadyMember && this.socketGateway) {
+    // Solo notificar si realmente se conectó (aunque ya era miembro)
+    // En este caso, notifyUserAddedToRoom suena a "Nuevo usuario", tal vez deberíamos tener "UserConnected"
+    // Pero mantenemos la lógica existente para evitar romper el frontend
+    if (this.socketGateway) {
       this.socketGateway.notifyUserAddedToRoom(
         username,
         room.roomCode,
         room.name,
       );
-      // console.log(`?? Notificaci�n enviada para ${username}`);
     }
 
-    // console.log(`? Usuario ${username} unido exitosamente a la sala ${room.name}`);
-
-    // console.log('✅ Usuario unido exitosamente a la sala');
     return room;
+  }
+
+  // 🔥 NUEVO: Aprobar solicitud de ingreso
+  async approveJoinRequest(roomCode: string, username: string, approverUsername?: string): Promise<TemporaryRoom> {
+    const room = await this.findByRoomCode(roomCode);
+
+    if (!room.pendingMembers || !room.pendingMembers.includes(username)) {
+      throw new NotFoundException(`No se encontró solicitud pendiente para ${username}`);
+    }
+
+    // Mover de pending a members
+    room.pendingMembers = room.pendingMembers.filter(u => u !== username);
+
+    if (!room.members) room.members = [];
+    if (!room.members.includes(username)) {
+      room.members.push(username);
+    }
+
+    // Opcional: Agregar también a assignedMembers si se requiere "fijarlo"
+    if (room.isAssignedByAdmin) {
+      if (!room.assignedMembers) room.assignedMembers = [];
+      if (!room.assignedMembers.includes(username)) {
+        room.assignedMembers.push(username);
+      }
+    }
+
+    room.currentMembers = room.members.length;
+    await this.temporaryRoomRepository.save(room);
+
+    // Notificar aprobación
+    if (this.socketGateway && this.socketGateway.notifyUserApproved) {
+      this.socketGateway.notifyUserApproved(roomCode, username);
+    }
+
+    return room;
+  }
+
+  // 🔥 NUEVO: Rechazar solicitud de ingreso
+  async rejectJoinRequest(roomCode: string, username: string): Promise<TemporaryRoom> {
+    const room = await this.findByRoomCode(roomCode);
+
+    if (room.pendingMembers && room.pendingMembers.includes(username)) {
+      room.pendingMembers = room.pendingMembers.filter(u => u !== username);
+      await this.temporaryRoomRepository.save(room);
+    }
+
+    return room;
+  }
+
+  // 🔥 NUEVO: Validar acceso estricto a la sala
+  async validateUserAccess(roomCode: string, username: string): Promise<void> {
+    const room = await this.temporaryRoomRepository.findOne({ where: { roomCode } });
+
+    if (!room) {
+      return;
+    }
+
+    // 1. Verificar si está en pendientes
+    if (room.pendingMembers && room.pendingMembers.includes(username)) {
+      throw new ForbiddenException(`Tu solicitud para unirte a "${room.name}" está pendiente de aprobación.`);
+    }
   }
 
   async leaveRoom(roomCode: string, username: string): Promise<TemporaryRoom> {
@@ -382,6 +438,23 @@ export class TemporaryRoomsService {
 
     // Remover el usuario solo de connectedMembers (mantener en historial)
     const userIndex = room.connectedMembers.indexOf(username);
+    if (userIndex !== -1) {
+      room.connectedMembers.splice(userIndex, 1);
+    }
+
+    // 🔥 FIX: También remover de 'members' para forzar nueva solicitud al reingresar
+    // Esto asegura que "Salir del grupo" sea real y no solo desconexión
+    if (room.members && room.members.includes(username)) {
+      room.members = room.members.filter(u => u !== username);
+    }
+
+    // Actualizar conteo basado en miembros reales
+    room.currentMembers = room.members.length;
+
+    // console.log('👥 Usuarios conectados después de salir:', room.connectedMembers);
+    // console.log('📜 Historial de usuarios (sin cambios):', room.members);
+    await this.temporaryRoomRepository.save(room);
+    // console.log('✅ Usuario desconectado de la sala en BD');
     if (userIndex !== -1) {
       room.connectedMembers.splice(userIndex, 1);
       // ?? MODIFICADO: currentMembers debe ser el total de usuarios A�ADIDOS (members), no solo conectados
