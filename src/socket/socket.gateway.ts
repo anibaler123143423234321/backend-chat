@@ -3855,11 +3855,14 @@ export class SocketGateway
             // console.log(
             //     `? Usuario ${username} est� conectado, enviando notificaci�n`,
             // );
-            userConnection.socket.emit('addedToRoom', {
+            // 🔥 CLUSTER FIX: Usar server.emit() para Redis
+            this.server.emit('addedToRoom', {
+                username: username, // Filtrar en frontend
                 roomCode,
                 roomName,
                 message: `Has sido agregado a la sala: ${roomName}`,
             });
+            console.log(`✅ [CLUSTER] addedToRoom emitido vía Redis para ${username}`);
         } else {
             // console.log(
             //     `? Usuario ${username} NO est� conectado o no existe en el mapa de usuarios`,
@@ -3886,10 +3889,13 @@ export class SocketGateway
         // Notificar al usuario eliminado
         const userConnection = this.users.get(username);
         if (userConnection && userConnection.socket.connected) {
-            userConnection.socket.emit('removedFromRoom', {
+            // 🔥 CLUSTER FIX: Usar server.emit() para Redis
+            this.server.emit('removedFromRoom', {
+                username: username, // Filtrar en frontend
                 roomCode,
                 message: 'Has sido eliminado de la sala',
             });
+            console.log(`✅ [CLUSTER] removedFromRoom emitido vía Redis para ${username}`);
 
             // Limpiar la sala actual del usuario
             if (userConnection.userData) {

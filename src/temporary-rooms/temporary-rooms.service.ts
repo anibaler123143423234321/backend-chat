@@ -390,6 +390,58 @@ export class TemporaryRoomsService {
     return room;
   }
 
+  // 🔥 NUEVO: Agregar usuario directamente (bypassing pending) - Para admins
+  async addMemberDirectly(roomCode: string, username: string): Promise<TemporaryRoom> {
+    console.log(`🔧 addMemberDirectly: Agregando ${username} directamente a sala ${roomCode}`);
+
+    const room = await this.findByRoomCode(roomCode);
+
+    // Inicializar arrays si no existen
+    if (!room.members) room.members = [];
+    if (!room.connectedMembers) room.connectedMembers = [];
+    if (!room.pendingMembers) room.pendingMembers = [];
+
+    // Verificar si ya es miembro
+    if (room.members.includes(username)) {
+      console.log(`✅ Usuario ${username} ya es miembro, solo agregando a connectedMembers`);
+
+      // Solo agregar a connectedMembers si no está
+      if (!room.connectedMembers.includes(username)) {
+        room.connectedMembers.push(username);
+        await this.temporaryRoomRepository.save(room);
+      }
+
+      return room;
+    }
+
+    // Verificar capacidad
+    if (room.members.length >= room.maxCapacity) {
+      throw new BadRequestException(`La sala ha alcanzado su capacidad máxima (${room.maxCapacity} usuarios)`);
+    }
+
+    // Agregar directamente a members (sin pasar por pending)
+    room.members.push(username);
+    room.connectedMembers.push(username);
+
+    // Remover de pendingMembers si estaba ahí
+    if (room.pendingMembers.includes(username)) {
+      room.pendingMembers = room.pendingMembers.filter(u => u !== username);
+      console.log(`🧹 Usuario ${username} removido de pendingMembers`);
+    }
+
+    room.currentMembers = room.members.length;
+    await this.temporaryRoomRepository.save(room);
+
+    console.log(`✅ Usuario ${username} agregado directamente a sala ${roomCode}. Total miembros: ${room.currentMembers}`);
+
+    // Notificar a través del socket gateway
+    if (this.socketGateway) {
+      this.socketGateway.notifyUserAddedToRoom(username, room.roomCode, room.name);
+    }
+
+    return room;
+  }
+
   // 🔥 NUEVO: Rechazar solicitud de ingreso
   async rejectJoinRequest(roomCode: string, username: string): Promise<TemporaryRoom> {
     const room = await this.findByRoomCode(roomCode);

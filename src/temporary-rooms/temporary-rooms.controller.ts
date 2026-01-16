@@ -163,6 +163,16 @@ export class TemporaryRoomsController {
     return this.temporaryRoomsService.approveJoinRequest(roomCode, body.username, approver);
   }
 
+  @Post(':roomCode/add-user')
+  addUserDirectly(
+    @Param('roomCode') roomCode: string,
+    @Body() body: { username: string },
+    @Request() req
+  ) {
+    // Este endpoint permite a admins agregar usuarios directamente sin pasar por pending
+    return this.temporaryRoomsService.addMemberDirectly(roomCode, body.username);
+  }
+
   @Post(':roomCode/reject-join')
   rejectJoinRequest(
     @Param('roomCode') roomCode: string,
