@@ -2994,14 +2994,13 @@ export class SocketGateway
 
         // Enviar a TODOS los usuarios conectados (para que vean actualizaciones en tiempo real)
         // Esto permite que usuarios que salieron de la sala vean cuando otros entran/salen
-        this.users.forEach(({ socket }) => {
-            if (socket.connected) {
-                socket.emit('roomUsers', {
-                    roomCode,
-                    users: roomUsersList,
-                });
-            }
+        // 🔥 CLUSTER FIX: Usar server.to(roomCode).emit() para Redis
+        this.server.to(roomCode).emit('roomUsers', {
+            roomCode,
+            users: roomUsersList,
         });
+        console.log(`✅ [CLUSTER] roomUsers emitido vía Redis para ${roomCode}`);
+
 
         // ?? MODIFICADO: Usar members.length para el contador (total de usuarios a�adidos a la sala)
         // Notificar a todos los ADMIN y JEFEPISO sobre el cambio en el contador de usuarios
