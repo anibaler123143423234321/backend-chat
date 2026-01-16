@@ -3444,10 +3444,24 @@ export class SocketGateway
             );
 
             if (message) {
+                // 🔥 Obtener datos completos de usuarios que leyeron
+                const readByData = await Promise.all(
+                    (message.readBy || []).map(async (username) => {
+                        const userConnection = this.users.get(username);
+                        return userConnection?.userData?.nombre ? {
+                            username,
+                            nombre: userConnection.userData.nombre,
+                            apellido: userConnection.userData.apellido,
+                            picture: userConnection.userData.picture
+                        } : username; // Fallback a string si no hay datos
+                    })
+                );
+
                 // Broadcast a la sala - SIN log para evitar spam
                 this.server.to(data.roomCode).emit('roomMessageRead', {
                     messageId: data.messageId,
-                    readBy: message.readBy,
+                    readBy: message.readBy, // Array de usernames (compatibilidad)
+                    readByData, // 🔥 NUEVO: Array con datos completos
                     readAt: message.readAt,
                     roomCode: data.roomCode,
                 });
@@ -3482,9 +3496,23 @@ export class SocketGateway
             // Esto permite que los demás usuarios vean los checks de lectura en tiempo real
             if (updatedMessages.length > 0) {
                 for (const msg of updatedMessages) {
+                    // 🔥 Obtener datos completos de usuarios que leyeron
+                    const readByData = await Promise.all(
+                        (msg.readBy || []).map(async (username) => {
+                            const userConnection = this.users.get(username);
+                            return userConnection?.userData?.nombre ? {
+                                username,
+                                nombre: userConnection.userData.nombre,
+                                apellido: userConnection.userData.apellido,
+                                picture: userConnection.userData.picture
+                            } : username; // Fallback a string si no hay datos
+                        })
+                    );
+
                     this.server.to(data.roomCode).emit('roomMessageRead', {
                         messageId: msg.id,
-                        readBy: msg.readBy,
+                        readBy: msg.readBy, // Array de usernames (compatibilidad)
+                        readByData, // 🔥 NUEVO: Array con datos completos
                         readAt: msg.readAt,
                         roomCode: data.roomCode,
                     });
