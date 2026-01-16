@@ -417,7 +417,9 @@ export class TemporaryRoomsService {
   }
 
   async leaveRoom(roomCode: string, username: string): Promise<TemporaryRoom> {
-    // console.log('🚪 Usuario saliendo de la sala:', username, 'de', roomCode);
+    // 🔍 LOGGING: Rastrear llamadas a leaveRoom para depuración
+    console.log(`� LEAVE ROOM CALLED: User=${username}, Room=${roomCode}`);
+    console.log(`📍 Stack trace:`, new Error().stack?.split('\n').slice(1, 4).join('\n'));
 
     const room = await this.findByRoomCode(roomCode);
 
@@ -440,33 +442,19 @@ export class TemporaryRoomsService {
     const userIndex = room.connectedMembers.indexOf(username);
     if (userIndex !== -1) {
       room.connectedMembers.splice(userIndex, 1);
+      console.log(`✅ Usuario ${username} removido de connectedMembers. Quedan: ${room.connectedMembers.length}`);
     }
 
-    // 🔥 FIX: También remover de 'members' para forzar nueva solicitud al reingresar
-    // Esto asegura que "Salir del grupo" sea real y no solo desconexión
-    if (room.members && room.members.includes(username)) {
-      room.members = room.members.filter(u => u !== username);
-    }
+    // ❌ ELIMINADO: Ya NO removemos de 'members'
+    // 🔒 FIX: Mantener usuario en 'members' para evitar que se salgan automáticamente
+    // Solo 'removeUserFromRoom' (admin) puede eliminar permanentemente
+    console.log(`🔒 Usuario ${username} MANTIENE acceso a la sala (members: ${room.members?.length || 0})`);
 
-    // Actualizar conteo basado en miembros reales
-    room.currentMembers = room.members.length;
+    // Actualizar conteo basado en miembros reales (no cambia si no removemos de members)
+    room.currentMembers = room.members?.length || 0;
 
-    // console.log('👥 Usuarios conectados después de salir:', room.connectedMembers);
-    // console.log('📜 Historial de usuarios (sin cambios):', room.members);
     await this.temporaryRoomRepository.save(room);
-    // console.log('✅ Usuario desconectado de la sala en BD');
-    if (userIndex !== -1) {
-      room.connectedMembers.splice(userIndex, 1);
-      // ?? MODIFICADO: currentMembers debe ser el total de usuarios A�ADIDOS (members), no solo conectados
-      room.currentMembers = room.members.length;
-
-      // console.log('👥 Usuarios conectados después de salir:', room.connectedMembers);
-      // console.log('📜 Historial de usuarios (sin cambios):', room.members);
-      await this.temporaryRoomRepository.save(room);
-      // console.log('✅ Usuario desconectado de la sala en BD');
-    } else {
-      // console.log('❌ Usuario no encontrado en connectedMembers');
-    }
+    console.log(`✅ leaveRoom completado: ${username} desconectado pero sigue siendo miembro`);
 
     // Limpiar la sala actual del usuario en la base de datos
     try {
@@ -474,10 +462,10 @@ export class TemporaryRoomsService {
       if (user && user.currentRoomCode === roomCode) {
         user.currentRoomCode = null;
         await this.userRepository.save(user);
-        // console.log('✅ Sala actual del usuario limpiada en BD');
+        console.log(`✅ Sala actual del usuario ${username} limpiada en BD`);
       }
     } catch (error) {
-      // console.error('❌ Error al limpiar sala actual del usuario:', error);
+      console.error(`❌ Error al limpiar sala actual del usuario ${username}:`, error);
     }
 
     return room;
