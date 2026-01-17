@@ -2141,32 +2141,28 @@ export class SocketGateway
             if (data.fileSize !== undefined) editEvent.fileSize = data.fileSize;
 
             if (data.isGroup && data.roomCode) {
-                // Broadcast a todos los usuarios de la sala
+                // 🚀 CLUSTER FIX: Usar Redis Broadcast para grupos
+                // Iterar miembros y usar server.to() para cada uno
                 const roomUsersSet = this.roomUsers.get(data.roomCode);
                 if (roomUsersSet) {
                     roomUsersSet.forEach((user) => {
-                        const userConnection = this.users.get(user);
-                        if (userConnection && userConnection.socket.connected) {
-                            userConnection.socket.emit('messageEdited', editEvent);
-                        }
+                        // Usar server.to() para que pase por Redis Adapter
+                        this.server.to(user).emit('messageEdited', editEvent);
                     });
                     // console.log(
-                    //     `? Broadcast de edici�n enviado a ${roomUsersSet.size} usuarios en sala ${data.roomCode}`,
+                    //     `🚀 Broadcast de edición enviado a ${roomUsersSet.size} usuarios en sala ${data.roomCode} vía Redis`,
                     // );
                 }
             } else {
-                // Enviar al destinatario individual
-                const recipient = this.users.get(data.to);
-                if (recipient && recipient.socket.connected) {
-                    recipient.socket.emit('messageEdited', editEvent);
-                }
-                // Tambi�n enviar al remitente para sincronizar
-                const sender = this.users.get(data.username);
-                if (sender && sender.socket.connected) {
-                    sender.socket.emit('messageEdited', editEvent);
-                }
+                // 🚀 CLUSTER FIX: Usar Redis Broadcast para chats individuales
+                // Enviar al destinatario usando server.to()
+                this.server.to(data.to).emit('messageEdited', editEvent);
+
+                // También enviar al remitente para sincronizar
+                this.server.to(data.username).emit('messageEdited', editEvent);
+
                 // console.log(
-                //     `? Notificaci�n de edici�n enviada a ${data.to} y ${data.username}`,
+                //     `🚀 Notificación de edición enviada a ${data.to} y ${data.username} vía Redis`,
                 // );
             }
         } catch (error) {
