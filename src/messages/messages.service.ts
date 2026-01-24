@@ -6,11 +6,12 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, IsNull } from 'typeorm';
+import { Repository, IsNull, In } from 'typeorm';
 import { Message } from './entities/message.entity';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { TemporaryConversation } from '../temporary-conversations/entities/temporary-conversation.entity';
 import { TemporaryRoom } from '../temporary-rooms/entities/temporary-room.entity';
+import { User } from '../users/entities/user.entity';
 import { getPeruDate, formatPeruTime, formatDisplayDate } from '../utils/date.utils';
 import { SocketGateway } from '../socket/socket.gateway';
 
@@ -23,9 +24,15 @@ export class MessagesService {
     private temporaryRoomRepository: Repository<TemporaryRoom>,
     @InjectRepository(TemporaryConversation)
     private temporaryConversationRepository: Repository<TemporaryConversation>,
+    @InjectRepository(User)
+    private userRepository: Repository<User>,
     @Inject(forwardRef(() => SocketGateway))
     private socketGateway: SocketGateway,
   ) { }
+
+  // 🔥 CACHÉ DE FOTOS DE PERFIL (Para evitar consultas masivas a BD)
+  private pictureCache = new Map<string, { url: string; expiresAt: number }>();
+  private readonly PICTURE_CACHE_TTL = 1000 * 60 * 60 * 24 * 30; // 30 días
 
   async create(createMessageDto: CreateMessageDto): Promise<Message> {
     // Log eliminado para optimización
@@ -288,7 +295,7 @@ export class MessagesService {
         'message.fileSize',
         'message.sentAt',
         'message.isRead',
-        'message.readBy', // Se convertirá a readByCount en el mapeo
+        'message.readBy',
         'message.isDeleted',
         'message.deletedBy',
         'message.isEdited',
@@ -319,6 +326,7 @@ export class MessagesService {
     const messageIds = messages.map((m) => m.id);
     const threadCountMap: Record<number, number> = {};
     const lastReplyMap: Record<number, string> = {};
+    const lastReplyTextMap: Record<number, string> = {}; // 🔥 FIX: Definido aquí para scope local seguro
 
     if (messageIds.length > 0) {
       // Obtener conteo de threads para todos los mensajes en una sola consulta
@@ -349,7 +357,7 @@ export class MessagesService {
 
       // Agrupar por threadId y tomar el primero (más reciente)
       const seenThreadIds = new Set<number>();
-      const lastReplyTextMap: Record<number, string> = {};
+      // map local declarado arriba
       lastReplies.forEach((reply) => {
         if (!seenThreadIds.has(reply.threadId)) {
           lastReplyMap[reply.threadId] = reply.from;
@@ -357,13 +365,7 @@ export class MessagesService {
           seenThreadIds.add(reply.threadId);
         }
       });
-
-      // 🔥 Guardar mapa de texto para uso posterior
-      (this as any)._lastReplyTextMap = lastReplyTextMap;
     }
-
-    // 🔥 Obtener el mapa de texto (puede estar vacío)
-    const lastReplyTextMap: Record<number, string> = (this as any)._lastReplyTextMap || {};
 
     // 🔥 Invertir el orden para que se muestren cronológicamente (más antiguos primero)
     const reversedMessages = messages.reverse();
@@ -372,6 +374,44 @@ export class MessagesService {
     const page = Math.floor(offset / limit) + 1;
     const totalPages = Math.ceil(total / limit);
     const hasMore = offset + messages.length < total;
+
+    // 🔥 NUEVO: Obtener fotos de perfil de los remitentes (CON CACHÉ)
+    const uniqueSenders = [...new Set(messages.map(m => m.from))];
+    const userMap: Record<string, string> = {};
+    const missingUsernames: string[] = [];
+    const now = Date.now();
+
+    // 1. Verificar Caché
+    uniqueSenders.forEach(username => {
+      const cached = this.pictureCache.get(username);
+      if (cached && cached.expiresAt > now) {
+        userMap[username] = cached.url;
+      } else {
+        missingUsernames.push(username);
+      }
+    });
+
+    // 2. Buscar faltantes en BD y actualizar caché
+    if (missingUsernames.length > 0) {
+      try {
+        const users = await this.userRepository.find({
+          where: { username: In(missingUsernames) },
+          select: ['username', 'picture']
+        });
+        users.forEach(u => {
+          if (u.picture) {
+            userMap[u.username] = u.picture;
+            // Guardar en caché
+            this.pictureCache.set(u.username, {
+              url: u.picture,
+              expiresAt: now + this.PICTURE_CACHE_TTL
+            });
+          }
+        });
+      } catch (err) {
+        console.error('Error fetching user pictures:', err);
+      }
+    }
 
     // 🚀 OPTIMIZADO: Payload reducido - readBy convertido a readByCount
     // Campos eliminados: numberInList, displayDate (se calculan en frontend)
@@ -387,6 +427,7 @@ export class MessagesService {
         lastReplyFrom: lastReplyMap[msg.id] || null,
         lastReplyText: lastReplyTextMap[msg.id] || null, // Ya viene truncado desde SQL
         time: formatPeruTime(new Date(msg.sentAt)), // 🔥 RECALCULAR SIEMPRE para asegurar formato AM/PM
+        picture: userMap[msg.from] || null, // 🔥 Picture agregado
       };
     });
 

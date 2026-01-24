@@ -494,6 +494,30 @@ export class SocketGateway
         }
     }
 
+    // 🔥 NUEVO: Obtener Mapa de usuarios online (para lookup rápido O(1))
+    // Retorna username -> UserData
+    private async getOnlineUsersDataMap(): Promise<Map<string, any>> {
+        const usersMap = new Map<string, any>();
+        if (!this.isRedisReady()) return usersMap;
+
+        try {
+            const usersHash = await this.redisClient.hGetAll(this.REDIS_ONLINE_USERS_KEY);
+            for (const [username, jsonData] of Object.entries(usersHash)) {
+                try {
+                    const userData = JSON.parse(jsonData as string);
+                    usersMap.set(username, userData);
+                    // También mapear minúsculas para lookup case-insensitive
+                    usersMap.set(username.toLowerCase(), userData);
+                } catch {
+                    // Ignorar errores de parseo
+                }
+            }
+        } catch (error) {
+            console.error('❌ Error obteniendo mapa de usuarios online de Redis:', error.message);
+        }
+        return usersMap;
+    }
+
     //  CLUSTER FIX: Enviar estado online (Filtrado por relevancia)
     private async sendInitialOnlineStatuses(
         socket: Socket,
@@ -732,6 +756,9 @@ export class SocketGateway
 
         // 🚀 OPTIMIZADO: Guardar o actualizar usuario en la base de datos con numeroAgente y role
         // Solo si hay cambios significativos (evitar escrituras innecesarias)
+        // 🔥 FIX: Declarar userCacheData fuera del bloque try para usarlo al final
+        let userCacheData = null;
+
         try {
             // 🚀 REDIS CACHE: Verificar primero en Redis (para cluster) antes de ir a MySQL
             let cachedUser = this.userCache.get(username);
@@ -805,7 +832,7 @@ export class SocketGateway
                 }
 
                 // 🚀 OPTIMIZACIÓN: Actualizar caché de usuario (local + Redis)
-                const userCacheData = {
+                userCacheData = {
                     id: dbUser.id,
                     username: dbUser.username,
                     nombre: dbUser.nombre,
@@ -829,6 +856,9 @@ export class SocketGateway
                         console.error(`Error guardando caché Redis de ${username}:`, err.message);
                     }
                 }
+            } else {
+                // Si no hubo updates, usar el usuario de cache existente
+                userCacheData = cachedUser;
             }
 
             // ?? NUEVO: Agregar a adminUsers si es admin
@@ -906,10 +936,13 @@ export class SocketGateway
                 : username;
 
         // Broadcast ligero: solo notificar cambio de estado online
-        this.broadcastUserStatusChange(displayName, true, userData, username);
+        // 🔥 FIX: Usar userCacheData para asegurar que picture y otros datos actualizados se envíen
+        const userToBroadcast = userCacheData || userData;
+        this.broadcastUserStatusChange(displayName, true, userToBroadcast, username);
 
         //  CLUSTER FIX: Agregar usuario a Redis para tracking global
-        await this.addOnlineUserToRedis(username, userData);
+        // 🔥 FIX: Usar userCacheData para asegurar que picture esté en Redis
+        await this.addOnlineUserToRedis(username, userToBroadcast);
 
         // MOVIDO: await this.sendInitialOnlineStatuses(client); (Ahora se llama en setImmediate con datos)
 
@@ -3042,6 +3075,9 @@ export class SocketGateway
         // 🔥 CLUSTER FIX: Obtener Set de usuarios online (incluye Redis)
         const onlineUsersSet = await this.getOnlineUsersSet();
 
+        // 🔥 CLUSTER FIX: Obtener datos completos de usuarios online desde Redis
+        const onlineUsersDataMap = await this.getOnlineUsersDataMap();
+
         // Crear lista con TODOS los usuarios añadidos a la sala y su estado de conexión
         const roomUsersList = allUsernames.map((username) => {
             let user = this.users.get(username);
@@ -3052,6 +3088,14 @@ export class SocketGateway
                 const cached = this.userCache.get(username);
                 if (cached) {
                     userData = cached;
+                }
+            }
+
+            // 🔥 FIX: Si aún no tenemos datos pero está online en Redis, usar datos de Redis
+            if (!userData) {
+                const redisData = onlineUsersDataMap.get(username);
+                if (redisData) {
+                    userData = redisData;
                 }
             }
 

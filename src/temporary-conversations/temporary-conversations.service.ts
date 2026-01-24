@@ -447,9 +447,32 @@ export class TemporaryConversationsService {
             unreadCount = 0;
           }
         } catch (error) {
-          console.error(`Error al enriquecer conversaci�n ${conv.id}:`, error);
+          console.error(`Error al enriquecer conversación ${conv.id}:`, error);
         }
-        // 🔥 OPTIMIZADO: Retornar solo campos esenciales
+
+        // 🔥 Obtener información del otro participante (role, numeroAgente y PICTURE)
+        let otherParticipantRole = null;
+        let otherParticipantNumeroAgente = null;
+        let otherParticipantPicture = null;
+
+        const participantsList = conv.participants || [];
+        if (participantsList.length > 0 && username) {
+          const otherParticipants = participantsList.filter((p) => this.normalizeUsername(p) !== this.normalizeUsername(username));
+          if (otherParticipants.length > 0) {
+            const otherParticipantName = otherParticipants[0];
+            const otherUser = await this.userRepository.findOne({
+              where: { username: otherParticipantName },
+            });
+
+            if (otherUser) {
+              otherParticipantRole = otherUser.role;
+              otherParticipantNumeroAgente = otherUser.numeroAgente;
+              otherParticipantPicture = otherUser.picture;
+            }
+          }
+        }
+
+        // 🔥 OPTIMIZADO: Retornar solo campos esenciales + PICTURE
         return {
           id: conv.id,
           name: conv.name,
@@ -459,6 +482,9 @@ export class TemporaryConversationsService {
           settings: conv.settings,
           unreadCount,
           lastMessage: lastMessage ? { sentAt: lastMessage.sentAt } : null,
+          role: otherParticipantRole,
+          numeroAgente: otherParticipantNumeroAgente,
+          picture: otherParticipantPicture, // 🔥 PICTURE AGREGADO
         };
       }),
     );
@@ -605,10 +631,11 @@ export class TemporaryConversationsService {
           }).length;
         }
 
-        // 🔥 Obtener información del otro participante (role y numeroAgente)
+        // 🔥 Obtener información del otro participante (role, numeroAgente y PICTURE)
         const otherParticipants = participants.filter((p) => p !== username);
         let otherParticipantRole = null;
         let otherParticipantNumeroAgente = null;
+        let otherParticipantPicture = null;
 
         if (otherParticipants.length > 0) {
           // Buscar el otro participante en la tabla chat_users
@@ -620,6 +647,7 @@ export class TemporaryConversationsService {
           if (otherUser) {
             otherParticipantRole = otherUser.role;
             otherParticipantNumeroAgente = otherUser.numeroAgente;
+            otherParticipantPicture = otherUser.picture;
           }
         }
 
@@ -628,6 +656,7 @@ export class TemporaryConversationsService {
           unreadCount,
           role: otherParticipantRole, // 🔥 Incluir role del otro participante
           numeroAgente: otherParticipantNumeroAgente, // 🔥 Incluir numeroAgente del otro participante
+          picture: otherParticipantPicture, // 🔥 Incluir picture del otro participante
         };
       }),
     );

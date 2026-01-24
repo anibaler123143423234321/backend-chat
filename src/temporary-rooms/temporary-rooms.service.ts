@@ -1009,7 +1009,7 @@ export class TemporaryRoomsService {
                 isOnline: isOnline,
                 role: dbUser.role,
                 numeroAgente: dbUser.numeroAgente,
-                picture: null, // TODO: La foto viene del backend Java, no disponible en chat_users
+                picture: dbUser.picture || null,
                 email: dbUser.email,
               };
             } else {
