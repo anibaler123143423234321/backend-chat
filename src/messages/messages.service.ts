@@ -394,18 +394,34 @@ export class MessagesService {
     // 2. Buscar faltantes en BD y actualizar caché
     if (missingUsernames.length > 0) {
       try {
-        const users = await this.userRepository.find({
-          where: { username: In(missingUsernames) },
-          select: ['username', 'picture']
-        });
+        // 🔥 FIX CLUSTER: Buscar por username O por Nombre Completo (concatenado)
+        // Esto es necesario porque message.from suele ser el Nombre Completo, no el username
+        const users = await this.userRepository
+          .createQueryBuilder('user')
+          .select(['user.username', 'user.nombre', 'user.apellido', 'user.picture'])
+          .where('user.username IN (:...names)', { names: missingUsernames })
+          .orWhere("CONCAT(COALESCE(user.nombre, ''), ' ', COALESCE(user.apellido, '')) IN (:...names)", { names: missingUsernames })
+          .orWhere("CONCAT(COALESCE(user.nombre, ''), ' ', COALESCE(user.apellido, ''), ' ') IN (:...names)", { names: missingUsernames }) // Con espacio opcional
+          .getMany();
+
         users.forEach(u => {
           if (u.picture) {
-            userMap[u.username] = u.picture;
-            // Guardar en caché
-            this.pictureCache.set(u.username, {
-              url: u.picture,
-              expiresAt: now + this.PICTURE_CACHE_TTL
-            });
+            const fullName = `${u.nombre || ''} ${u.apellido || ''}`.trim();
+            const fullNameWithSpace = `${fullName} `;
+
+            // Intentar matchear con las claves que faltan
+            if (missingUsernames.includes(u.username)) {
+              userMap[u.username] = u.picture;
+              this.pictureCache.set(u.username, { url: u.picture, expiresAt: now + this.PICTURE_CACHE_TTL });
+            }
+            if (missingUsernames.includes(fullName)) {
+              userMap[fullName] = u.picture;
+              this.pictureCache.set(fullName, { url: u.picture, expiresAt: now + this.PICTURE_CACHE_TTL });
+            }
+            if (missingUsernames.includes(fullNameWithSpace)) {
+              userMap[fullNameWithSpace] = u.picture;
+              this.pictureCache.set(fullNameWithSpace, { url: u.picture, expiresAt: now + this.PICTURE_CACHE_TTL });
+            }
           }
         });
       } catch (err) {
