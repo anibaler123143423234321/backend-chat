@@ -805,6 +805,7 @@ export class SocketGateway
                     apellido: dbUser.apellido,
                     role: dbUser.role,
                     numeroAgente: dbUser.numeroAgente,
+                    picture: userData?.picture || null, // 🔥 FIX: Guardar picture en caché (desde userData)
                     cachedAt: Date.now(),
                 };
                 this.userCache.set(username, userCacheData);
@@ -3036,19 +3037,30 @@ export class SocketGateway
 
         // Crear lista con TODOS los usuarios añadidos a la sala y su estado de conexión
         const roomUsersList = allUsernames.map((username) => {
-            const user = this.users.get(username);
+            let user = this.users.get(username);
+            let userData = user?.userData;
+
+            // 🔥 FIX: Si no está conectado localmente, buscar en caché (local o lo que se haya traído de Redis)
+            if (!userData) {
+                const cached = this.userCache.get(username);
+                if (cached) {
+                    userData = cached;
+                }
+            }
+
             // 🔥 CLUSTER FIX: Verificar estado online usando Set que incluye Redis
             const isOnline = this.isUserOnlineWithSet(username, onlineUsersSet);
+
             return {
-                id: user?.userData?.id || null,
+                id: userData?.id || null,
                 username: username,
-                picture: user?.userData?.picture || null,
-                nombre: user?.userData?.nombre || null,
-                apellido: user?.userData?.apellido || null,
-                sede: user?.userData?.sede || null,
-                sede_id: user?.userData?.sede_id || null,
-                role: user?.userData?.role || null,
-                numeroAgente: user?.userData?.numeroAgente || null,
+                picture: userData?.picture || null,
+                nombre: userData?.nombre || null,
+                apellido: userData?.apellido || null,
+                sede: userData?.sede || null,
+                sede_id: userData?.sede_id || null,
+                role: userData?.role || null,
+                numeroAgente: userData?.numeroAgente || null,
                 isOnline: isOnline,
             };
         });
@@ -3943,8 +3955,8 @@ export class SocketGateway
     /**
      * Notificar cuando un usuario es eliminado de una sala
      */
-    async handleUserRemovedFromRoom(roomCode: string, username: string) {
-        // console.log(`?? Usuario ${username} eliminado de la sala ${roomCode}`);
+    async handleUserRemovedFromRoom(roomCode: string, username: string, roomName?: string, removedBy?: string) {
+        // console.log(`👋 Usuario ${username} eliminado de la sala ${roomCode}`);
 
         // Remover el usuario del mapa de usuarios de la sala
         const roomUserSet = this.roomUsers.get(roomCode);
@@ -3962,9 +3974,11 @@ export class SocketGateway
             this.server.emit('removedFromRoom', {
                 username: username, // Filtrar en frontend
                 roomCode,
-                message: 'Has sido eliminado de la sala',
+                roomName: roomName || roomCode,
+                removedBy: removedBy || 'Administrador',
+                message: `Has sido eliminado de la sala "${roomName || roomCode}"${removedBy ? ` por ${removedBy}` : ''}`,
             });
-            console.log(`✅ [CLUSTER] removedFromRoom emitido vía Redis para ${username}`);
+            console.log(`✅ [CLUSTER] removedFromRoom emitido vía Redis para ${username} (sala: ${roomName}, por: ${removedBy})`);
 
             // Limpiar la sala actual del usuario
             if (userConnection.userData) {
@@ -3972,7 +3986,7 @@ export class SocketGateway
             }
         }
 
-        // Notificar a todos los usuarios de la sala sobre la actualizaci�n
+        // Notificar a todos los usuarios de la sala sobre la actualización
         await this.broadcastRoomUsers(roomCode);
 
         // Reenviar lista general de usuarios

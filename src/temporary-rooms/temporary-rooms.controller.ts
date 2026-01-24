@@ -104,10 +104,12 @@ export class TemporaryRoomsController {
   @Post(':roomCode/remove-user')
   removeUserFromRoom(
     @Param('roomCode') roomCode: string,
-    @Body() body: { username: string },
+    @Body() body: { username: string; removedBy?: string },
     @Request() req
   ) {
-    return this.temporaryRoomsService.removeUserFromRoom(roomCode, body.username);
+    // Capturar quién realiza la eliminación para auditoría
+    const removedBy = body.removedBy || req.user?.displayName || req.user?.username || 'Administrador';
+    return this.temporaryRoomsService.removeUserFromRoom(roomCode, body.username, removedBy);
   }
 
   @Delete(':id')

@@ -523,7 +523,7 @@ export class TemporaryRoomsService {
     return room;
   }
 
-  async removeUserFromRoom(roomCode: string, username: string): Promise<any> {
+  async removeUserFromRoom(roomCode: string, username: string, removedBy?: string): Promise<any> {
     const room = await this.findByRoomCode(roomCode);
 
     if (!room) {
@@ -535,7 +535,7 @@ export class TemporaryRoomsService {
       room.connectedMembers = room.connectedMembers.filter(
         (u) => u !== username,
       );
-      // ?? MODIFICADO: currentMembers debe ser el total de usuarios A�ADIDOS (members), no solo conectados
+      // 👈 MODIFICADO: currentMembers debe ser el total de usuarios AÑADIDOS (members), no solo conectados
       room.currentMembers = room.members.length;
     }
 
@@ -562,15 +562,16 @@ export class TemporaryRoomsService {
       console.error('❌ Error al limpiar sala actual del usuario:', error);
     }
 
-    // Notificar a través del socket gateway
+    // Notificar a través del socket gateway con roomName y removedBy
     if (this.socketGateway) {
-      this.socketGateway.handleUserRemovedFromRoom(roomCode, username);
+      this.socketGateway.handleUserRemovedFromRoom(roomCode, username, room.name, removedBy);
     }
 
     return {
       message: `Usuario ${username} eliminado de la sala ${room.name}`,
       roomCode: room.roomCode,
       username: username,
+      removedBy: removedBy || 'Administrador',
     };
   }
 
