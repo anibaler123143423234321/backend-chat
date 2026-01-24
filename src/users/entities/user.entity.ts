@@ -26,6 +26,9 @@ export class User {
   @Column({ nullable: true })
   numeroAgente: string;
 
+  @Column({ nullable: true, type: 'text' })
+  picture: string;
+
   @CreateDateColumn()
   createdAt: Date;
 

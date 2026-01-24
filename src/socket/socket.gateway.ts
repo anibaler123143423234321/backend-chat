@@ -79,6 +79,7 @@ export class SocketGateway
             apellido: string;
             role: string;
             numeroAgente: string;
+            picture?: string; // 🔥 FIX: Agregar picture a la definición del tipo
             cachedAt: number; // timestamp
         }
     >();
@@ -752,7 +753,8 @@ export class SocketGateway
 
             const needsDbUpdate = !cachedUser ||
                 cachedUser.role !== userData?.role ||
-                cachedUser.numeroAgente !== userData?.numeroAgente;
+                cachedUser.numeroAgente !== userData?.numeroAgente ||
+                cachedUser.picture !== userData?.picture;
 
             if (needsDbUpdate) {
                 let dbUser = await this.userRepository.findOne({ where: { username } });
@@ -780,6 +782,10 @@ export class SocketGateway
                         dbUser.numeroAgente = userData.numeroAgente;
                         hasChanges = true;
                     }
+                    if (userData?.picture && dbUser.picture !== userData.picture) {
+                        dbUser.picture = userData.picture;
+                        hasChanges = true;
+                    }
 
                     if (hasChanges) {
                         await this.userRepository.save(dbUser);
@@ -793,6 +799,7 @@ export class SocketGateway
                         email: userData?.email,
                         role: userData?.role,
                         numeroAgente: userData?.numeroAgente,
+                        picture: userData?.picture,
                     });
                     await this.userRepository.save(dbUser);
                 }
@@ -2977,8 +2984,8 @@ export class SocketGateway
                                         apellido: dbUser.apellido || null,
                                         email: dbUser.email || null,
                                         role: dbUser.role || 'USER',
-                                        picture: null,
-                                        sede: null,
+                                        picture: dbUser.picture || null, // 🔥 FIX: Usar picture de BD
+                                        sede: userConversations.find(c => c.participants.includes(fullName))?.sede || null, // Intentar obtener sede de conversación si no está en BD
                                         sede_id: null,
                                         numeroAgente: dbUser.numeroAgente || null,
                                         isOnline: isUserConnected,
