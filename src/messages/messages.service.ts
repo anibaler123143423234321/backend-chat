@@ -1373,8 +1373,11 @@ export class MessagesService {
     // 🔥 Si ordenamos DESC, revertimos para mantener orden cronológico en el frontend
     const orderedMessages = order === 'DESC' ? messages.reverse() : messages;
 
+    // 🔥 Enriquecer con fotos y metadatos
+    const enrichedData = await this.enrichMessages(orderedMessages);
+
     return {
-      data: orderedMessages,
+      data: enrichedData,
       total,
       hasMore,
       page,
@@ -2055,7 +2058,7 @@ export class MessagesService {
     };
   }
 
-  // 🔥 HELPER: Enriquecer mensajes con información de hilos (respuestas)
+  // 🔥 HELPER: Enriquecer mensajes con información de hilos (respuestas) Y FOTOS
   private async enrichMessages(messages: any[]): Promise<any[]> {
     if (!messages || messages.length === 0) return [];
 
@@ -2065,44 +2068,98 @@ export class MessagesService {
     const lastReplyTextMap: Record<number, string> = {};
 
     // 1. Thread Counts
-    const threadCounts = await this.messageRepository
-      .createQueryBuilder('message')
-      .select('message.threadId', 'threadId')
-      .addSelect('COUNT(*)', 'count')
-      .where('message.threadId IN (:...messageIds)', { messageIds })
-      .andWhere('message.isDeleted = false')
-      .groupBy('message.threadId')
-      .getRawMany();
+    if (messageIds.length > 0) {
+      const threadCounts = await this.messageRepository
+        .createQueryBuilder('message')
+        .select('message.threadId', 'threadId')
+        .addSelect('COUNT(*)', 'count')
+        .where('message.threadId IN (:...messageIds)', { messageIds })
+        .andWhere('message.isDeleted = false')
+        .groupBy('message.threadId')
+        .getRawMany();
 
-    threadCounts.forEach((tc) => {
-      threadCountMap[tc.threadId] = parseInt(tc.count);
-    });
+      threadCounts.forEach((tc) => {
+        threadCountMap[tc.threadId] = parseInt(tc.count);
+      });
 
-    // 2. Last Replies
-    const lastReplies = await this.messageRepository
-      .createQueryBuilder('message')
-      .select('message.threadId', 'threadId')
-      .addSelect('message.from', 'from')
-      .addSelect(
-        'CASE WHEN LENGTH(message.message) > 100 THEN CONCAT(SUBSTRING(message.message, 1, 100), "...") ELSE message.message END',
-        'message',
-      )
-      .where('message.threadId IN (:...messageIds)', { messageIds })
-      .andWhere('message.isDeleted = false')
-      .orderBy('message.id', 'DESC')
-      .getRawMany();
+      // 2. Last Replies
+      const lastReplies = await this.messageRepository
+        .createQueryBuilder('message')
+        .select('message.threadId', 'threadId')
+        .addSelect('message.from', 'from')
+        .addSelect(
+          'CASE WHEN LENGTH(message.message) > 100 THEN CONCAT(SUBSTRING(message.message, 1, 100), "...") ELSE message.message END',
+          'message',
+        )
+        .where('message.threadId IN (:...messageIds)', { messageIds })
+        .andWhere('message.isDeleted = false')
+        .orderBy('message.id', 'DESC')
+        .getRawMany();
 
-    // Group by threadId and take first (most recent)
-    const seenThreadIds = new Set<number>();
-    lastReplies.forEach((reply) => {
-      if (!seenThreadIds.has(reply.threadId)) {
-        lastReplyMap[reply.threadId] = reply.from;
-        lastReplyTextMap[reply.threadId] = reply.message || '';
-        seenThreadIds.add(reply.threadId);
+      // Group by threadId and take first (most recent)
+      const seenThreadIds = new Set<number>();
+      lastReplies.forEach((reply) => {
+        if (!seenThreadIds.has(reply.threadId)) {
+          lastReplyMap[reply.threadId] = reply.from;
+          lastReplyTextMap[reply.threadId] = reply.message || '';
+          seenThreadIds.add(reply.threadId);
+        }
+      });
+    }
+
+    // 🔥 3. Obtener fotos de perfil (cache + DB robusta)
+    const uniqueSenders = [...new Set(messages.map(m => m.from))];
+    const userMap: Record<string, string> = {};
+    const missingUsernames: string[] = [];
+    const now = Date.now();
+
+    // Cache check
+    uniqueSenders.forEach(username => {
+      const cached = this.pictureCache.get(username);
+      if (cached && cached.expiresAt > now) {
+        userMap[username] = cached.url;
+      } else {
+        missingUsernames.push(username);
       }
     });
 
-    // 3. Map messages & Return
+    // DB Fetch
+    if (missingUsernames.length > 0) {
+      try {
+        const users = await this.userRepository
+          .createQueryBuilder('user')
+          .select(['user.username', 'user.nombre', 'user.apellido', 'user.picture'])
+          .where('user.username IN (:...names)', { names: missingUsernames })
+          .orWhere("CONCAT(COALESCE(user.nombre, ''), ' ', COALESCE(user.apellido, '')) IN (:...names)", { names: missingUsernames })
+          .orWhere("CONCAT(COALESCE(user.nombre, ''), ' ', COALESCE(user.apellido, ''), ' ') IN (:...names)", { names: missingUsernames })
+          .getMany();
+
+        users.forEach(u => {
+          if (u.picture) {
+            const fullName = `${u.nombre || ''} ${u.apellido || ''}`.trim();
+            const fullNameWithSpace = `${fullName} `;
+
+            // Map back to requested keys
+            if (missingUsernames.includes(u.username)) {
+              userMap[u.username] = u.picture;
+              this.pictureCache.set(u.username, { url: u.picture, expiresAt: now + this.PICTURE_CACHE_TTL });
+            }
+            if (missingUsernames.includes(fullName)) {
+              userMap[fullName] = u.picture;
+              this.pictureCache.set(fullName, { url: u.picture, expiresAt: now + this.PICTURE_CACHE_TTL });
+            }
+            if (missingUsernames.includes(fullNameWithSpace)) {
+              userMap[fullNameWithSpace] = u.picture;
+              this.pictureCache.set(fullNameWithSpace, { url: u.picture, expiresAt: now + this.PICTURE_CACHE_TTL });
+            }
+          }
+        });
+      } catch (err) {
+        console.error('Error fetching user pictures in enrichMessages:', err);
+      }
+    }
+
+    // 4. Map messages & Return
     return messages.map((msg) => {
       // Asegurar que msg es un objeto plano si es una entidad
       const msgObj = typeof msg.toJSON === 'function' ? msg.toJSON() : msg;
@@ -2111,6 +2168,8 @@ export class MessagesService {
         threadCount: threadCountMap[msg.id] || 0,
         lastReplyFrom: lastReplyMap[msg.id] || null,
         lastReplyText: lastReplyTextMap[msg.id] || null,
+        picture: userMap[msg.from] || null, // 🔥 Picture agregado
+        // time: msg.sentAt ? formatPeruTime(new Date(msg.sentAt)) : msg.time // COMMENTED: User data is trusted
       };
     });
   }
