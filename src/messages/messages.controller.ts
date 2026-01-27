@@ -9,6 +9,7 @@ import {
   Query,
   Patch,
   ParseIntPipe,
+  BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -444,6 +445,16 @@ export class MessagesController {
   async incrementThreadCount(@Param('id') id: string) {
     await this.messagesService.incrementThreadCount(parseInt(id));
     return { success: true };
+  }
+
+  // 🔥 NUEVO: Marcar hilo como leído
+  @Patch('thread/:threadId/read')
+  async markThreadAsRead(
+    @Param('threadId') threadId: string,
+    @Body('username') username: string, // El usuario que lee
+  ) {
+    if (!username) throw new BadRequestException('Username is required');
+    return await this.messagesService.markThreadAsRead(parseInt(threadId), username);
   }
 
   // 🔥 NUEVO: Obtener conteo de mensajes no leídos para un usuario en una sala

@@ -34,6 +34,28 @@ export class MessagesService {
   private pictureCache = new Map<string, { url: string; expiresAt: number }>();
   private readonly PICTURE_CACHE_TTL = 1000 * 60 * 60 * 24 * 30; // 30 días
 
+  async markThreadAsRead(threadId: number, username: string) {
+    // Ejecutar query raw para performance (append a array JSONB)
+    // Solo actualizamos mensajes de OTROS usuarios que NO hayamos leído
+    await this.messageRepository.query(`
+            UPDATE "message"
+            SET "readBy" = COALESCE("readBy", '[]'::jsonb) || to_jsonb($2::text)
+            WHERE "threadId" = $1
+            AND "from" != $2
+            AND (
+                "readBy" IS NULL 
+                OR NOT JSON_CONTAINS(LOWER("readBy"), LOWER(JSON_QUOTE($2)))
+            )
+        `, [threadId, username]);
+
+    return { success: true };
+  }
+
+  // 🔥 NUEVO: Obtener conteo absoluto de respuestas en un hilo
+  async getThreadCount(threadId: number): Promise<number> {
+    return await this.messageRepository.count({ where: { threadId } });
+  }
+
   async create(createMessageDto: CreateMessageDto): Promise<Message> {
     // Log eliminado para optimización
 
@@ -343,6 +365,33 @@ export class MessagesService {
         threadCountMap[tc.threadId] = parseInt(tc.count);
       });
 
+      // 🔥 NUEVO: Obtener conteo de mensajes de hilo NO LEÍDOS por el usuario
+      const unreadThreadCountMap: Record<number, number> = {};
+      if (username) {
+        const unreadThreadCounts = await this.messageRepository
+          .createQueryBuilder('message')
+          .select('message.threadId', 'threadId')
+          .addSelect('COUNT(*)', 'count')
+          .where('message.threadId IN (:...messageIds)', { messageIds })
+          .andWhere('message.isDeleted = false')
+          // Mensajes que NO son míos
+          .andWhere('LOWER(message.from) != LOWER(:username)', { username })
+          // Y que NO he leído
+          .andWhere(
+            "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(LOWER(message.readBy), LOWER(:usernameJson)))",
+            { usernameJson: JSON.stringify(username) }
+          )
+          .groupBy('message.threadId')
+          .getRawMany();
+
+        unreadThreadCounts.forEach((row) => {
+          unreadThreadCountMap[row.threadId] = parseInt(row.count, 10);
+        });
+      }
+
+      // 🔥 Guardar mapa para uso en el map final
+      (this as any)._unreadThreadCountMapRoom = unreadThreadCountMap;
+
       // 🚀 OPTIMIZADO: Truncar texto directamente en SQL para evitar transferir datos innecesarios
       // Esto es más eficiente que truncar en JavaScript porque la BD nunca envía el texto completo
       const lastReplies = await this.messageRepository
@@ -440,6 +489,7 @@ export class MessagesService {
         ...msgWithoutReadBy,
         readByCount, // Solo el conteo, no la lista completa
         threadCount: threadCountMap[msg.id] || 0,
+        unreadThreadCount: ((this as any)._unreadThreadCountMapRoom || {})[msg.id] || 0, // 🔥 Mapear conteo no leído
         lastReplyFrom: lastReplyMap[msg.id] || null,
         lastReplyText: lastReplyTextMap[msg.id] || null, // Ya viene truncado desde SQL
         time: formatPeruTime(new Date(msg.sentAt)), // 🔥 RECALCULAR SIEMPRE para asegurar formato AM/PM
@@ -628,6 +678,34 @@ export class MessagesService {
         threadCountMap[tc.threadId] = parseInt(tc.count);
       });
 
+      // 🔥 NUEVO: Obtener conteo de mensajes de hilo NO LEÍDOS por el usuario (from)
+      // Asumimos que 'from' es el usuario que consulta
+      const unreadThreadCountMap: Record<number, number> = {};
+      if (from) {
+        const unreadThreadCounts = await this.messageRepository
+          .createQueryBuilder('message')
+          .select('message.threadId', 'threadId')
+          .addSelect('COUNT(*)', 'count')
+          .where('message.threadId IN (:...messageIds)', { messageIds })
+          .andWhere('message.isDeleted = false')
+          // Mensajes que NO son míos
+          .andWhere('LOWER(message.from) != LOWER(:username)', { username: from })
+          // Y que NO he leído
+          .andWhere(
+            "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(LOWER(message.readBy), LOWER(:usernameJson)))",
+            { usernameJson: JSON.stringify(from) }
+          )
+          .groupBy('message.threadId')
+          .getRawMany();
+
+        unreadThreadCounts.forEach((row) => {
+          unreadThreadCountMap[row.threadId] = parseInt(row.count, 10);
+        });
+      }
+
+      // 🔥 Guardar mapa para uso en el map final
+      (this as any)._unreadThreadCountMapUser = unreadThreadCountMap;
+
       // 🚀 OPTIMIZADO: Truncar texto directamente en SQL
       const lastReplies = await this.messageRepository
         .createQueryBuilder('message')
@@ -665,6 +743,7 @@ export class MessagesService {
       ...msg,
       numberInList: index + 1 + offset,
       threadCount: threadCountMap[msg.id] || 0,
+      unreadThreadCount: ((this as any)._unreadThreadCountMapUser || {})[msg.id] || 0, // 🔥 Mapear conteo no leído
       lastReplyFrom: lastReplyMap[msg.id] || null,
       lastReplyText: lastReplyTextMap[msg.id] || null, // Ya viene truncado desde SQL
       displayDate: formatDisplayDate(msg.sentAt),

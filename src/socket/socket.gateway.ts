@@ -3734,6 +3734,9 @@ export class SocketGateway
                 roomName = room?.name || '';
             }
 
+            // 🔥 FIX: Obtener conteo REAL desde BD para evitar desincronización
+            const realThreadCount = await this.messagesService.getThreadCount(threadId);
+
             const updatePayload = {
                 messageId: threadId,
                 lastReplyFrom: from,
@@ -3743,6 +3746,7 @@ export class SocketGateway
                 isGroup,
                 roomCode,
                 roomName,
+                threadCount: realThreadCount, // 🔥 ENVIAR TOTAL ABSOLUTO
             };
 
             if (isGroup && roomCode) {
@@ -3798,52 +3802,18 @@ export class SocketGateway
         }
     }
 
+    // 🔥 DESHABILITADO: Este handler es redundante.
+    // La lógica de threadCountUpdated ya se maneja en handleThreadMessage.
+    // Mantener este handler causaba emisiones duplicadas.
+    /*
     @SubscribeMessage('threadCountUpdated')
     async handleThreadCountUpdated(
         @ConnectedSocket() _client: Socket,
         @MessageBody() data: any,
     ) {
-        // 🚀 NOTA: Este handler ahora es principalmente para compatibilidad con frontends antiguos
-        // La lógica principal de actualización de threadCount se hace en handleThreadMessage
-        // Este handler solo reenvía el evento a los destinatarios
-
-        try {
-            const { messageId, lastReplyFrom, isGroup, roomCode, to, from, lastReplyText } = data;
-
-            let roomName = '';
-            if (isGroup && roomCode) {
-                const room = await this.getCachedRoom(roomCode);
-                roomName = room?.name || '';
-            }
-
-            const updatePayload = {
-                messageId,
-                lastReplyFrom,
-                lastReplyText,
-                from,
-                to,
-                isGroup,
-                roomCode,
-                roomName,
-            };
-
-            if (isGroup && roomCode) {
-                this.server.to(roomCode).emit('threadCountUpdated', updatePayload);
-            } else {
-                const toRoom = to?.toLowerCase?.();
-                const fromRoom = from?.toLowerCase?.();
-
-                if (toRoom) {
-                    this.server.to(toRoom).emit('threadCountUpdated', updatePayload);
-                }
-                if (fromRoom && fromRoom !== toRoom) {
-                    this.server.to(fromRoom).emit('threadCountUpdated', updatePayload);
-                }
-            }
-        } catch (error) {
-            console.error('❌ Error al reenviar threadCountUpdated:', error);
-        }
+        // ... código eliminado para evitar duplicados ...
     }
+    */
     // ==================== REACCIONES A MENSAJES ====================
 
     @SubscribeMessage('toggleReaction')
