@@ -23,6 +23,8 @@ import { TemporaryRoom } from '../../temporary-rooms/entities/temporary-room.ent
 @Index('IDX_messages_room_thread_deleted', ['roomCode', 'threadId', 'isDeleted'])
 @Index('IDX_messages_conv_thread_deleted', ['conversationId', 'threadId', 'isDeleted'])
 @Index('IDX_messages_from_to_group', ['from', 'to', 'isGroup'])
+@Index('IDX_messages_room_deleted_sentAt', ['roomCode', 'isDeleted', 'sentAt'])
+@Index('IDX_messages_conv_deleted_sentAt', ['conversationId', 'isDeleted', 'sentAt'])
 export class Message {
   @PrimaryGeneratedColumn()
   id: number;

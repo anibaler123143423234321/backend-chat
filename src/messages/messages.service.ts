@@ -132,7 +132,7 @@ export class MessagesService {
         .andWhere('message.roomCode IS NOT NULL')
         .andWhere('message.isDeleted = :isDeleted', { isDeleted: false })
         .andWhere('message.threadId IS NULL')
-        .andWhere('LOWER(message.from) != LOWER(:username)', { username })
+        .andWhere('message.from != :username', { username })
         // Mensajes sin readBy o donde el usuario no está en readBy
         .andWhere(
           "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(LOWER(message.readBy), LOWER(:usernameJson)))",
@@ -175,7 +175,7 @@ export class MessagesService {
           .andWhere('message.isDeleted = :isDeleted', { isDeleted: false })
           .andWhere('message.threadId IS NULL')
           .andWhere('message.isGroup = :isGroup', { isGroup: false })
-          .andWhere('LOWER(message.from) != LOWER(:username)', { username })
+          .andWhere('message.from != :username', { username })
           .andWhere(
             "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(LOWER(message.readBy), LOWER(:usernameJson)))",
             { usernameJson: JSON.stringify(username) }
@@ -339,7 +339,7 @@ export class MessagesService {
       .where('message.roomCode = :roomCode', { roomCode })
       .andWhere('message.threadId IS NULL')
       .andWhere('message.isDeleted = :isDeleted', { isDeleted: false })
-      .orderBy('message.id', 'DESC')
+      .orderBy('message.sentAt', 'DESC')
       .take(limit)
       .skip(offset)
       .getManyAndCount();
@@ -375,7 +375,7 @@ export class MessagesService {
           .where('message.threadId IN (:...messageIds)', { messageIds })
           .andWhere('message.isDeleted = false')
           // Mensajes que NO son míos
-          .andWhere('LOWER(message.from) != LOWER(:username)', { username })
+          .andWhere('message.from != :username', { username })
           // Y que NO he leído
           .andWhere(
             "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(LOWER(message.readBy), LOWER(:usernameJson)))",
@@ -401,7 +401,7 @@ export class MessagesService {
         .addSelect('CASE WHEN LENGTH(message.message) > 100 THEN CONCAT(SUBSTRING(message.message, 1, 100), "...") ELSE message.message END', 'message')
         .where('message.threadId IN (:...messageIds)', { messageIds })
         .andWhere('message.isDeleted = false')
-        .orderBy('message.id', 'DESC')
+        .orderBy('message.sentAt', 'DESC')
         .getRawMany();
 
       // Agrupar por threadId y tomar el primero (más reciente)
@@ -540,11 +540,11 @@ export class MessagesService {
     const messages = await this.messageRepository
       .createQueryBuilder('message')
       .where(
-        'LOWER(message.from) = LOWER(:from) AND LOWER(message.to) = LOWER(:to) AND message.threadId IS NULL AND message.isGroup = false',
+        'message.from = :from AND message.to = :to AND message.threadId IS NULL AND message.isGroup = false',
         { from, to },
       )
       .orWhere(
-        'LOWER(message.from) = LOWER(:to) AND LOWER(message.to) = LOWER(:from) AND message.threadId IS NULL AND message.isGroup = false',
+        'message.from = :to AND message.to = :from AND message.threadId IS NULL AND message.isGroup = false',
         { from, to },
       )
       .orderBy('message.sentAt', 'ASC')
@@ -647,13 +647,13 @@ export class MessagesService {
         'message.isForwarded',
       ])
       .where(
-        '(LOWER(message.from) = LOWER(:from) AND LOWER(message.to) = LOWER(:to)) OR (LOWER(message.from) = LOWER(:to) AND LOWER(message.to) = LOWER(:from))',
+        '(message.from = :from AND message.to = :to) OR (message.from = :to AND message.to = :from)',
         { from, to },
       )
       .andWhere('message.threadId IS NULL')
       .andWhere('message.isGroup = :isGroup', { isGroup: false })
       .andWhere('message.isDeleted = :isDeleted', { isDeleted: false })
-      .orderBy('message.id', 'DESC')
+      .orderBy('message.sentAt', 'DESC')
       .take(limit)
       .skip(offset)
       .getMany();
@@ -689,7 +689,7 @@ export class MessagesService {
           .where('message.threadId IN (:...messageIds)', { messageIds })
           .andWhere('message.isDeleted = false')
           // Mensajes que NO son míos
-          .andWhere('LOWER(message.from) != LOWER(:username)', { username: from })
+          .andWhere('message.from != :username', { username: from })
           // Y que NO he leído
           .andWhere(
             "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(LOWER(message.readBy), LOWER(:usernameJson)))",
@@ -714,7 +714,7 @@ export class MessagesService {
         .addSelect('CASE WHEN LENGTH(message.message) > 100 THEN CONCAT(SUBSTRING(message.message, 1, 100), "...") ELSE message.message END', 'message')
         .where('message.threadId IN (:...messageIds)', { messageIds })
         .andWhere('message.isDeleted = false')
-        .orderBy('message.id', 'DESC')
+        .orderBy('message.sentAt', 'DESC')
         .getRawMany();
 
       // Agrupar por threadId y tomar el primero (más reciente)

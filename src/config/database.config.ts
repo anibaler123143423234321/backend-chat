@@ -14,11 +14,11 @@ export const databaseConfig: TypeOrmModuleOptions = {
   logging: false,
 
   extra: {
-    connectionLimit: 5,        // 🔴 BAJO
+    connectionLimit: 5,
     waitForConnections: true,
     queueLimit: 0,
     acquireTimeout: 15000,
-    enableKeepAlive: true,
+    enableKeepAlive: false,
     keepAliveInitialDelay: 10000,
   },
 };
