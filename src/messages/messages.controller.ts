@@ -417,11 +417,13 @@ export class MessagesController {
     @Param('roomCode') roomCode: string,
     @Query('limit') limit: string = '50',
     @Query('offset') offset: string = '0',
+    @Query('search') search: string = '',
   ) {
     return await this.messagesService.findThreadsByRoom(
       roomCode,
       parseInt(limit),
       parseInt(offset),
+      search
     );
   }
 
@@ -432,12 +434,14 @@ export class MessagesController {
     @Param('to') to: string,
     @Query('limit') limit: string = '50',
     @Query('offset') offset: string = '0',
+    @Query('search') search: string = '',
   ) {
     return await this.messagesService.findThreadsByUser(
       from,
       to,
       parseInt(limit),
       parseInt(offset),
+      search
     );
   }
 
