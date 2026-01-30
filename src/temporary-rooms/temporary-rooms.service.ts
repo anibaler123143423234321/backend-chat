@@ -228,6 +228,7 @@ export class TemporaryRoomsService {
           ...roomWithoutMembers,
           lastMessage, // 🔥 Asegurar que se devuelve el último mensaje
           lastActivity: lastMessage?.sentAt || room.createdAt, // 🔥 CORRECCIÓN: Usar fecha del mensaje si existe
+          // isMuted: room.settings?.mutedUsers?.includes(displayName) || false, // 🔥 Estado de silencio
         };
       }),
     );
@@ -736,6 +737,7 @@ export class TemporaryRoomsService {
         createdAt: room.createdAt, // 🔥 AGREGADO
         updatedAt: room.updatedAt, // 🔥 AGREGADO
         lastMessage: lastMessage, // 🔥 AGREGADO
+        // isMuted: room.settings?.mutedUsers?.includes(displayName) || false, // 🔥 Estado de silencio
       };
     }).filter(room => room !== null); // Eliminar nulos del filtrado
 
@@ -1144,5 +1146,37 @@ export class TemporaryRoomsService {
     });
 
     return room?.pinnedMessageId || null;
+  }
+
+  // 🔥 NUEVO: Silenciar sala para un usuario
+  async muteRoom(roomCode: string, username: string): Promise<any> {
+    const room = await this.findByRoomCode(roomCode);
+
+    if (!room.settings) {
+      room.settings = {};
+    }
+
+    if (!room.settings.mutedUsers) {
+      room.settings.mutedUsers = [];
+    }
+
+    if (!room.settings.mutedUsers.includes(username)) {
+      room.settings.mutedUsers.push(username);
+      await this.temporaryRoomRepository.save(room);
+    }
+
+    return { success: true, isMuted: true, roomCode };
+  }
+
+  // 🔥 NUEVO: Desactivar silencio de sala para un usuario
+  async unmuteRoom(roomCode: string, username: string): Promise<any> {
+    const room = await this.findByRoomCode(roomCode);
+
+    if (room.settings && room.settings.mutedUsers) {
+      room.settings.mutedUsers = room.settings.mutedUsers.filter(u => u !== username);
+      await this.temporaryRoomRepository.save(room);
+    }
+
+    return { success: true, isMuted: false, roomCode };
   }
 }

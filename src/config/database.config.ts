@@ -9,22 +9,16 @@ export const databaseConfig: TypeOrmModuleOptions = {
   database: process.env.DB_DATABASE || 'chat_midas',
 
   entities: [__dirname + '/../**/*.entity{.ts,.js}'],
-
-  synchronize: true,
-
-  // NUNCA uses America/Lima (no lo soporta)
+  synchronize: false,
   timezone: 'Z',
-
   logging: false,
 
   extra: {
-    //  OPTIMIZADO para 200+ usuarios concurrentes
-    connectionLimit: 10, // REDUCIDO para Cluster Mode (10 x N_CORES < Max_MySQL)
-    queueLimit: 0, // Sin límite de cola (espera infinita si no hay conexiones)
-    acquireTimeout: 30000, // 30 segundos máximo para obtener conexión
-    charset: 'utf8mb4',
+    connectionLimit: 5,        // 🔴 BAJO
     waitForConnections: true,
-    enableKeepAlive: true, // Mantiene conexiones activas
-    keepAliveInitialDelay: 5000, // Ping cada 5 segundos
+    queueLimit: 0,
+    acquireTimeout: 15000,
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 10000,
   },
 };

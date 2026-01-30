@@ -480,6 +480,7 @@ export class TemporaryConversationsService {
           participants: conv.participants,
           assignedUsers: conv.assignedUsers,
           settings: conv.settings,
+          //isMuted: conv.settings?.mutedUsers?.includes(usernameNormalized) || false, // 🔥 Estado de silencio
           unreadCount,
           lastMessage: lastMessage ? { sentAt: lastMessage.sentAt } : null,
           role: otherParticipantRole,
@@ -1055,6 +1056,40 @@ export class TemporaryConversationsService {
       limit,
       totalPages,
     };
+  }
+
+  // 🔥 Silenciar conversación
+  async muteConversation(id: number, username: string): Promise<any> {
+    const conversation = await this.findOne(id);
+    const usernameNormalized = this.normalizeUsername(username);
+
+    if (!conversation.settings) {
+      conversation.settings = {};
+    }
+
+    if (!conversation.settings.mutedUsers) {
+      conversation.settings.mutedUsers = [];
+    }
+
+    if (!conversation.settings.mutedUsers.includes(usernameNormalized)) {
+      conversation.settings.mutedUsers.push(usernameNormalized);
+      await this.temporaryConversationRepository.save(conversation);
+    }
+
+    return { success: true, isMuted: true, id };
+  }
+
+  // 🔥 Activar notificaciones (Desilenciar)
+  async unmuteConversation(id: number, username: string): Promise<any> {
+    const conversation = await this.findOne(id);
+    const usernameNormalized = this.normalizeUsername(username);
+
+    if (conversation.settings && conversation.settings.mutedUsers) {
+      conversation.settings.mutedUsers = conversation.settings.mutedUsers.filter(u => u !== usernameNormalized);
+      await this.temporaryConversationRepository.save(conversation);
+    }
+
+    return { success: true, isMuted: false, id };
   }
 
   private generateLinkId(): string {

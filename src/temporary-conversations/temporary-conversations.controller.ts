@@ -152,4 +152,14 @@ export class TemporaryConversationsController {
     const userRole = body?.userRole || req.user?.role || 'ASESOR';
     return this.temporaryConversationsService.activateConversation(parseInt(id), userId, userRole);
   }
+
+  @Post(':id/mute')
+  muteConversation(@Param('id') id: string, @Body() body: { username: string }) {
+    return this.temporaryConversationsService.muteConversation(+id, body.username);
+  }
+
+  @Post(':id/unmute')
+  unmuteConversation(@Param('id') id: string, @Body() body: { username: string }) {
+    return this.temporaryConversationsService.unmuteConversation(+id, body.username);
+  }
 }

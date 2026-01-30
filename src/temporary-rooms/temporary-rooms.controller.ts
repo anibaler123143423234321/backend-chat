@@ -182,4 +182,20 @@ export class TemporaryRoomsController {
   ) {
     return this.temporaryRoomsService.rejectJoinRequest(roomCode, body.username);
   }
+
+  @Post(':roomCode/mute')
+  muteRoom(
+    @Param('roomCode') roomCode: string,
+    @Body() body: { username: string }
+  ) {
+    return this.temporaryRoomsService.muteRoom(roomCode, body.username);
+  }
+
+  @Post(':roomCode/unmute')
+  unmuteRoom(
+    @Param('roomCode') roomCode: string,
+    @Body() body: { username: string }
+  ) {
+    return this.temporaryRoomsService.unmuteRoom(roomCode, body.username);
+  }
 }
