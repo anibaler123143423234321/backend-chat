@@ -6,7 +6,7 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, IsNull, In } from 'typeorm';
+import { Repository, IsNull, In, MoreThan, Like } from 'typeorm';
 import { Message } from './entities/message.entity';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { TemporaryConversation } from '../temporary-conversations/entities/temporary-conversation.entity';
@@ -1587,28 +1587,33 @@ export class MessagesService {
   }
 
   // 🔥 NUEVO: Obtener hilos padres de un grupo (roomCode)
+  // 🔥 NUEVO: Obtener hilos padres de un grupo (roomCode)
   async findThreadsByRoom(
     roomCode: string,
     limit: number = 50,
     offset: number = 0,
+    search: string = '', // 🔥 Filtro de búsqueda
   ): Promise<{ data: any[]; total: number; hasMore: boolean }> {
+
+    const whereCondition: any = {
+      roomCode,
+      threadId: IsNull(), // Solo mensajes principales (no respuestas)
+      isDeleted: false,
+      threadCount: MoreThan(0), // 🔥 Filtrar desde BD los que tienen hilos
+    };
+
+    if (search && search.trim()) {
+      whereCondition.message = Like(`%${search.trim()}%`);
+    }
+
     const [threads, total] = await this.messageRepository.findAndCount({
-      where: {
-        roomCode,
-        threadId: IsNull(), // Solo mensajes principales (no respuestas)
-        isDeleted: false,
-      },
+      where: whereCondition,
       order: { id: 'DESC' }, // Más recientes primero
+      take: limit, // 🔥 Paginación DB
+      skip: offset, // 🔥 Paginación DB
     });
 
-    // Filtrar solo los que tienen threadCount > 0
-    const parentThreads = threads.filter((msg) => msg.threadCount > 0);
-    const totalWithThreads = parentThreads.length;
-
-    // Aplicar paginación después del filtro
-    const paginatedThreads = parentThreads.slice(offset, offset + limit);
-
-    const data = paginatedThreads.map((msg) => ({
+    const data = threads.map((msg) => ({
       id: msg.id,
       message: msg.message,
       from: msg.from,
@@ -1623,8 +1628,8 @@ export class MessagesService {
 
     return {
       data,
-      total: totalWithThreads,
-      hasMore: offset + limit < totalWithThreads,
+      total,
+      hasMore: offset + threads.length < total,
     };
   }
 
@@ -1634,40 +1639,44 @@ export class MessagesService {
     to: string,
     limit: number = 50,
     offset: number = 0,
+    search: string = '', // 🔥 Filtro de búsqueda
   ): Promise<{ data: any[]; total: number; hasMore: boolean }> {
+
+    // Construir condiciones base
+    const baseWhere1: any = { from, to, threadId: IsNull(), isDeleted: false, threadCount: MoreThan(0) };
+    const baseWhere2: any = { from: to, to: from, threadId: IsNull(), isDeleted: false, threadCount: MoreThan(0) };
+
+    if (search && search.trim()) {
+      const searchLike = Like(`%${search.trim()}%`);
+      baseWhere1.message = searchLike;
+      baseWhere2.message = searchLike;
+    }
+
     // Buscar mensajes entre ambos usuarios (en ambas direcciones)
-    const threads = await this.messageRepository.find({
-      where: [
-        { from, to, threadId: IsNull(), isDeleted: false },
-        { from: to, to: from, threadId: IsNull(), isDeleted: false },
-      ],
+    const [threads, total] = await this.messageRepository.findAndCount({
+      where: [baseWhere1, baseWhere2],
       order: { id: 'DESC' },
+      take: limit, // 🔥 Paginación DB
+      skip: offset, // 🔥 Paginación DB
     });
 
-    // Filtrar solo los que tienen threadCount > 0
-    const parentThreads = threads.filter((msg) => msg.threadCount > 0);
-    const totalWithThreads = parentThreads.length;
-
-    // Aplicar paginación después del filtro
-    const paginatedThreads = parentThreads.slice(offset, offset + limit);
-
-    const data = paginatedThreads.map((msg) => ({
+    const data = threads.map((msg) => ({
       id: msg.id,
       message: msg.message,
       from: msg.from,
-      to: msg.to,
       senderRole: msg.senderRole,
       senderNumeroAgente: msg.senderNumeroAgente,
       threadCount: msg.threadCount,
       lastReplyFrom: msg.lastReplyFrom,
       sentAt: msg.sentAt,
       mediaType: msg.mediaType,
+      roomCode: msg.roomCode, // Puede ser null en privados
     }));
 
     return {
       data,
-      total: totalWithThreads,
-      hasMore: offset + limit < totalWithThreads,
+      total,
+      hasMore: offset + threads.length < total,
     };
   }
 

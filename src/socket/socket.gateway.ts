@@ -3992,7 +3992,7 @@ export class SocketGateway
         const userConnection = this.users.get(username);
         if (userConnection && userConnection.socket.connected) {
             // 🔥 CLUSTER FIX: Usar server.emit() para Redis
-            this.server.emit('removedFromRoom', {
+            this.server.to(username).emit('removedFromRoom', {
                 username: username, // Filtrar en frontend
                 roomCode,
                 roomName: roomName || roomCode,
