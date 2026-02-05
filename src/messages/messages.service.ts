@@ -8,6 +8,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull, In, MoreThan, Like } from 'typeorm';
 import { Message } from './entities/message.entity';
+import { MessageAttachment } from './entities/message-attachment.entity'; // 🔥 NUEVO: Importar entidad
 import { CreateMessageDto } from './dto/create-message.dto';
 import { TemporaryConversation } from '../temporary-conversations/entities/temporary-conversation.entity';
 import { TemporaryRoom } from '../temporary-rooms/entities/temporary-room.entity';
@@ -26,6 +27,8 @@ export class MessagesService {
     private temporaryConversationRepository: Repository<TemporaryConversation>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @InjectRepository(MessageAttachment) // 🔥 NUEVO: Inyectar repositorio de adjuntos
+    private attachmentRepository: Repository<MessageAttachment>,
     @Inject(forwardRef(() => SocketGateway))
     private socketGateway: SocketGateway,
   ) { }
@@ -82,6 +85,7 @@ export class MessagesService {
       isGroup,
       roomCode,
       threadId,
+      attachments, // 🔥 NUEVO: Extraer adjuntos
       ...restDto
     } = createMessageDto;
 
@@ -107,6 +111,21 @@ export class MessagesService {
 
     const savedMessage = await this.messageRepository.save(message);
 
+    // 🔥 NUEVO: Guardar adjuntos si existen
+    if (attachments && Array.isArray(attachments) && attachments.length > 0) {
+      const attachmentsToSave = attachments.map(att => {
+        return this.attachmentRepository.create({
+          url: att.url,
+          type: att.type || 'file', // Usar 'type' de acuerdo a la entidad y DTO
+          fileName: att.fileName,
+          fileSize: att.fileSize,
+          messageId: savedMessage.id
+        });
+      });
+      await this.attachmentRepository.save(attachmentsToSave);
+      savedMessage.attachments = attachmentsToSave;
+    }
+
     // 🔥 DEBUG: Verificar que se guardó correctamente
     // console.log('✅ DEBUG mensaje guardado:', {
     //   id: savedMessage.id,
@@ -120,7 +139,7 @@ export class MessagesService {
     // 🔥 NOTA: La actualización de contadores y último mensaje ahora se maneja
     // directamente en socket.gateway.ts cuando se distribuyen los mensajes
 
-    return savedMessage;
+    return this.sanitizeMessage(savedMessage);
   }
 
   // 🔥 NUEVO: Obtener todos los conteos de mensajes no leídos para un usuario
@@ -315,6 +334,7 @@ export class MessagesService {
     // readBy convertido a readByCount (entero)
     const [messages, total] = await this.messageRepository
       .createQueryBuilder('message')
+      .leftJoinAndSelect('message.attachments', 'attachments')
       .select([
         'message.id',
         'message.from',
@@ -347,6 +367,11 @@ export class MessagesService {
         'message.videoCallUrl',
         'message.videoRoomID',
         'message.isForwarded',
+        'attachments.id',
+        'attachments.url',
+        'attachments.type',
+        'attachments.fileName',
+        'attachments.fileSize',
       ])
       .where('message.roomCode = :roomCode', { roomCode })
       .andWhere('message.threadId IS NULL')
@@ -497,7 +522,7 @@ export class MessagesService {
       const { readBy, ...msgWithoutReadBy } = msg as any;
       const readByCount = Array.isArray(readBy) ? readBy.length : 0;
 
-      return {
+      const enriched = {
         ...msgWithoutReadBy,
         readByCount, // Solo el conteo, no la lista completa
         threadCount: threadCountMap[msg.id] || 0,
@@ -507,6 +532,8 @@ export class MessagesService {
         time: formatPeruTime(new Date(msg.sentAt)), // 🔥 RECALCULAR SIEMPRE para asegurar formato AM/PM
         picture: userMap[msg.from] || null, // 🔥 Picture agregado
       };
+
+      return this.sanitizeMessage(enriched); // 🔥 LIMPIEZA TOTAL
     });
 
     return {
@@ -516,6 +543,28 @@ export class MessagesService {
       page,
       totalPages,
     };
+  }
+
+  // 🔥 HELPER: Eliminar campos nulos, indefinidos o arrays vacíos para limpiar la respuesta API
+  private sanitizeMessage(msg: any): any {
+    if (!msg) return msg;
+
+    // Asegurar que es un objeto plano
+    const cleanObj = typeof msg.toJSON === 'function' ? msg.toJSON() : { ...msg };
+
+    Object.keys(cleanObj).forEach(key => {
+      const val = cleanObj[key];
+      if (val === null || val === undefined) {
+        delete cleanObj[key];
+      } else if (Array.isArray(val) && val.length === 0) {
+        delete cleanObj[key];
+      } else if (typeof val === 'boolean' && val === false && (key === 'isGroup' || key === 'isRead' || key === 'isDeleted' || key === 'isEdited' || key === 'isForwarded')) {
+        // OPCIONAL: Podríamos borrar los booleans false si se desea, pero usualmente son útiles
+        // Por ahora los dejamos para mantener claridad en el estado del mensaje
+      }
+    });
+
+    return cleanObj;
   }
 
   /**
@@ -623,6 +672,7 @@ export class MessagesService {
     // � OPTIMIZADO: Usar QueryBuilder con campos específicos
     const messages = await this.messageRepository
       .createQueryBuilder('message')
+      .leftJoinAndSelect('message.attachments', 'attachments')
       .select([
         'message.id',
         'message.from',
@@ -657,6 +707,11 @@ export class MessagesService {
         'message.type',
         'message.conversationId',
         'message.isForwarded',
+        'attachments.id',
+        'attachments.url',
+        'attachments.type',
+        'attachments.fileName',
+        'attachments.fileSize',
       ])
       .where(
         '(message.from = :from AND message.to = :to) OR (message.from = :to AND message.to = :from)',
@@ -751,25 +806,29 @@ export class MessagesService {
     const reversedMessages = messages.reverse();
 
     // Agregar numeración secuencial y threadCount
-    return reversedMessages.map((msg, index) => ({
-      ...msg,
-      numberInList: index + 1 + offset,
-      threadCount: threadCountMap[msg.id] || 0,
-      unreadThreadCount: ((this as any)._unreadThreadCountMapUser || {})[msg.id] || 0, // 🔥 Mapear conteo no leído
-      lastReplyFrom: lastReplyMap[msg.id] || null,
-      lastReplyText: lastReplyTextMap[msg.id] || null, // Ya viene truncado desde SQL
-      displayDate: formatDisplayDate(msg.sentAt),
-      time: formatPeruTime(new Date(msg.sentAt)), // 🔥 RECALCULAR SIEMPRE para asegurar formato AM/PM
-    }));
+    return reversedMessages.map((msg, index) => {
+      const enriched = {
+        ...msg,
+        numberInList: index + 1 + offset,
+        threadCount: threadCountMap[msg.id] || 0,
+        unreadThreadCount: ((this as any)._unreadThreadCountMapUser || {})[msg.id] || 0, // 🔥 Mapear conteo no leído
+        lastReplyFrom: lastReplyMap[msg.id] || null,
+        lastReplyText: lastReplyTextMap[msg.id] || null, // Ya viene truncado desde SQL
+        displayDate: formatDisplayDate(msg.sentAt),
+        time: formatPeruTime(new Date(msg.sentAt)), // 🔥 RECALCULAR SIEMPRE para asegurar formato AM/PM
+      };
+      return this.sanitizeMessage(enriched);
+    });
   }
 
   async findRecentMessages(limit: number = 20): Promise<Message[]> {
     // 🔥 Excluir mensajes de hilos (threadId debe ser null)
-    return await this.messageRepository.find({
+    const messages = await this.messageRepository.find({
       where: { isDeleted: false, threadId: IsNull() },
       order: { sentAt: 'DESC' },
       take: limit,
     });
+    return messages.map(m => this.sanitizeMessage(m));
   }
 
   // 🔥 NUEVO: Buscar menciones para un usuario
@@ -781,6 +840,7 @@ export class MessagesService {
   ): Promise<{ data: any[]; total: number; hasMore: boolean; page: number; totalPages: number }> {
     const query = this.messageRepository
       .createQueryBuilder('message')
+      .leftJoinAndSelect('message.attachments', 'attachments')
       .select([
         'message.id',
         'message.from',
@@ -794,6 +854,11 @@ export class MessagesService {
         'message.isRead',
         'message.threadId', // Importante para saber si es respuesta en hilo
         'message.replyToMessageId',
+        'attachments.id',
+        'attachments.url',
+        'attachments.type',
+        'attachments.fileName',
+        'attachments.fileSize',
       ])
       // Buscar mensajes que contengan @username (case insensitive)
       .where('LOWER(message.message) LIKE LOWER(:mentionPattern)', { mentionPattern: `%@${username}%` })
@@ -814,11 +879,14 @@ export class MessagesService {
       .getManyAndCount();
 
     // Formatear respuesta
-    const data = messages.map((msg) => ({
-      ...msg,
-      displayDate: formatDisplayDate(msg.sentAt),
-      time: formatPeruTime(new Date(msg.sentAt)),
-    }));
+    const data = messages.map((msg) => {
+      const enriched = {
+        ...msg,
+        displayDate: formatDisplayDate(msg.sentAt),
+        time: formatPeruTime(new Date(msg.sentAt)),
+      };
+      return this.sanitizeMessage(enriched);
+    });
 
     const page = Math.floor(offset / limit) + 1;
     const totalPages = Math.ceil(total / limit);
@@ -870,50 +938,62 @@ export class MessagesService {
     username: string,
   ): Promise<{ updatedCount: number; updatedMessages: { id: number; readBy: string[]; readAt: Date }[] }> {
     try {
-      const messages = await this.messageRepository.find({
-        where: { roomCode, isDeleted: false },
-      });
+      const readAt = new Date();
+      const normalizedUsername = this.normalizeForReadBy(username);
 
-      let updatedCount = 0;
-      const updates = [];
-      const updatedMessages: { id: number; readBy: string[]; readAt: Date }[] = [];
+      // 🚀 OPTIMIZADO: Primero obtenemos solo los IDs de mensajes que necesitan actualización
+      // Esto es mucho más rápido que cargar todos los mensajes completos
+      const messagesToUpdate = await this.messageRepository
+        .createQueryBuilder('message')
+        .select(['message.id', 'message.readBy'])
+        .where('message.roomCode = :roomCode', { roomCode })
+        .andWhere('message.isDeleted = :isDeleted', { isDeleted: false })
+        .andWhere('LOWER(TRIM(message.from)) != :username', { username: username?.toLowerCase().trim() })
+        // Mensajes que el usuario aún no ha leído
+        .andWhere(
+          "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(message.readBy, :usernameJson))",
+          { usernameJson: JSON.stringify(normalizedUsername) }
+        )
+        .getMany();
 
-      for (const message of messages) {
-        // No marcar mensajes propios
-        if (
-          message.from?.toLowerCase().trim() === username?.toLowerCase().trim()
-        ) {
-          continue;
-        }
-
-        if (!message.readBy) {
-          message.readBy = [];
-        }
-
-        // Verificar si ya leyó (normalizado)
-        const alreadyRead = message.readBy.some(
-          (u) => u?.toLowerCase().trim() === username?.toLowerCase().trim(),
-        );
-
-        if (!alreadyRead) {
-          // 🚀 OPTIMIZADO: Guardar normalizado para evitar LOWER() en queries
-          message.readBy.push(this.normalizeForReadBy(username));
-          message.isRead = true;
-          message.readAt = new Date();
-          updates.push(this.messageRepository.save(message));
-          updatedCount++;
-
-          // 🔥 NUEVO: Guardar info del mensaje actualizado para emitir en tiempo real
-          updatedMessages.push({
-            id: message.id,
-            readBy: [...message.readBy], // Copia del array
-            readAt: message.readAt,
-          });
-        }
+      if (messagesToUpdate.length === 0) {
+        return { updatedCount: 0, updatedMessages: [] };
       }
 
-      if (updates.length > 0) {
-        await Promise.all(updates);
+      const messageIds = messagesToUpdate.map(m => m.id);
+      const updatedMessages: { id: number; readBy: string[]; readAt: Date }[] = [];
+
+      // 🚀 OPTIMIZADO: Procesar en lotes de 100 para evitar bloqueos largos
+      const BATCH_SIZE = 100;
+      let updatedCount = 0;
+
+      for (let i = 0; i < messageIds.length; i += BATCH_SIZE) {
+        const batchIds = messageIds.slice(i, i + BATCH_SIZE);
+        const batchMessages = messagesToUpdate.slice(i, i + BATCH_SIZE);
+
+        // Actualizar cada mensaje del lote con su nuevo readBy
+        const updatePromises = batchMessages.map(async (msg) => {
+          const newReadBy = [...(msg.readBy || []), normalizedUsername];
+          await this.messageRepository
+            .createQueryBuilder()
+            .update()
+            .set({
+              readBy: () => `JSON_ARRAY_APPEND(COALESCE(readBy, JSON_ARRAY()), '$', '${normalizedUsername}')`,
+              isRead: true,
+              readAt: readAt
+            })
+            .where('id = :id', { id: msg.id })
+            .execute();
+
+          updatedMessages.push({
+            id: msg.id,
+            readBy: newReadBy,
+            readAt: readAt,
+          });
+        });
+
+        await Promise.all(updatePromises);
+        updatedCount += batchIds.length;
       }
 
       return { updatedCount, updatedMessages };
@@ -927,46 +1007,105 @@ export class MessagesService {
   }
 
   // Marcar múltiples mensajes como leídos
+  // 🚀 OPTIMIZADO: Marcar múltiples mensajes como leídos en lotes
   async markMultipleAsRead(
     messageIds: number[],
     username: string,
   ): Promise<Message[]> {
+    if (messageIds.length === 0) return [];
+
+    const readAt = new Date();
+    const normalizedUsername = this.normalizeForReadBy(username);
+
+    // 🚀 Obtener solo los mensajes que necesitan actualización en una sola query
+    const messagesToUpdate = await this.messageRepository
+      .createQueryBuilder('message')
+      .where('message.id IN (:...ids)', { ids: messageIds })
+      .andWhere('message.from != :username', { username })
+      .andWhere(
+        "(message.readBy IS NULL OR NOT JSON_CONTAINS(message.readBy, :usernameJson))",
+        { usernameJson: JSON.stringify(normalizedUsername) }
+      )
+      .getMany();
+
+    if (messagesToUpdate.length === 0) return [];
+
+    // 🚀 Actualizar en lotes
+    const BATCH_SIZE = 50;
     const updatedMessages: Message[] = [];
 
-    for (const messageId of messageIds) {
-      const message = await this.markAsRead(messageId, username);
-      if (message) {
+    for (let i = 0; i < messagesToUpdate.length; i += BATCH_SIZE) {
+      const batch = messagesToUpdate.slice(i, i + BATCH_SIZE);
+      const updatePromises = batch.map(async (message) => {
+        await this.messageRepository
+          .createQueryBuilder()
+          .update()
+          .set({
+            readBy: () => `JSON_ARRAY_APPEND(COALESCE(readBy, JSON_ARRAY()), '$', '${normalizedUsername}')`,
+            isRead: true,
+            readAt: readAt
+          })
+          .where('id = :id', { id: message.id })
+          .execute();
+
+        message.readBy = [...(message.readBy || []), normalizedUsername];
+        message.isRead = true;
+        message.readAt = readAt;
         updatedMessages.push(message);
-      }
+      });
+      await Promise.all(updatePromises);
     }
 
     return updatedMessages;
   }
 
-  // Marcar todos los mensajes de una conversación como leídos
+  // 🚀 OPTIMIZADO: Marcar todos los mensajes de una conversación como leídos
   async markConversationAsRead(from: string, to: string): Promise<Message[]> {
-    const messages = await this.messageRepository.find({
-      where: {
-        from,
-        to,
-        isRead: false,
-        isDeleted: false,
-      },
-    });
+    const readAt = new Date();
+    const normalizedTo = this.normalizeForReadBy(to);
 
+    // 🚀 Obtener solo los mensajes que necesitan actualización
+    const messages = await this.messageRepository
+      .createQueryBuilder('message')
+      .where('message.from = :from', { from })
+      .andWhere('message.to = :to', { to })
+      .andWhere('message.isRead = :isRead', { isRead: false })
+      .andWhere('message.isDeleted = :isDeleted', { isDeleted: false })
+      .andWhere(
+        "(message.readBy IS NULL OR NOT JSON_CONTAINS(message.readBy, :toJson))",
+        { toJson: JSON.stringify(normalizedTo) }
+      )
+      .getMany();
+
+    if (messages.length === 0) {
+      return [];
+    }
+
+    // 🚀 Actualizar en lotes
+    const BATCH_SIZE = 100;
     const updatedMessages: Message[] = [];
 
-    for (const message of messages) {
-      if (!message.readBy) {
-        message.readBy = [];
-      }
-      if (!message.readBy.includes(to)) {
-        message.readBy.push(to);
+    for (let i = 0; i < messages.length; i += BATCH_SIZE) {
+      const batch = messages.slice(i, i + BATCH_SIZE);
+      const updatePromises = batch.map(async (message) => {
+        const newReadBy = [...(message.readBy || []), normalizedTo];
+        await this.messageRepository
+          .createQueryBuilder()
+          .update()
+          .set({
+            readBy: () => `JSON_ARRAY_APPEND(COALESCE(readBy, JSON_ARRAY()), '$', '${normalizedTo}')`,
+            isRead: true,
+            readAt: readAt
+          })
+          .where('id = :id', { id: message.id })
+          .execute();
+
+        message.readBy = newReadBy;
         message.isRead = true;
-        message.readAt = new Date();
-        await this.messageRepository.save(message);
+        message.readAt = readAt;
         updatedMessages.push(message);
-      }
+      });
+      await Promise.all(updatePromises);
     }
 
     return updatedMessages;
@@ -1097,6 +1236,49 @@ export class MessagesService {
       return true;
     }
     return false;
+  }
+
+  // 🔥 NUEVO: Vaciar todos los mensajes de una sala (grupos/favoritos) - Solo SUPERADMIN
+  async clearAllMessagesInRoom(
+    roomCode: string,
+    deletedBy: string,
+  ): Promise<{ deletedCount: number }> {
+    const result = await this.messageRepository.update(
+      { roomCode, isDeleted: false },
+      { isDeleted: true, deletedAt: new Date(), deletedBy },
+    );
+    return { deletedCount: result.affected || 0 };
+  }
+
+  // 🔥 NUEVO: Vaciar todos los mensajes de una conversación directa (chats asignados) - Solo SUPERADMIN
+  async clearAllMessagesInConversation(
+    from: string,
+    to: string,
+    deletedBy: string,
+  ): Promise<{ deletedCount: number }> {
+    // DEBUG: Descomentar para depurar problemas de eliminación
+    // console.log(`🗑️ clearAllMessagesInConversation llamada con:`);
+    // console.log(`   from: "${from}"`);
+    // console.log(`   to: "${to}"`);
+    // console.log(`   deletedBy: "${deletedBy}"`);
+
+    // Eliminar mensajes en ambas direcciones (from -> to y to -> from)
+    const result1 = await this.messageRepository.update(
+      { from, to, isDeleted: false },
+      { isDeleted: true, deletedAt: new Date(), deletedBy },
+    );
+    // console.log(`   Resultado dirección 1 (from->to): ${result1.affected} afectados`);
+
+    const result2 = await this.messageRepository.update(
+      { from: to, to: from, isDeleted: false },
+      { isDeleted: true, deletedAt: new Date(), deletedBy },
+    );
+    // console.log(`   Resultado dirección 2 (to->from): ${result2.affected} afectados`);
+
+    const totalDeleted = (result1.affected || 0) + (result2.affected || 0);
+    // console.log(`   Total eliminados: ${totalDeleted}`);
+
+    return { deletedCount: totalDeleted };
   }
 
   async editMessage(
@@ -1350,23 +1532,25 @@ export class MessagesService {
     const limitedResults = filteredMessages.slice(0, limit);
 
     // Retornar los mensajes con información de la conversación
-    return limitedResults.map((msg) => ({
-      id: msg.id,
-      message: msg.message,
-      from: msg.from,
-      to: msg.to,
-      sentAt: msg.sentAt,
-      isGroup: msg.isGroup,
-      roomCode: msg.roomCode,
-      mediaType: msg.mediaType,
-      mediaData: msg.mediaData,
-      fileName: msg.fileName,
-      fileSize: msg.fileSize,
-      // Información adicional para identificar la conversación
-      conversationType: msg.isGroup ? 'group' : 'direct',
-      conversationId: msg.isGroup ? msg.roomCode : msg.to,
-      conversationName: msg.isGroup ? msg.roomCode : msg.to,
-    }));
+    return limitedResults.map((msg) => {
+      const result = {
+        id: msg.id,
+        message: msg.message,
+        from: msg.from,
+        to: msg.to,
+        sentAt: msg.sentAt,
+        isGroup: msg.isGroup,
+        roomCode: msg.roomCode,
+        mediaType: msg.mediaType,
+        mediaData: msg.mediaData,
+        fileName: msg.fileName,
+        fileSize: msg.fileSize,
+        conversationType: msg.isGroup ? 'group' : 'direct',
+        conversationId: msg.isGroup ? msg.roomCode : msg.to,
+        conversationName: msg.isGroup ? msg.roomCode : msg.to,
+      };
+      return this.sanitizeMessage(result);
+    });
   }
 
   // Buscar mensajes por ID de usuario
@@ -1886,11 +2070,11 @@ export class MessagesService {
   }
 
   async findOne(id: number): Promise<Message | null> {
-
-    return await this.messageRepository.findOne({
+    const message = await this.messageRepository.findOne({
       where: { id },
       relations: ['room'] // Opcional: si necesitas datos de la sala
-    })
+    });
+    return this.sanitizeMessage(message);
   }
 
   private normalizeUsername(username: string): string {
@@ -2215,7 +2399,26 @@ export class MessagesService {
       });
     }
 
-    // 🔥 3. Obtener fotos de perfil (cache + DB robusta)
+    // 🔥 3. Obtener Adjuntos (Attachments) de forma masiva
+    const attachmentsMap: Record<number, any[]> = {};
+    if (messageIds.length > 0) {
+      try {
+        const allAttachments = await this.attachmentRepository.find({
+          where: { messageId: In(messageIds) }
+        });
+
+        allAttachments.forEach(att => {
+          if (!attachmentsMap[att.messageId]) {
+            attachmentsMap[att.messageId] = [];
+          }
+          attachmentsMap[att.messageId].push(att);
+        });
+      } catch (err) {
+        console.error('Error fetching attachments in enrichMessages:', err);
+      }
+    }
+
+    // 🔥 4. Obtener fotos de perfil (cache + DB robusta)
     const uniqueSenders = [...new Set(messages.map(m => m.from))];
     const userMap: Record<string, string> = {};
     const missingUsernames: string[] = [];
@@ -2271,14 +2474,17 @@ export class MessagesService {
     return messages.map((msg) => {
       // Asegurar que msg es un objeto plano si es una entidad
       const msgObj = typeof msg.toJSON === 'function' ? msg.toJSON() : msg;
-      return {
+
+      const enrichedMsg = {
         ...msgObj,
         threadCount: threadCountMap[msg.id] || 0,
         lastReplyFrom: lastReplyMap[msg.id] || null,
         lastReplyText: lastReplyTextMap[msg.id] || null,
-        picture: userMap[msg.from] || null, // 🔥 Picture agregado
-        // time: msg.sentAt ? formatPeruTime(new Date(msg.sentAt)) : msg.time // COMMENTED: User data is trusted
+        attachments: attachmentsMap[msg.id] || msg.attachments || [],
+        picture: userMap[msg.from] || null,
       };
+
+      return this.sanitizeMessage(enrichedMsg);
     });
   }
 }

@@ -8,9 +8,17 @@ import { TemporaryRoom } from '../temporary-rooms/entities/temporary-room.entity
 import { User } from '../users/entities/user.entity';
 import { SocketModule } from '../socket/socket.module';
 
+import { MessageAttachment } from './entities/message-attachment.entity';
+
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Message, TemporaryRoom, TemporaryConversation, User]),
+    TypeOrmModule.forFeature([
+      Message,
+      TemporaryRoom,
+      TemporaryConversation,
+      User,
+      MessageAttachment,
+    ]),
     forwardRef(() => SocketModule),
   ],
   controllers: [MessagesController],

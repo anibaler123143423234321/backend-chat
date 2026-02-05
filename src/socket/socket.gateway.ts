@@ -1723,6 +1723,7 @@ export class SocketGateway
                                 videoCallUrl: data.videoCallUrl,
                                 videoRoomID: data.videoRoomID,
                                 metadata: data.metadata,
+                                attachments: data.attachments, // 🔥 NUEVO: Enviar adjuntos en tiempo real
                             };
 
                             // 🚀 CLUSTER FIX: Broadcast global a la sala vía Redis
@@ -1823,6 +1824,7 @@ export class SocketGateway
                                     videoCallUrl: data.videoCallUrl,
                                     videoRoomID: data.videoRoomID,
                                     metadata: data.metadata,
+                                    attachments: data.attachments, // 🔥 NUEVO: Enviar adjuntos en tiempo real
                                 });
                                 // console.log(`🚀 DEBUG: Mensaje enviado a sala ${groupRoomCode} (Redis Broadcast)`);
                             } else {
@@ -1859,6 +1861,7 @@ export class SocketGateway
                                         videoCallUrl: data.videoCallUrl,
                                         videoRoomID: data.videoRoomID,
                                         metadata: data.metadata,
+                                        attachments: data.attachments, // 🔥 NUEVO: Enviar adjuntos en tiempo real
                                     });
                                 });
                             }
@@ -1911,6 +1914,7 @@ export class SocketGateway
                         videoCallUrl: data.videoCallUrl,
                         videoRoomID: data.videoRoomID,
                         metadata: data.metadata,
+                        attachments: data.attachments, // 🔥 NUEVO: Enviar adjuntos en tiempo real
                     };
 
                     //  Enviar mensaje al destinatario
@@ -1951,6 +1955,7 @@ export class SocketGateway
                         replyToMessageId,
                         replyToSender,
                         replyToText,
+                        attachments: data.attachments, // 🔥 NUEVO: Enviar adjuntos en tiempo real
                     });
 
                     // NUEVO: Emitir evento de actualizaci�n de conversaci�n asignada
@@ -2083,6 +2088,7 @@ export class SocketGateway
             videoCallUrl,
             videoRoomID,
             metadata,
+            attachments, // 🔥 NUEVO: Extraer lista de adjuntos
         } = data;
 
         try {
@@ -2124,6 +2130,7 @@ export class SocketGateway
                 videoCallUrl,
                 videoRoomID,
                 metadata,
+                attachments, // 🔥 NUEVO: Pasar adjuntos al servicio para persistencia
             };
 
             // console.log(`?? Guardando mensaje en BD:`, messageData);
@@ -3606,22 +3613,30 @@ export class SocketGateway
                 updatedCount,
             });
 
-            // 🔥 NUEVO: Emitir roomMessageRead para cada mensaje a todos los usuarios de la sala
-            // Esto permite que los demás usuarios vean los checks de lectura en tiempo real
+            // 🚀 OPTIMIZADO: Emitir UN SOLO evento batch en lugar de N eventos individuales
+            // Antes: N loops = N queries a getBatchUsersData + N eventos socket
+            // Ahora: 1 query + 1 evento socket
             if (updatedMessages.length > 0) {
-                // 🔥 FIX CLUSTER: Procesar mensajes en batch o individualmente pero usando getBatchUsersData
-                // Dado que son muchos mensajes, mejor hacer un loop simple
-                for (const msg of updatedMessages) {
-                    const readByData = await this.getBatchUsersData(msg.readBy || []);
+                // Recolectar todos los usuarios únicos que leyeron mensajes
+                const allReadByUsers = new Set<string>();
+                updatedMessages.forEach(msg => {
+                    (msg.readBy || []).forEach(user => allReadByUsers.add(user));
+                });
 
-                    this.server.to(data.roomCode).emit('roomMessageRead', {
+                // Una sola llamada para obtener datos de todos los usuarios
+                const readByData = await this.getBatchUsersData(Array.from(allReadByUsers));
+
+                // Emitir UN SOLO evento batch con todos los mensajes actualizados
+                this.server.to(data.roomCode).emit('roomMessagesReadBatch', {
+                    messages: updatedMessages.map(msg => ({
                         messageId: msg.id,
                         readBy: msg.readBy,
-                        readByData,
                         readAt: msg.readAt,
-                        roomCode: data.roomCode,
-                    });
-                }
+                    })),
+                    readByData, // Datos de usuarios compartidos para todos
+                    roomCode: data.roomCode,
+                    updatedCount,
+                });
             }
 
             // Emitir reset de contador para asegurar que el frontend se actualice

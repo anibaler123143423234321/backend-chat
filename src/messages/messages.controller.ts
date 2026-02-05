@@ -333,6 +333,25 @@ export class MessagesController {
     return { success: deleted };
   }
 
+  // 🔥 NUEVO: Vaciar todos los mensajes de una sala (grupos/favoritos) - Solo SUPERADMIN
+  @Delete('room/:roomCode/clear')
+  async clearAllMessagesInRoom(
+    @Param('roomCode') roomCode: string,
+    @Body('deletedBy') deletedBy: string,
+  ) {
+    return this.messagesService.clearAllMessagesInRoom(roomCode, deletedBy);
+  }
+
+  // 🔥 NUEVO: Vaciar todos los mensajes de una conversación directa - Solo SUPERADMIN
+  @Delete('conversation/clear')
+  async clearAllMessagesInConversation(
+    @Body('from') from: string,
+    @Body('to') to: string,
+    @Body('deletedBy') deletedBy: string,
+  ) {
+    return this.messagesService.clearAllMessagesInConversation(from, to, deletedBy);
+  }
+
   @Get('stats/:roomCode?')
   async getStats(@Param('roomCode') roomCode?: string) {
     // console.log(`ðŸ“Š Obteniendo estadÃ­sticas de mensajes`);

@@ -9,6 +9,8 @@ import {
   Index,
 } from 'typeorm';
 import { TemporaryRoom } from '../../temporary-rooms/entities/temporary-room.entity';
+import { MessageAttachment } from './message-attachment.entity';
+import { OneToMany } from 'typeorm';
 
 // 🚀 ÍNDICES PARA OPTIMIZAR CONSULTAS FRECUENTES
 // Estos índices mejoran significativamente el rendimiento de las consultas de mensajes
@@ -137,6 +139,11 @@ export class Message {
 
   @Column({ type: 'json', nullable: true })
   metadata: any; // Metadata adicional (JSON flexible)
+
+  @OneToMany(() => MessageAttachment, (attachment) => attachment.message, {
+    cascade: true,
+  })
+  attachments: MessageAttachment[];
 
   // Relación con la sala temporal (opcional)
   @ManyToOne(() => TemporaryRoom, { nullable: true })

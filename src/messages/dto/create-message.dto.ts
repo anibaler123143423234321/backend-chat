@@ -6,6 +6,23 @@ import {
   IsDateString,
 } from 'class-validator';
 
+export class CreateAttachmentDto {
+  @IsString()
+  url: string;
+
+  @IsString()
+  @IsOptional()
+  type?: string;
+
+  @IsString()
+  @IsOptional()
+  fileName?: string;
+
+  @IsNumber()
+  @IsOptional()
+  fileSize?: number;
+}
+
 export class CreateMessageDto {
   @IsString()
   @IsOptional()
@@ -122,4 +139,8 @@ export class CreateMessageDto {
   @IsBoolean()
   @IsOptional()
   isForwarded?: boolean;
+
+  @IsOptional()
+  attachments?: CreateAttachmentDto[];
 }
+
