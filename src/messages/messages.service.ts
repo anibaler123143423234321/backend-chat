@@ -35,20 +35,30 @@ export class MessagesService {
   private readonly PICTURE_CACHE_TTL = 1000 * 60 * 60 * 24 * 30; // 30 días
 
   async markThreadAsRead(threadId: number, username: string) {
-    // Ejecutar query raw para performance (append a array JSONB)
-    // Solo actualizamos mensajes de OTROS usuarios que NO hayamos leído
-    await this.messageRepository.query(`
-            UPDATE "message"
-            SET "readBy" = COALESCE("readBy", '[]'::jsonb) || to_jsonb($2::text)
-            WHERE "threadId" = $1
-            AND "from" != $2
-            AND (
-                "readBy" IS NULL 
-                OR NOT JSON_CONTAINS(LOWER("readBy"), LOWER(JSON_QUOTE($2)))
-            )
-        `, [threadId, username]);
+    // 🚀 OPTIMIZADO para MySQL: Normalizar username antes de guardar
+    const normalizedUsername = this.normalizeForReadBy(username);
 
-    return { success: true };
+    // Obtener mensajes del hilo que no sean míos y no haya leído
+    const messages = await this.messageRepository
+      .createQueryBuilder('message')
+      .where('message.threadId = :threadId', { threadId })
+      .andWhere('message.from != :username', { username })
+      .andWhere(
+        "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(message.readBy, :usernameJson))",
+        { usernameJson: JSON.stringify(normalizedUsername) }
+      )
+      .getMany();
+
+    // Actualizar cada mensaje agregando el usuario normalizado a readBy
+    for (const message of messages) {
+      if (!message.readBy) {
+        message.readBy = [];
+      }
+      message.readBy.push(normalizedUsername);
+      await this.messageRepository.save(message);
+    }
+
+    return { success: true, updatedCount: messages.length };
   }
 
   // 🔥 NUEVO: Obtener conteo absoluto de respuestas en un hilo
@@ -134,9 +144,10 @@ export class MessagesService {
         .andWhere('message.threadId IS NULL')
         .andWhere('message.from != :username', { username })
         // Mensajes sin readBy o donde el usuario no está en readBy
+        // 🚀 OPTIMIZADO: Sin LOWER() - readBy ya se guarda normalizado
         .andWhere(
-          "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(LOWER(message.readBy), LOWER(:usernameJson)))",
-          { usernameJson: JSON.stringify(username) }
+          "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(message.readBy, :usernameJson))",
+          { usernameJson: JSON.stringify(this.normalizeForReadBy(username)) }
         )
         .groupBy('message.roomCode')
         .getRawMany();
@@ -176,9 +187,10 @@ export class MessagesService {
           .andWhere('message.threadId IS NULL')
           .andWhere('message.isGroup = :isGroup', { isGroup: false })
           .andWhere('message.from != :username', { username })
+          // 🚀 OPTIMIZADO: Sin LOWER() - readBy ya se guarda normalizado
           .andWhere(
-            "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(LOWER(message.readBy), LOWER(:usernameJson)))",
-            { usernameJson: JSON.stringify(username) }
+            "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(message.readBy, :usernameJson))",
+            { usernameJson: JSON.stringify(this.normalizeForReadBy(username)) }
           )
           .groupBy('message.conversationId')
           .getRawMany();
@@ -376,10 +388,10 @@ export class MessagesService {
           .andWhere('message.isDeleted = false')
           // Mensajes que NO son míos
           .andWhere('message.from != :username', { username })
-          // Y que NO he leído
+          // Y que NO he leído - 🚀 OPTIMIZADO: Sin LOWER()
           .andWhere(
-            "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(LOWER(message.readBy), LOWER(:usernameJson)))",
-            { usernameJson: JSON.stringify(username) }
+            "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(message.readBy, :usernameJson))",
+            { usernameJson: JSON.stringify(this.normalizeForReadBy(username)) }
           )
           .groupBy('message.threadId')
           .getRawMany();
@@ -690,10 +702,10 @@ export class MessagesService {
           .andWhere('message.isDeleted = false')
           // Mensajes que NO son míos
           .andWhere('message.from != :username', { username: from })
-          // Y que NO he leído
+          // Y que NO he leído - 🚀 OPTIMIZADO: Sin LOWER()
           .andWhere(
-            "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(LOWER(message.readBy), LOWER(:usernameJson)))",
-            { usernameJson: JSON.stringify(from) }
+            "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(message.readBy, :usernameJson))",
+            { usernameJson: JSON.stringify(this.normalizeForReadBy(from)) }
           )
           .groupBy('message.threadId')
           .getRawMany();
@@ -841,7 +853,8 @@ export class MessagesService {
       );
 
       if (!alreadyRead) {
-        message.readBy.push(username);
+        // 🚀 OPTIMIZADO: Guardar normalizado para evitar LOWER() en queries
+        message.readBy.push(this.normalizeForReadBy(username));
         message.isRead = true;
         message.readAt = new Date();
         await this.messageRepository.save(message);
@@ -883,7 +896,8 @@ export class MessagesService {
         );
 
         if (!alreadyRead) {
-          message.readBy.push(username);
+          // 🚀 OPTIMIZADO: Guardar normalizado para evitar LOWER() en queries
+          message.readBy.push(this.normalizeForReadBy(username));
           message.isRead = true;
           message.readAt = new Date();
           updates.push(this.messageRepository.save(message));
@@ -1887,6 +1901,12 @@ export class MessagesService {
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '') || ''
     );
+  }
+
+  // 🚀 NUEVO: Normalización para readBy - MAYÚSCULAS para compatibilidad
+  // Los datos existentes ya están en MAYÚSCULAS, mantenemos el formato
+  private normalizeForReadBy(username: string): string {
+    return username?.toUpperCase().trim() || '';
   }
 
   // 🔥 NUEVO: Búsqueda global de mensajes (tipo WhatsApp) con paginación
