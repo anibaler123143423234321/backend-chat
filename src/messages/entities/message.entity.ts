@@ -113,6 +113,9 @@ export class Message {
   @Column({ type: 'varchar', length: 20, nullable: true })
   replyToSenderNumeroAgente: string; // Número de agente del remitente original
 
+  @Column({ type: 'int', nullable: true })
+  replyToAttachmentId: number; // 🔥 NUEVO: ID del adjunto específico al que se responde
+
   // Campos para hilos de conversación
   @Column({ type: 'int', nullable: true })
   threadId: number; // ID del mensaje principal del hilo (null si es mensaje principal)

@@ -136,8 +136,18 @@ export class MessagesService {
     //   senderNumeroAgente: savedMessage.senderNumeroAgente,
     // });
 
-    // 🔥 NOTA: La actualización de contadores y último mensaje ahora se maneja
-    // directamente en socket.gateway.ts cuando se distribuyen los mensajes
+    // 🔥 NUEVO: Manejar replyToAttachmentId
+    if (savedMessage.replyToAttachmentId) {
+      await this.attachmentRepository.update(
+        { id: savedMessage.replyToAttachmentId },
+        {
+          lastReplyFrom: savedMessage.from,
+          lastReplyAt: peruDate
+        }
+      );
+      // Nota: El incremento de threadCount se hace habitualmente vía socket.gateway o un endpoint separado,
+      // pero para asegurar consistencia lo hacemos aquí o en el gateway.
+    }
 
     return this.sanitizeMessage(savedMessage);
   }
@@ -372,6 +382,9 @@ export class MessagesService {
         'attachments.type',
         'attachments.fileName',
         'attachments.fileSize',
+        'attachments.threadCount',
+        'attachments.lastReplyFrom',
+        'attachments.lastReplyAt',
       ])
       .where('message.roomCode = :roomCode', { roomCode })
       .andWhere('message.threadId IS NULL')
@@ -1632,11 +1645,17 @@ export class MessagesService {
     limit: number = 100,
     offset: number = 0,
     order: 'ASC' | 'DESC' = 'ASC',
+    attachmentId?: number, // 🔥 NUEVO: Filtrar por adjunto específico
   ): Promise<{ data: Message[]; total: number; hasMore: boolean; page: number; totalPages: number }> {
     // 🔥 CORREGIDO: Usar ID en lugar de sentAt para ordenamiento consistente
     // sentAt puede estar corrupto, así que usamos ID que es más confiable
+    const where: any = { threadId, isDeleted: false };
+    if (attachmentId) {
+      where.replyToAttachmentId = attachmentId;
+    }
+
     const [messages, total] = await this.messageRepository.findAndCount({
-      where: { threadId, isDeleted: false },
+      where,
       order: { id: order },
       take: limit,
       skip: offset,
@@ -1778,10 +1797,15 @@ export class MessagesService {
   }
 
   // 🚀 OPTIMIZADO: Incrementar contador de respuestas en hilo con UPDATE directo
-  // Antes: 2 queries (findOne + save) → Ahora: 1 query (increment)
-  // Mejora: ~50% menos tiempo de ejecución
-  async incrementThreadCount(messageId: number): Promise<void> {
-    await this.messageRepository.increment({ id: messageId }, 'threadCount', 1);
+  // 🔥 FIX: Separar contadores - General vs Adjunto específico
+  async incrementThreadCount(messageId: number, attachmentId?: number): Promise<void> {
+    if (attachmentId) {
+      // Si es respuesta a un adjunto específico, SOLO incrementar el contador del adjunto
+      await this.attachmentRepository.increment({ id: attachmentId }, 'threadCount', 1);
+    } else {
+      // Si es respuesta general (sin adjunto), SOLO incrementar el contador del mensaje padre
+      await this.messageRepository.increment({ id: messageId }, 'threadCount', 1);
+    }
   }
 
   // 🔥 NUEVO: Obtener hilos padres de un grupo (roomCode)

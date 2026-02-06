@@ -5,14 +5,14 @@ import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 // 160 conexiones totales / 8 workers = 20 por worker
 export const databaseConfig: TypeOrmModuleOptions = {
   type: 'mysql',
-  host: process.env.DB_HOST || 'localhost',
+  host: process.env.DB_HOST || '198.46.186.2',
   port: parseInt(process.env.DB_PORT) || 3306,
   username: process.env.DB_USERNAME || 'usuarioCrm2',
   password: process.env.DB_PASSWORD || 'Midas*2025%',
   database: process.env.DB_DATABASE || 'chat_midas',
 
   entities: [__dirname + '/../**/*.entity{.ts,.js}'],
-  synchronize: false,
+  synchronize: true,
   timezone: 'Z',
   logging: false,
 

@@ -3708,11 +3708,12 @@ export class SocketGateway
                 }
             }
 
-            // 🚀 PASO 2: Incrementar threadCount del mensaje padre (1 query optimizado)
+            // 🚀 PASO 2: Incrementar threadCount del mensaje padre O del adjunto específico
             if (threadId) {
                 try {
-                    await this.messagesService.incrementThreadCount(threadId);
-                    console.log(`🔢 threadCount incrementado para mensaje ${threadId}`);
+                    // 🔥 FIX: Pasar replyToAttachmentId para separar contadores
+                    await this.messagesService.incrementThreadCount(threadId, data.replyToAttachmentId);
+                    console.log(`🔢 threadCount incrementado para ${data.replyToAttachmentId ? `adjunto ${data.replyToAttachmentId}` : `mensaje ${threadId}`}`);
                 } catch (incError) {
                     console.error('❌ Error al incrementar threadCount:', incError);
                 }

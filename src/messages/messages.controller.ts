@@ -404,6 +404,7 @@ export class MessagesController {
   @Get('thread/:threadId')
   async findThreadMessages(
     @Param('threadId') threadId: string,
+    @Query('attachmentId') attachmentId?: string, // 🔥 NUEVO
     @Query('limit') limit: string = '100',
     @Query('offset') offset: string = '0',
     @Query('order') order: string = 'ASC',
@@ -413,6 +414,7 @@ export class MessagesController {
       parseInt(limit),
       parseInt(offset),
       order.toUpperCase() === 'DESC' ? 'DESC' : 'ASC',
+      attachmentId ? parseInt(attachmentId) : undefined, // 🔥 NUEVO
     );
   }
 
@@ -465,8 +467,14 @@ export class MessagesController {
   }
 
   @Patch(':id/increment-thread')
-  async incrementThreadCount(@Param('id') id: string) {
-    await this.messagesService.incrementThreadCount(parseInt(id));
+  async incrementThreadCount(
+    @Param('id') id: string,
+    @Query('attachmentId') attachmentId?: string, // 🔥 NUEVO
+  ) {
+    await this.messagesService.incrementThreadCount(
+      parseInt(id),
+      attachmentId ? parseInt(attachmentId) : undefined,
+    );
     return { success: true };
   }
 

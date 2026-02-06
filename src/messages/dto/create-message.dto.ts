@@ -140,6 +140,10 @@ export class CreateMessageDto {
   @IsOptional()
   isForwarded?: boolean;
 
+  @IsNumber()
+  @IsOptional()
+  replyToAttachmentId?: number; // 🔥 NUEVO: ID del adjunto específico al que se responde
+
   @IsOptional()
   attachments?: CreateAttachmentDto[];
 }
