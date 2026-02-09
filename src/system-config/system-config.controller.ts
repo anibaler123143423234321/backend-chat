@@ -2,12 +2,18 @@ import { Controller, Get, Post, Body, Param, Delete, UseGuards } from '@nestjs/c
 import { SystemConfigService } from './system-config.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiBody } from '@nestjs/swagger';
+
+@ApiTags('Configuración')
+@ApiBearerAuth()
 @Controller('system-config')
 @UseGuards(JwtAuthGuard)
 export class SystemConfigController {
-  constructor(private readonly systemConfigService: SystemConfigService) {}
+  constructor(private readonly systemConfigService: SystemConfigService) { }
 
   @Get()
+  @ApiOperation({ summary: 'Obtener toda la configuración del sistema' })
+  @ApiResponse({ status: 200, description: 'Configuraciones recuperadas' })
   getAllConfigs() {
     return this.systemConfigService.getAllConfigs();
   }
@@ -18,6 +24,9 @@ export class SystemConfigController {
   }
 
   @Post('message-expiration')
+  @ApiOperation({ summary: 'Establecer días de expiración de mensajes' })
+  @ApiBody({ schema: { type: 'object', properties: { days: { type: 'number' } } } })
+  @ApiResponse({ status: 200, description: 'Configuración actualizada' })
   setMessageExpirationDays(@Body() body: { days: number }) {
     return this.systemConfigService.setMessageExpirationDays(body.days);
   }

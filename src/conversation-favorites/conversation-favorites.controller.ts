@@ -1,12 +1,20 @@
-import { Controller, Post, Delete, Get, Body, Param, Query } from '@nestjs/common';
+import { Controller, Post, Delete, Get, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { ConversationFavoritesService } from './conversation-favorites.service';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiQuery, ApiBody } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
+@ApiTags('Favoritos (Chats)')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller('conversation-favorites')
 export class ConversationFavoritesController {
-  constructor(private readonly conversationFavoritesService: ConversationFavoritesService) {}
+  constructor(private readonly conversationFavoritesService: ConversationFavoritesService) { }
 
   // Alternar favorito (agregar o quitar)
   @Post('toggle')
+  @ApiOperation({ summary: 'Alternar estado de favorito (agregar/quitar)' })
+  @ApiBody({ schema: { type: 'object', properties: { username: { type: 'string' }, conversationId: { type: 'number' } } } })
+  @ApiResponse({ status: 200, description: 'Estado alternado' })
   async toggleFavorite(
     @Body() body: { username: string; conversationId: number },
   ) {
@@ -38,6 +46,9 @@ export class ConversationFavoritesController {
 
   // Obtener favoritos de un usuario
   @Get('user/:username')
+  @ApiOperation({ summary: 'Obtener conversaciones favoritas de un usuario' })
+  @ApiParam({ name: 'username' })
+  @ApiResponse({ status: 200, description: 'Lista de favoritos' })
   async getUserFavorites(@Param('username') username: string) {
     return await this.conversationFavoritesService.getUserFavorites(username);
   }

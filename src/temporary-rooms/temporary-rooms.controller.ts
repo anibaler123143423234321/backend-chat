@@ -16,6 +16,10 @@ import {
 import { CreateTemporaryRoomDto } from './dto/create-temporary-room.dto';
 import { JoinRoomDto } from './dto/join-room.dto';
 
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiQuery, ApiBody } from '@nestjs/swagger';
+
+@ApiTags('Salas y Grupos')
+@ApiBearerAuth()
 @Controller('temporary-rooms')
 // @UseGuards(JwtAuthGuard) // Temporalmente deshabilitado para pruebas
 export class TemporaryRoomsController {
@@ -23,6 +27,8 @@ export class TemporaryRoomsController {
   }
 
   @Post()
+  @ApiOperation({ summary: 'Crear una nueva sala temporal' })
+  @ApiResponse({ status: 201, description: 'Sala creada con éxito' })
   create(
     @Body() createDto: CreateTemporaryRoomDto,
     @Request() req,
@@ -44,6 +50,12 @@ export class TemporaryRoomsController {
   }
 
   @Get('user/list')
+  @ApiOperation({ summary: 'Obtener salas de un usuario' })
+  @ApiQuery({ name: 'username', description: 'Username del usuario' })
+  @ApiQuery({ name: 'page', required: false, description: 'Página' })
+  @ApiQuery({ name: 'limit', required: false, description: 'Límite' })
+  @ApiQuery({ name: 'search', required: false, description: 'Término de búsqueda' })
+  @ApiResponse({ status: 200, description: 'Lista de salas' })
   findUserRooms(
     @Query('username') username: string,
     @Query('page') page: string = '1',
@@ -59,6 +71,13 @@ export class TemporaryRoomsController {
   }
 
   @Get('admin/rooms')
+  @ApiOperation({ summary: 'Obtener todas las salas (Vista Admin)' })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'displayName', required: false })
+  @ApiQuery({ name: 'role', required: false })
+  @ApiResponse({ status: 200, description: 'Lista de salas administrativa' })
   getAdminRooms(
     @Request() req,
     @Query('page') page?: number,
@@ -71,12 +90,18 @@ export class TemporaryRoomsController {
   }
 
   @Get('user/current-room')
+  @ApiOperation({ summary: 'Obtener la sala actual del usuario' })
+  @ApiQuery({ name: 'username', required: false })
+  @ApiResponse({ status: 200, description: 'Sala actual' })
   getCurrentUserRoom(@Request() req, @Query('username') username?: string) {
     // Usar username del query param (displayName desde localStorage)
     return this.temporaryRoomsService.getCurrentUserRoomByUsername(username);
   }
 
   @Get('code/:roomCode')
+  @ApiOperation({ summary: 'Buscar sala por código' })
+  @ApiParam({ name: 'roomCode', description: 'Código único de la sala' })
+  @ApiResponse({ status: 200, description: 'Datos de la sala' })
   findByCode(@Param('roomCode') roomCode: string) {
     return this.temporaryRoomsService.findByRoomCode(roomCode);
   }
@@ -88,11 +113,17 @@ export class TemporaryRoomsController {
   }
 
   @Get(':roomCode/users')
+  @ApiOperation({ summary: 'Obtener usuarios de una sala' })
+  @ApiParam({ name: 'roomCode' })
+  @ApiResponse({ status: 200, description: 'Lista de usuarios' })
   getRoomUsers(@Param('roomCode') roomCode: string) {
     return this.temporaryRoomsService.getRoomUsers(roomCode);
   }
 
   @Post('join')
+  @ApiOperation({ summary: 'Unirse a una sala' })
+  @ApiBody({ type: JoinRoomDto })
+  @ApiResponse({ status: 201, description: 'Usuario unido a la sala' })
   joinRoom(@Body() joinDto: JoinRoomDto, @Request() req) {
 
     // Usar username del DTO o del request, con fallback
@@ -102,6 +133,10 @@ export class TemporaryRoomsController {
   }
 
   @Post(':roomCode/remove-user')
+  @ApiOperation({ summary: 'Remover usuario de una sala' })
+  @ApiParam({ name: 'roomCode' })
+  @ApiBody({ schema: { type: 'object', properties: { username: { type: 'string' }, removedBy: { type: 'string', required: ['false'] } } } })
+  @ApiResponse({ status: 200, description: 'Usuario removido' })
   removeUserFromRoom(
     @Param('roomCode') roomCode: string,
     @Body() body: { username: string; removedBy?: string },
@@ -131,6 +166,10 @@ export class TemporaryRoomsController {
   }
 
   @Patch(':id/update')
+  @ApiOperation({ summary: 'Actualizar datos de una sala' })
+  @ApiParam({ name: 'id' })
+  @ApiBody({ schema: { type: 'object', properties: { maxCapacity: { type: 'number' }, picture: { type: 'string' }, description: { type: 'string' } } } })
+  @ApiResponse({ status: 200, description: 'Sala actualizada' })
   updateRoom(
     @Param('id') id: string,
     @Body() updateData: { maxCapacity?: number; picture?: string; description?: string },
@@ -147,6 +186,10 @@ export class TemporaryRoomsController {
   }
 
   @Patch(':roomCode/pin-message')
+  @ApiOperation({ summary: 'Fijar un mensaje en la sala' })
+  @ApiParam({ name: 'roomCode' })
+  @ApiBody({ schema: { type: 'object', properties: { messageId: { type: 'number', nullable: true } } } })
+  @ApiResponse({ status: 200, description: 'Mensaje fijado' })
   async pinMessage(
     @Param('roomCode') roomCode: string,
     @Body() body: { messageId: number | null }
@@ -155,6 +198,10 @@ export class TemporaryRoomsController {
   }
 
   @Post(':roomCode/approve-join')
+  @ApiOperation({ summary: 'Aprobar solicitud de unión a sala' })
+  @ApiParam({ name: 'roomCode' })
+  @ApiBody({ schema: { type: 'object', properties: { username: { type: 'string' }, approverUsername: { type: 'string', required: ['false'] } } } })
+  @ApiResponse({ status: 200, description: 'Solicitud aprobada' })
   approveJoinRequest(
     @Param('roomCode') roomCode: string,
     @Body() body: { username: string; approverUsername?: string },
@@ -192,6 +239,10 @@ export class TemporaryRoomsController {
   }
 
   @Post(':roomCode/unmute')
+  @ApiOperation({ summary: 'Quitar silencio (unmute) de una sala para el usuario' })
+  @ApiParam({ name: 'roomCode' })
+  @ApiBody({ schema: { type: 'object', properties: { username: { type: 'string' } } } })
+  @ApiResponse({ status: 200, description: 'Sala con sonido' })
   unmuteRoom(
     @Param('roomCode') roomCode: string,
     @Body() body: { username: string }

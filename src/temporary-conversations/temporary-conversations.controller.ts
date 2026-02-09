@@ -15,6 +15,11 @@ import { TemporaryConversationsService } from './temporary-conversations.service
 import { CreateTemporaryConversationDto } from './dto/create-temporary-conversation.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiQuery, ApiBody } from '@nestjs/swagger';
+
+@ApiTags('Chats Asignados')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller('temporary-conversations')
 // @UseGuards(JwtAuthGuard) // Temporalmente deshabilitado - autenticaciÃ³n por socket
 export class TemporaryConversationsController {
@@ -23,6 +28,9 @@ export class TemporaryConversationsController {
   ) { }
 
   @Post()
+  @ApiOperation({ summary: 'Crear una nueva conversación temporal' })
+  @ApiBody({ type: CreateTemporaryConversationDto })
+  @ApiResponse({ status: 201, description: 'Conversación creada' })
   create(@Body() createDto: CreateTemporaryConversationDto, @Request() req) {
     const userId = req.user?.id || 1;
     return this.temporaryConversationsService.create(createDto, userId);
@@ -42,6 +50,12 @@ export class TemporaryConversationsController {
   }
 
   @Get('assigned/list')
+  @ApiOperation({ summary: 'Obtener conversaciones asignadas al usuario' })
+  @ApiQuery({ name: 'username', required: false })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  @ApiQuery({ name: 'search', required: false })
+  @ApiResponse({ status: 200, description: 'Lista de conversaciones asignadas' })
   findAssignedConversations(
     @Query('username') username?: string,
     @Query('page') page: string = '1',
@@ -59,6 +73,9 @@ export class TemporaryConversationsController {
   }
 
   @Get('my-conversations')
+  @ApiOperation({ summary: 'Obtener mis conversaciones activas' })
+  @ApiQuery({ name: 'username', required: false })
+  @ApiResponse({ status: 200, description: 'Lista de conversaciones' })
   findMyConversations(@Request() req) {
     // Obtener username del query param si no hay usuario autenticado
     const username = req.user?.username || req.query.username;
@@ -97,6 +114,9 @@ export class TemporaryConversationsController {
   }
 
   @Post('admin-assign')
+  @ApiOperation({ summary: 'Asignar conversación entre dos usuarios (Admin)' })
+  @ApiBody({ schema: { type: 'object', properties: { user1: { type: 'string' }, user2: { type: 'string' }, name: { type: 'string' }, adminId: { type: 'number' }, adminRole: { type: 'string' } } } })
+  @ApiResponse({ status: 201, description: 'Conversación asignada' })
   createAdminAssignedConversation(
     @Body()
     body: {
@@ -138,6 +158,10 @@ export class TemporaryConversationsController {
   }
 
   @Patch(':id/deactivate')
+  @ApiOperation({ summary: 'Desactivar una conversación temporal' })
+  @ApiParam({ name: 'id' })
+  @ApiBody({ schema: { type: 'object', properties: { userRole: { type: 'string', required: ['false'] } } } })
+  @ApiResponse({ status: 200, description: 'Conversación desactivada' })
   deactivateConversation(@Param('id') id: string, @Body() body: any, @Request() req) {
     const userId = req.user?.id || req.user?.sub || 1;
     // Priorizar el rol del body (viene del localStorage) sobre el del token JWT

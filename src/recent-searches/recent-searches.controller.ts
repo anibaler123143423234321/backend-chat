@@ -13,15 +13,24 @@ import { RecentSearchesService } from './recent-searches.service';
 import { CreateRecentSearchDto } from './dto/create-recent-search.dto';
 import { SearchType } from './entities/recent-search.entity';
 
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiQuery, ApiBody } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { UseGuards } from '@nestjs/common';
+
+@ApiTags('Búsquedas Recientes')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller('recent-searches')
 export class RecentSearchesController {
-  constructor(private readonly recentSearchesService: RecentSearchesService) {}
+  constructor(private readonly recentSearchesService: RecentSearchesService) { }
 
   /**
    * POST /api/recent-searches
    * Guardar una nueva búsqueda reciente
    */
   @Post()
+  @ApiOperation({ summary: 'Guardar una nueva búsqueda reciente' })
+  @ApiBody({ type: CreateRecentSearchDto })
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() createRecentSearchDto: CreateRecentSearchDto) {
     return await this.recentSearchesService.create(createRecentSearchDto);
@@ -33,6 +42,10 @@ export class RecentSearchesController {
    * Query params: limit (default: 20)
    */
   @Get(':username')
+  @ApiOperation({ summary: 'Obtener búsquedas recientes de un usuario' })
+  @ApiParam({ name: 'username' })
+  @ApiQuery({ name: 'limit', required: false, description: 'Default: 20' })
+  @ApiResponse({ status: 200, description: 'Lista de búsquedas' })
   async findByUsername(
     @Param('username') username: string,
     @Query('limit') limit?: number,
