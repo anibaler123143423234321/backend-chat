@@ -4,13 +4,13 @@ import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiQuery, 
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @ApiTags('Favoritos (Chats)')
-@ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
 @Controller('conversation-favorites')
 export class ConversationFavoritesController {
   constructor(private readonly conversationFavoritesService: ConversationFavoritesService) { }
 
   // Alternar favorito (agregar o quitar)
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
   @Post('toggle')
   @ApiOperation({ summary: 'Alternar estado de favorito (agregar/quitar)' })
   @ApiBody({ schema: { type: 'object', properties: { username: { type: 'string' }, conversationId: { type: 'number' } } } })
@@ -25,6 +25,8 @@ export class ConversationFavoritesController {
   }
 
   // Agregar a favoritos
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
   @Post()
   async addFavorite(
     @Body() body: { username: string; conversationId: number },
@@ -36,6 +38,8 @@ export class ConversationFavoritesController {
   }
 
   // Quitar de favoritos
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
   @Delete()
   async removeFavorite(
     @Body() body: { username: string; conversationId: number },

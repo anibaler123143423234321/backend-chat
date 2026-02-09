@@ -124,10 +124,10 @@ export class TemporaryRoomsService {
   }
 
   async findUserRooms(
-    username: string, // Este es el displayName que envía el frontend
+    username: string,
     page: number = 1,
     limit: number = 10,
-    search?: string, // 🔥 NUEVO: Parámetro de búsqueda
+    search?: string,
   ): Promise<{
     rooms: any[];
     total: number;
@@ -135,117 +135,81 @@ export class TemporaryRoomsService {
     totalPages: number;
     hasMore: boolean;
   }> {
-    // El frontend envía el displayName (nombre completo) en el parámetro username
     const displayName = username;
 
-    // 🔥 Obtener roomCodes de favoritos para excluirlos
+    // 1. Obtener roomCodes de favoritos para excluirlos
     let favoriteRoomCodes: string[] = [];
     try {
       favoriteRoomCodes = await this.roomFavoritesService.getUserFavoriteRoomCodes(displayName);
-      console.log(`🔥 [findUserRooms] Favoritos de ${displayName}:`, favoriteRoomCodes, '- Estos serán excluidos');
     } catch (error) {
       console.error('Error al obtener favoritos:', error);
     }
 
-    // Obtener todas las salas activas
-    const allRooms = await this.temporaryRoomRepository.find({
-      where: { isActive: true },
-      order: { createdAt: 'DESC' },
-    });
+    // 2. Construir QueryBuilder base
+    const queryBuilder = this.temporaryRoomRepository
+      .createQueryBuilder('room')
+      .select([
+        'room.id',
+        'room.name',
+        'room.description',
+        'room.roomCode',
+        'room.maxCapacity',
+        'room.currentMembers',
+        'room.isActive',
+        'room.isAssignedByAdmin',
+        'room.createdAt',
+        'room.updatedAt',
+      ])
+      .where('room.isActive = :isActive', { isActive: true })
+      // 🔥 Filtrar por pertenencia usando JSON_CONTAINS (Sintaxis MySQL)
+      .andWhere('JSON_CONTAINS(room.members, :username)', { username: JSON.stringify(displayName) });
 
-    // Filtrar salas donde el usuario es miembro
-    let userRooms = allRooms.filter((room) => {
-      const members = room.members || [];
-      return members.includes(displayName);
-    });
+    // 3. Excluir favoritos
+    if (favoriteRoomCodes.length > 0) {
+      queryBuilder.andWhere('room.roomCode NOT IN (:...favoriteRoomCodes)', { favoriteRoomCodes });
+    }
 
-    // 🔥 Excluir grupos que son favoritos - así siempre devuelve 10 NO-favoritos
-    userRooms = userRooms.filter((room) => !favoriteRoomCodes.includes(room.roomCode));
-
-    // 🔥 Aplicar filtro de búsqueda por nombre o roomCode
+    // 4. Aplicar búsqueda
     if (search && search.trim()) {
-      const searchLower = search.toLowerCase().trim();
-      userRooms = userRooms.filter((room) =>
-        room.name?.toLowerCase().includes(searchLower) ||
-        room.roomCode?.toLowerCase().includes(searchLower)
+      queryBuilder.andWhere(
+        '(room.name LIKE :search OR room.roomCode LIKE :search)',
+        { search: `%${search}%` },
       );
     }
 
-    // Aplicar paginaci�n
-    const total = userRooms.length;
-    const offset = (page - 1) * limit;
-    const paginatedRooms = userRooms.slice(offset, offset + limit);
-    const totalPages = Math.ceil(total / limit);
-    const hasMore = page < totalPages;
+    // 5. Ordenar por fecha de creación
+    queryBuilder.orderBy('room.createdAt', 'DESC');
 
-    // Enriquecer cada sala con informaci�n adicional (�ltimo mensaje, etc.)
-    const enrichedRooms = await Promise.all(
-      paginatedRooms.map(async (room) => {
-        let lastMessage = null;
+    // 6. Obtener total y aplicar paginación
+    const pageNum = Number(page);
+    const limitNum = Number(limit);
+    const skipNum = (pageNum - 1) * limitNum;
 
-        try {
-          // Obtener el �ltimo mensaje de la sala
-          const messages = await this.messageRepository.find({
-            where: { roomCode: room.roomCode, isDeleted: false },
-            order: { sentAt: 'DESC' },
-            take: 1,
-          });
+    // Obtener el conteo total
+    const total = await queryBuilder.getCount();
 
-          if (messages.length > 0) {
-            const msg = messages[0];
+    // Aplicar paginación al queryBuilder
+    queryBuilder.skip(skipNum).take(limitNum);
 
-            // Si es un archivo multimedia sin texto, mostrar el tipo de archivo
-            let messageText = msg.message;
-            if (!messageText && msg.mediaType) {
-              const mediaTypeMap = {
-                image: '?? Imagen',
-                video: '?? Video',
-                audio: '?? Audio',
-                document: '?? Documento',
-              };
-              messageText = mediaTypeMap[msg.mediaType] || '?? Archivo';
-            }
+    const entities = await queryBuilder.getMany();
 
-            lastMessage = {
-              text: messageText || msg.fileName || 'Archivo',
-              from: msg.from,
-              sentAt: msg.sentAt,
-              mediaType: msg.mediaType,
-              fileName: msg.fileName,
-            };
-          }
-        } catch (error) {
-          console.error(
-            `Error al obtener ltimo mensaje de sala ${room.roomCode}:`,
-            error,
-          );
-        }
+    const paginatedRooms = entities.map((room) => {
+      // Excluir arrays pesados para el listado (aunque ya el select los excluye)
+      const { members, connectedMembers, assignedMembers, pendingMembers, ...roomData } = room;
 
-        // 🔥 OPTIMIZACIÓN: Excluir arrays pesados (members, connectedMembers, assignedMembers)
-        const { members, connectedMembers, assignedMembers, ...roomWithoutMembers } = room;
-
-        return {
-          ...roomWithoutMembers,
-          lastMessage, // 🔥 Asegurar que se devuelve el último mensaje
-          lastActivity: lastMessage?.sentAt || room.createdAt, // 🔥 CORRECCIÓN: Usar fecha del mensaje si existe
-          // isMuted: room.settings?.mutedUsers?.includes(displayName) || false, // 🔥 Estado de silencio
-        };
-      }),
-    );
-
-    // ?? ORDENAR por lastMessage.sentAt (ms reciente primero)
-    // 🔥 ORDENAR por lastActivity (más reciente primero)
-    const sortedEnrichedRooms = enrichedRooms.sort((a, b) => {
-      const aDate = a.lastActivity || a.createdAt;
-      const bDate = b.lastActivity || b.createdAt;
-      return new Date(bDate).getTime() - new Date(aDate).getTime();
+      return {
+        ...roomData,
+        lastActivity: room.updatedAt || room.createdAt,
+      };
     });
 
+    const totalPages = Math.ceil(total / limitNum);
+    const hasMore = pageNum < totalPages;
 
     return {
-      rooms: sortedEnrichedRooms, // ?? Usar sortedEnrichedRooms
+      rooms: paginatedRooms,
       total,
-      page,
+      page: pageNum,
       totalPages,
       hasMore,
     };

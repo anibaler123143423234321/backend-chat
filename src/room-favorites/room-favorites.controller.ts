@@ -4,13 +4,13 @@ import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiBody, A
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @ApiTags('Favoritos (Salas)')
-@ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
 @Controller('room-favorites')
 export class RoomFavoritesController {
   constructor(private readonly roomFavoritesService: RoomFavoritesService) { }
 
   // Alternar favorito (agregar o quitar)
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
   @Post('toggle')
   @ApiOperation({ summary: 'Alternar estado de favorito en una sala (agregar/quitar)' })
   @ApiBody({ schema: { type: 'object', properties: { username: { type: 'string' }, roomCode: { type: 'string' }, roomId: { type: 'number' } } } })
@@ -26,6 +26,8 @@ export class RoomFavoritesController {
   }
 
   // Agregar a favoritos
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
   @Post()
   @ApiOperation({ summary: 'Agregar una sala a favoritos' })
   @ApiBody({ schema: { type: 'object', properties: { username: { type: 'string' }, roomCode: { type: 'string' }, roomId: { type: 'number' } } } })
@@ -41,6 +43,8 @@ export class RoomFavoritesController {
   }
 
   // Quitar de favoritos
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
   @Delete()
   async removeFavorite(
     @Body() body: { username: string; roomCode: string },
