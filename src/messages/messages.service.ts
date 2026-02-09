@@ -342,6 +342,7 @@ export class MessagesService {
     // 🚀 OPTIMIZADO: Payload reducido ~60% eliminando campos innecesarios
     // Campos eliminados: fromId, to, roomCode, deletedAt, conversationId, numberInList, displayDate
     // readBy convertido a readByCount (entero)
+    // 🔥 FIX: threadId NO se incluye en el SELECT para evitar confusión en el frontend
     const [messages, total] = await this.messageRepository
       .createQueryBuilder('message')
       .leftJoinAndSelect('message.attachments', 'attachments')
@@ -369,7 +370,8 @@ export class MessagesService {
         'message.replyToSender',
         'message.replyToText',
         'message.replyToSenderNumeroAgente',
-        'message.threadId',
+        // 🔥 FIX: threadId NO se incluye en el SELECT para evitar confusión en el frontend
+        // Los mensajes devueltos son SOLO mensajes principales (no respuestas de hilos)
         'message.threadCount',
         'message.lastReplyFrom',
         'message.reactions',
@@ -683,6 +685,8 @@ export class MessagesService {
     offset: number = 0,
   ): Promise<any[]> {
     // � OPTIMIZADO: Usar QueryBuilder con campos específicos
+    // 🔥 FIX: NO incluir threadId en el SELECT para conversaciones directas
+    // Solo los mensajes principales (threadId IS NULL) deben devolverse
     const messages = await this.messageRepository
       .createQueryBuilder('message')
       .leftJoinAndSelect('message.attachments', 'attachments')
@@ -713,7 +717,8 @@ export class MessagesService {
         'message.replyToSender',
         'message.replyToText',
         'message.replyToSenderNumeroAgente',
-        'message.threadId',
+        // 🔥 FIX: threadId NO se incluye en el SELECT para evitar confusión en el frontend
+        // Los mensajes devueltos son SOLO mensajes principales (no respuestas de hilos)
         'message.threadCount',
         'message.lastReplyFrom',
         'message.reactions',
@@ -1692,6 +1697,7 @@ export class MessagesService {
       .createQueryBuilder('message')
       .where('message.roomCode = :roomCode', { roomCode })
       .andWhere('message.id < :beforeId', { beforeId })
+      .andWhere('message.threadId IS NULL') // 🔥 FIX: Solo mensajes principales
       .andWhere('message.isDeleted = false')
       .orderBy('message.id', 'DESC')
       .take(limit)
@@ -1721,6 +1727,7 @@ export class MessagesService {
         { from, to }
       )
       .andWhere('message.id < :beforeId', { beforeId })
+      .andWhere('message.threadId IS NULL') // 🔥 FIX: Solo mensajes principales
       .andWhere('message.isDeleted = false')
       .orderBy('message.id', 'DESC')
       .take(limit)
@@ -1745,6 +1752,7 @@ export class MessagesService {
       .createQueryBuilder('message')
       .where('message.roomCode = :roomCode', { roomCode })
       .andWhere('message.id > :afterId', { afterId })
+      .andWhere('message.threadId IS NULL') // 🔥 FIX: Solo mensajes principales
       .andWhere('message.isDeleted = false')
       .orderBy('message.id', 'ASC') // Orden ascendente (más viejos primero dentro del rango "futuro")
       .take(limit)
@@ -1778,6 +1786,7 @@ export class MessagesService {
         { from, to }
       )
       .andWhere('message.id > :afterId', { afterId })
+      .andWhere('message.threadId IS NULL') // 🔥 FIX: Solo mensajes principales
       .andWhere('message.isDeleted = false')
       .orderBy('message.id', 'ASC')
       .take(limit)
