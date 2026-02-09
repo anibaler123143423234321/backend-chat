@@ -20,11 +20,9 @@ import { User } from '../users/entities/user.entity';
 import { SocketGateway } from '../socket/socket.gateway';
 import { forwardRef, Inject, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiQuery, ApiBody } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @ApiTags('Mensajería')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
 @Controller('messages')
 export class MessagesController {
   constructor(

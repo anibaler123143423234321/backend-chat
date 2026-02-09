@@ -4,7 +4,6 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { UsersModule } from './users/users.module';
-import { AuthModule } from './auth/auth.module';
 import { RolesModule } from './roles/roles.module';
 import { SocketModule } from './socket/socket.module';
 import { ConfigModule } from '@nestjs/config';
@@ -24,7 +23,6 @@ import { DatabaseErrorInterceptor } from './common/interceptors/database-error.i
     TypeOrmModule.forRoot(databaseConfig),
     ConfigModule.forRoot({ cache: true }),
     UsersModule,
-    AuthModule,
     RolesModule,
     SocketModule,
     TemporaryConversationsModule,

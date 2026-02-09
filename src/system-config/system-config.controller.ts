@@ -1,13 +1,11 @@
 import { Controller, Get, Post, Body, Param, Delete, UseGuards } from '@nestjs/common';
 import { SystemConfigService } from './system-config.service';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiBody } from '@nestjs/swagger';
 
 @ApiTags('Configuración')
 @ApiBearerAuth()
 @Controller('system-config')
-@UseGuards(JwtAuthGuard)
 export class SystemConfigController {
   constructor(private readonly systemConfigService: SystemConfigService) { }
 

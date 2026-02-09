@@ -14,12 +14,9 @@ import { CreateRecentSearchDto } from './dto/create-recent-search.dto';
 import { SearchType } from './entities/recent-search.entity';
 
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiQuery, ApiBody } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-import { UseGuards } from '@nestjs/common';
 
 @ApiTags('Búsquedas Recientes')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
 @Controller('recent-searches')
 export class RecentSearchesController {
   constructor(private readonly recentSearchesService: RecentSearchesService) { }

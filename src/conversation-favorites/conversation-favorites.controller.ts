@@ -1,7 +1,6 @@
 import { Controller, Post, Delete, Get, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { ConversationFavoritesService } from './conversation-favorites.service';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiQuery, ApiBody } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @ApiTags('Favoritos (Chats)')
 @Controller('conversation-favorites')
@@ -10,7 +9,6 @@ export class ConversationFavoritesController {
 
   // Alternar favorito (agregar o quitar)
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard)
   @Post('toggle')
   @ApiOperation({ summary: 'Alternar estado de favorito (agregar/quitar)' })
   @ApiBody({ schema: { type: 'object', properties: { username: { type: 'string' }, conversationId: { type: 'number' } } } })
@@ -26,7 +24,6 @@ export class ConversationFavoritesController {
 
   // Agregar a favoritos
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard)
   @Post()
   async addFavorite(
     @Body() body: { username: string; conversationId: number },
@@ -39,7 +36,6 @@ export class ConversationFavoritesController {
 
   // Quitar de favoritos
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard)
   @Delete()
   async removeFavorite(
     @Body() body: { username: string; conversationId: number },

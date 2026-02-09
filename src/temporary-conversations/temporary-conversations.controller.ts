@@ -13,41 +13,17 @@
 } from '@nestjs/common';
 import { TemporaryConversationsService } from './temporary-conversations.service';
 import { CreateTemporaryConversationDto } from './dto/create-temporary-conversation.dto';
-import { JwtAuthGuard } from '../auth/jwt-auth.guard';
-
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiQuery, ApiBody } from '@nestjs/swagger';
+
 
 @ApiTags('Chats Asignados')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
 @Controller('temporary-conversations')
 // @UseGuards(JwtAuthGuard) // Temporalmente deshabilitado - autenticaciÃ³n por socket
 export class TemporaryConversationsController {
   constructor(
     private readonly temporaryConversationsService: TemporaryConversationsService,
   ) { }
-
-  @Post()
-  @ApiOperation({ summary: 'Crear una nueva conversación temporal' })
-  @ApiBody({ type: CreateTemporaryConversationDto })
-  @ApiResponse({ status: 201, description: 'Conversación creada' })
-  create(@Body() createDto: CreateTemporaryConversationDto, @Request() req) {
-    const userId = req.user?.id || 1;
-    return this.temporaryConversationsService.create(createDto, userId);
-  }
-
-  @Get('all')
-  findAll(
-    @Query('username') username?: string,
-    @Query('role') role?: string,
-    @Query('search') search?: string,
-    @Query('page') page: string = '1',
-    @Query('limit') limit: string = '20',
-  ) {
-    const pageNum = Math.max(1, parseInt(page) || 1);
-    const limitNum = Math.max(1, Math.min(50, parseInt(limit) || 20)); // Máximo 50 por página
-    return this.temporaryConversationsService.findAll(username, role, search, pageNum, limitNum);
-  }
 
   @Get('assigned/list')
   @ApiOperation({ summary: 'Obtener conversaciones asignadas al usuario' })
