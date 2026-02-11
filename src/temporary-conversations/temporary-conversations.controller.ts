@@ -21,6 +21,32 @@ import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiQuery, 
 @Controller('temporary-conversations')
 // @UseGuards(JwtAuthGuard) // Temporalmente deshabilitado - autenticaciÃ³n por socket
 export class TemporaryConversationsController {
+  @Get('all')
+  @ApiOperation({ summary: 'Obtener todas las conversaciones (Admin/User)' })
+  @ApiQuery({ name: 'username', required: false })
+  @ApiQuery({ name: 'role', required: false })
+  @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  @ApiResponse({ status: 200, description: 'Lista de conversaciones paginada' })
+  findAll(
+    @Query('username') username?: string,
+    @Query('role') role?: string,
+    @Query('search') search?: string,
+    @Query('page') page: string = '1',
+    @Query('limit') limit: string = '20',
+  ) {
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.max(1, parseInt(limit) || 20);
+    return this.temporaryConversationsService.findAll(
+      username,
+      role,
+      search,
+      pageNum,
+      limitNum,
+    );
+  }
+
   constructor(
     private readonly temporaryConversationsService: TemporaryConversationsService,
   ) { }
