@@ -137,15 +137,7 @@ export class TemporaryRoomsService {
   }> {
     const displayName = username;
 
-    // 1. Obtener roomCodes de favoritos para excluirlos
-    let favoriteRoomCodes: string[] = [];
-    try {
-      favoriteRoomCodes = await this.roomFavoritesService.getUserFavoriteRoomCodes(displayName);
-    } catch (error) {
-      console.error('Error al obtener favoritos:', error);
-    }
-
-    // 2. Construir QueryBuilder base
+    // 1. Construir QueryBuilder base
     const queryBuilder = this.temporaryRoomRepository
       .createQueryBuilder('room')
       .select([
@@ -161,13 +153,24 @@ export class TemporaryRoomsService {
         'room.updatedAt',
       ])
       .where('room.isActive = :isActive', { isActive: true })
-      // 🔥 Filtrar por pertenencia usando JSON_CONTAINS (Sintaxis MySQL)
-      .andWhere('JSON_CONTAINS(room.members, :username)', { username: JSON.stringify(displayName) });
+      // 🔥 MODIFICADO: Usar LIKE para mayor flexibilidad con case-sensitivity y displayNames
+      .andWhere('(room.members LIKE :search OR room.connectedMembers LIKE :search OR room.assignedMembers LIKE :search)', { search: `%${username}%` });
 
-    // 3. Excluir favoritos
-    if (favoriteRoomCodes.length > 0) {
-      queryBuilder.andWhere('room.roomCode NOT IN (:...favoriteRoomCodes)', { favoriteRoomCodes });
-    }
+    // 2. Excluir favoritos directamente en SQL para optimización
+    queryBuilder.andWhere((qb) => {
+      const subQuery = qb
+        .subQuery()
+        .select('rf.roomCode')
+        .from('room_favorites', 'rf')
+        .where('rf.username = :favUsername')
+        .getQuery();
+      return 'room.roomCode NOT IN ' + subQuery;
+    });
+
+    queryBuilder.setParameters({
+      username: JSON.stringify(username),
+      favUsername: username,
+    });
 
     // 4. Aplicar búsqueda
     if (search && search.trim()) {
@@ -516,6 +519,13 @@ export class TemporaryRoomsService {
 
     await this.temporaryRoomRepository.save(room);
 
+    // 🔥 NUEVO: Remover de favoritos automáticamente al ser expulsado
+    try {
+      await this.roomFavoritesService.removeFavorite(username, roomCode);
+    } catch (error) {
+      console.error(`❌ Error al remover favorito de usuario expulsado (${username}):`, error);
+    }
+
     // Limpiar la sala actual del usuario en la base de datos
     try {
       const user = await this.userRepository.findOne({ where: { username } });
@@ -587,22 +597,31 @@ export class TemporaryRoomsService {
     limit: number = 10,
     search?: string,
     displayName?: string,
-    role?: string, // ?? Recibir el rol
+    role?: string, // 👈 Recibir el rol
+    username?: string, // 👈 Recibir username para validar favoritos
   ): Promise<any> {
-    // Log eliminado para optimizaci�n
 
-    // Obtener c�digos de salas favoritas del usuario
+    // Obtener códigos de salas favoritas del usuario
     let favoriteRoomCodes: string[] = [];
-    if (displayName) {
+
+    // 🔥 OPTIMIZACIÓN: Priorizar búsqueda por username (Login) que es único e inmutable
+    if (username) {
+      try {
+        favoriteRoomCodes = await this.roomFavoritesService.getUserFavoriteRoomCodes(username);
+      } catch (error) {
+        console.error('Error al obtener favoritos por username:', error);
+      }
+    }
+    // Fallback a displayName si no hay username (para retrocompatibilidad)
+    else if (displayName) {
       try {
         favoriteRoomCodes = await this.roomFavoritesService.getUserFavoriteRoomCodes(displayName);
-        // Log eliminado para optimizaci�n
       } catch (error) {
-        console.error('Error al obtener favoritos:', error);
+        console.error('Error al obtener favoritos por displayName:', error);
       }
     }
 
-    // Construir condiciones de b�squeda
+    // Construir condiciones de bsqueda
     let whereConditions: any = { isActive: true };
 
     if (search && search.trim()) {
@@ -612,10 +631,10 @@ export class TemporaryRoomsService {
       ];
     }
 
-    // ?? NOTA: El filtrado por rol se hace en memoria despu�s del JOIN (l�neas 631-639)
+    // ?? NOTA: El filtrado por rol se hace en memoria despus del JOIN (lneas 631-639)
     // para evitar problemas de compatibilidad SQL
 
-    // ?? QUERY OPTIMIZADA: Una sola consulta SQL con JOIN y ordenamiento
+    // ?? RESTAURADO: Necesitamos el JOIN para ordenar por ltimo mensaje, aunque no lo devolvamos
     const queryBuilder = this.temporaryRoomRepository
       .createQueryBuilder('room')
       .leftJoin(
@@ -638,32 +657,26 @@ export class TemporaryRoomsService {
       )
       .select([
         'room',
-        'message.id',
-        'message.message',
-        'message.from',
-        'message.sentAt',
-        'message.time',
-        'message.mediaType',
-        'message.fileName',
+        'message.sentAt', // Solo seleccionamos sentAt para el ordenamiento
       ])
       .where('room.isActive = :isActive', { isActive: true });
 
-    // Aplicar búsqueda si existe (busca en nombre, código, mensaje y remitente)
+    // Aplicar búsqueda si existe (busca en nombre y código) - Nota: ya no buscamos en mensaje para optimizar
     if (search && search.trim()) {
       queryBuilder.andWhere(
-        '(room.name LIKE :search OR room.roomCode LIKE :search OR message.message LIKE :search OR message.from LIKE :search)',
+        '(room.name LIKE :search OR room.roomCode LIKE :search)',
         { search: `%${search}%` },
       );
     }
 
-    // FILTRADO POR ROL (Movido a l�gica en memoria para evitar problemas de compatibilidad SQL)
+    // FILTRADO POR ROL (Movido a lgica en memoria para evitar problemas de compatibilidad SQL)
     // if (['ADMIN', 'JEFEPISO'].includes(role)) { ... }
 
-    // Obtener todas las salas con su �ltimo mensaje
+    // Obtener todas las salas
     const { entities, raw } = await queryBuilder.getRawAndEntities();
 
-    // Mapear resultados y agregar lastMessage desde raw
-    const allRoomsWithLastMessage = entities.map((room, index) => {
+    // Mapear resultados
+    const allRooms = entities.map((room, index) => {
       // ?? FILTRADO POR ROL EN MEMORIA
       if (['ADMIN', 'JEFEPISO'].includes(role)) {
         const userFullName = displayName || '';
@@ -674,18 +687,8 @@ export class TemporaryRoomsService {
       }
 
       const rowData = raw[index];
-      const lastMessage = rowData.message_id
-        ? {
-          id: rowData.message_id,
-          text: rowData.message_message,
-          from: rowData.message_from,
-          sentAt: rowData.message_sentAt,
-          time: rowData.message_time,
-          mediaType: rowData.message_mediaType,
-          fileName: rowData.message_fileName,
-        }
-        : null;
-
+      // Obtenemos la fecha del último mensaje para ordenar
+      const lastMessageSentAt = rowData.message_sentAt;
 
       // 🔥 OPTIMIZACIÓN: NO devolver arrays pesados de members/connectedMembers
       // Solo devolver contadores para reducir payload ~83%
@@ -697,52 +700,49 @@ export class TemporaryRoomsService {
         currentMembers: room.currentMembers,
         maxCapacity: room.maxCapacity, // 🔥 AGREGADO: maxCapacity para el frontend
         isActive: room.isActive,
-        isAssignedByAdmin: room.isAssignedByAdmin,
-        createdAt: room.createdAt, // 🔥 AGREGADO
-        updatedAt: room.updatedAt, // 🔥 AGREGADO
-        lastMessage: lastMessage, // 🔥 AGREGADO
         // isMuted: room.settings?.mutedUsers?.includes(displayName) || false, // 🔥 Estado de silencio
+        _sortTime: lastMessageSentAt ? new Date(lastMessageSentAt).getTime() : 0 // CAMPO TEMPORAL PARA ORDENAR
       };
     }).filter(room => room !== null); // Eliminar nulos del filtrado
 
     // Separar favoritas y no favoritas
-    const favoritesWithMessage = allRoomsWithLastMessage.filter((room) =>
+    const favorites = allRooms.filter((room) =>
       favoriteRoomCodes.includes(room.roomCode),
     );
-    const nonFavoritesWithMessage = allRoomsWithLastMessage.filter(
+    const nonFavorites = allRooms.filter(
       (room) => !favoriteRoomCodes.includes(room.roomCode),
     );
 
-    // Función de ordenamiento unificada: Por fecha más reciente del último mensaje
+    // Función de ordenamiento RESTAURADA
     const sortByLastMessage = (rooms) => {
       return rooms.sort((a, b) => {
-        const timeA = new Date(a.lastMessage?.sentAt || 0).getTime();
-        const timeB = new Date(b.lastMessage?.sentAt || 0).getTime();
-        return timeB - timeA;
+        return b._sortTime - a._sortTime;
       });
     };
 
     // 🔥 MODIFICADO: Solo ordenar los NO-favoritos (favoritos van a su propia API)
-    const sortedNonFavorites = sortByLastMessage(nonFavoritesWithMessage);
+    const sortedNonFavorites = sortByLastMessage(nonFavorites);
 
     // 🔥 MODIFICADO: Solo paginar los NO-favoritos
     const pageNum = Number(page);
     const limitNum = Number(limit);
     const skip = (pageNum - 1) * limitNum;
-    const paginatedRooms = sortedNonFavorites.slice(skip, skip + limitNum);
 
-    // console.log(`🔥 [getAdminRooms] Total grupos: ${allRoomsWithLastMessage.length}, Favoritos: ${favoritesWithMessage.length}, No-favoritos: ${nonFavoritesWithMessage.length}, Devolviendo: ${paginatedRooms.length}`);
+    // Paginamos y eliminamos el campo temporal _sortTime
+    const paginatedRooms = sortedNonFavorites
+      .slice(skip, skip + limitNum)
+      .map(({ _sortTime, ...rest }) => rest);
 
     return {
       data: paginatedRooms, // 🔥 Solo NO-favoritos
-      total: nonFavoritesWithMessage.length, // 🔥 Total de NO-favoritos
+      total: nonFavorites.length, // 🔥 Total de NO-favoritos
       page: Number(page),
       limit: Number(limit),
-      totalPages: Math.ceil(nonFavoritesWithMessage.length / limit),
+      totalPages: Math.ceil(nonFavorites.length / limit),
     };
   }
 
-  // ?? NUEVO: Endpoint para obtener miembros de una sala espec�fica
+  // ?? NUEVO: Endpoint para obtener miembros de una sala especfica
   async getRoomMembers(roomCode: string): Promise<any> {
     const room = await this.temporaryRoomRepository.findOne({
       where: { roomCode, isActive: true },
@@ -1032,14 +1032,14 @@ export class TemporaryRoomsService {
    */
   async findByMember(username: string): Promise<TemporaryRoom[]> {
     try {
-      // Usar LIKE con JSON para buscar en el array members
-      // Esto es más eficiente que cargar todas las salas y filtrar
+      // 🚀 MODIFICADO: Usar LIKE para mayor flexibilidad con mayúsculas/minúsculas y displayNames
+      // JSON_CONTAINS es demasiado estricto y falla si hay diferencias de case o si se guardó el FullName
       const rooms = await this.temporaryRoomRepository
         .createQueryBuilder('room')
         .where('room.isActive = :isActive', { isActive: true })
         .andWhere(
-          '(room.members LIKE :memberPattern OR room.connectedMembers LIKE :memberPattern)',
-          { memberPattern: `%"${username}"%` }
+          '(room.members LIKE :pattern OR room.connectedMembers LIKE :pattern OR room.assignedMembers LIKE :pattern)',
+          { pattern: `%${username}%` }
         )
         .getMany();
 

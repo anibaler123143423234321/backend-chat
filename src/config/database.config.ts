@@ -18,7 +18,7 @@ export const databaseConfig: TypeOrmModuleOptions = {
   logging: false,
 
   extra: {
-    connectionLimit: 12,
+    connectionLimit: 15,
     waitForConnections: true,
     queueLimit: 50,
     acquireTimeout: 8000,

@@ -77,6 +77,7 @@ export class TemporaryRoomsController {
   @ApiQuery({ name: 'search', required: false })
   @ApiQuery({ name: 'displayName', required: false })
   @ApiQuery({ name: 'role', required: false })
+  @ApiQuery({ name: 'username', required: false }) // 👈 Nuevo parámetro para filtrar favoritos correctamente
   @ApiResponse({ status: 200, description: 'Lista de salas administrativa' })
   getAdminRooms(
     @Request() req,
@@ -84,9 +85,12 @@ export class TemporaryRoomsController {
     @Query('limit') limit?: number,
     @Query('search') search?: string,
     @Query('displayName') displayName?: string,
-    @Query('role') role?: string, // 👈 Recibir el rol
+    @Query('role') role?: string,
+    @Query('username') username?: string, // 👈 Recibir username
   ) {
-    return this.temporaryRoomsService.getAdminRooms(page, limit, search, displayName, role);
+    // Priorizar username del query, luego del token (req.user)
+    const finalUsername = username || req.user?.username;
+    return this.temporaryRoomsService.getAdminRooms(page, limit, search, displayName, role, finalUsername);
   }
 
   @Get('user/current-room')

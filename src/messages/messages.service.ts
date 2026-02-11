@@ -118,12 +118,24 @@ export class MessagesService {
           url: att.url,
           type: att.type || 'file', // Usar 'type' de acuerdo a la entidad y DTO
           fileName: att.fileName,
-          fileSize: att.fileSize,
+          // 🔥 FIX: Si el attachment no tiene fileSize, usar el del mensaje principal
+          fileSize: att.fileSize || restDto.fileSize,
           messageId: savedMessage.id
         });
       });
       await this.attachmentRepository.save(attachmentsToSave);
       savedMessage.attachments = attachmentsToSave;
+    } else if (restDto.fileSize && (restDto.mediaType || restDto.mediaData || restDto.fileName)) {
+      // 🔥 FIX: Si no hay attachments pero hay fileSize en el mensaje principal, crear uno
+      const attachment = this.attachmentRepository.create({
+        url: restDto.mediaData || '',
+        type: restDto.mediaType || 'file',
+        fileName: restDto.fileName,
+        fileSize: restDto.fileSize,
+        messageId: savedMessage.id
+      });
+      await this.attachmentRepository.save(attachment);
+      savedMessage.attachments = [attachment];
     }
 
     // 🔥 DEBUG: Verificar que se guardó correctamente
@@ -159,10 +171,10 @@ export class MessagesService {
   ): Promise<{ [key: string]: number }> {
     try {
       const result: { [key: string]: number } = {};
-      const usernameNormalized = this.normalizeUsername(username);
+      // const usernameNormalized = this.normalizeUsername(username); // No se usa directamente en SQL LIKE
 
       // 1. 🚀 OPTIMIZADO: Obtener conteos para TODAS las salas en UNA SOLA consulta
-      // En lugar de hacer N consultas (una por sala), hacemos una consulta agregada
+      // Filtrando SOLO salas donde el usuario es miembro activo
       const roomUnreadCounts = await this.messageRepository
         .createQueryBuilder('message')
         .select('message.roomCode', 'roomCode')
@@ -172,6 +184,21 @@ export class MessagesService {
         .andWhere('message.isDeleted = :isDeleted', { isDeleted: false })
         .andWhere('message.threadId IS NULL')
         .andWhere('message.from != :username', { username })
+        // 🔥 CRÍTICO: Filtrar solo salas donde el usuario es MIEMBRO o está CONECTADO
+        // Usamos subquery para no traer todos los IDs a memoria
+        .andWhere((qb) => {
+          const subQuery = qb
+            .subQuery()
+            .select('tr.roomCode')
+            .from(TemporaryRoom, 'tr')
+            .where('tr.isActive = :isActive', { isActive: true })
+            .andWhere(
+              '(tr.members LIKE :pattern OR tr.connectedMembers LIKE :pattern OR tr.assignedMembers LIKE :pattern)',
+              { pattern: `%${username}%` }
+            )
+            .getQuery();
+          return 'message.roomCode IN ' + subQuery;
+        })
         // Mensajes sin readBy o donde el usuario no está en readBy
         // 🚀 OPTIMIZADO: Sin LOWER() - readBy ya se guarda normalizado
         .andWhere(
@@ -190,45 +217,40 @@ export class MessagesService {
       }
 
       // 2. 🚀 OPTIMIZADO: Conteos para CONVERSACIONES ASIGNADAS en UNA SOLA consulta
-      // Primero obtenemos solo los IDs de conversaciones del usuario (rápido, sin mensajes)
-      const allConversations = await this.temporaryConversationRepository.find({
-        where: { isActive: true },
-        select: ['id', 'participants'], // Solo campos necesarios
-      });
-
-      const userConversationIds = allConversations
-        .filter((conv) => {
-          const participants = conv.participants || [];
-          return participants.some(
-            (p) => this.normalizeUsername(p) === usernameNormalized,
-          );
+      // Filtrando SOLO conversaciones donde el usuario es participante
+      const convUnreadCounts = await this.messageRepository
+        .createQueryBuilder('message')
+        .select('message.conversationId', 'conversationId')
+        .addSelect('COUNT(*)', 'unreadCount')
+        .where('message.isDeleted = :isDeleted', { isDeleted: false })
+        .andWhere('message.threadId IS NULL')
+        .andWhere('message.isGroup = :isGroup', { isGroup: false })
+        .andWhere('message.from != :username', { username })
+        // 🔥 CRÍTICO: Filtrar solo conversaciones donde el usuario es PARTICIPANTE
+        .andWhere((qb) => {
+          const subQuery = qb
+            .subQuery()
+            .select('tc.id')
+            .from(TemporaryConversation, 'tc')
+            .where('tc.isActive = :isActive', { isActive: true })
+            .andWhere('tc.participants LIKE :pattern', {
+              pattern: `%${username}%`,
+            })
+            .getQuery();
+          return 'message.conversationId IN ' + subQuery;
         })
-        .map((conv) => conv.id);
+        // 🚀 OPTIMIZADO: Sin LOWER() - readBy ya se guarda normalizado
+        .andWhere(
+          "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(message.readBy, :usernameJson))",
+          { usernameJson: JSON.stringify(this.normalizeForReadBy(username)) }
+        )
+        .groupBy('message.conversationId')
+        .getRawMany();
 
-      // Si el usuario tiene conversaciones, hacer UNA consulta agregada
-      if (userConversationIds.length > 0) {
-        const convUnreadCounts = await this.messageRepository
-          .createQueryBuilder('message')
-          .select('message.conversationId', 'conversationId')
-          .addSelect('COUNT(*)', 'unreadCount')
-          .where('message.conversationId IN (:...ids)', { ids: userConversationIds })
-          .andWhere('message.isDeleted = :isDeleted', { isDeleted: false })
-          .andWhere('message.threadId IS NULL')
-          .andWhere('message.isGroup = :isGroup', { isGroup: false })
-          .andWhere('message.from != :username', { username })
-          // 🚀 OPTIMIZADO: Sin LOWER() - readBy ya se guarda normalizado
-          .andWhere(
-            "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(message.readBy, :usernameJson))",
-            { usernameJson: JSON.stringify(this.normalizeForReadBy(username)) }
-          )
-          .groupBy('message.conversationId')
-          .getRawMany();
-
-        for (const row of convUnreadCounts) {
-          const count = parseInt(row.unreadCount, 10);
-          if (count > 0) {
-            result[row.conversationId.toString()] = count;
-          }
+      for (const row of convUnreadCounts) {
+        const count = parseInt(row.unreadCount, 10);
+        if (count > 0) {
+          result[row.conversationId.toString()] = count;
         }
       }
 
@@ -533,6 +555,14 @@ export class MessagesService {
     // 🚀 OPTIMIZADO: Payload reducido - readBy convertido a readByCount
     // Campos eliminados: numberInList, displayDate (se calculan en frontend)
     const data = reversedMessages.map((msg) => {
+      // 🔥 FIX: Si los attachments no tienen fileSize, usar el del mensaje principal
+      if (msg.attachments && msg.attachments.length > 0 && msg.fileSize) {
+        msg.attachments = msg.attachments.map(att => ({
+          ...att,
+          fileSize: att.fileSize || msg.fileSize
+        }));
+      }
+      
       // Extraer readBy y convertir a conteo
       const { readBy, ...msgWithoutReadBy } = msg as any;
       const readByCount = Array.isArray(readBy) ? readBy.length : 0;
@@ -825,6 +855,14 @@ export class MessagesService {
 
     // Agregar numeración secuencial y threadCount
     return reversedMessages.map((msg, index) => {
+      // 🔥 FIX: Si los attachments no tienen fileSize, usar el del mensaje principal
+      if (msg.attachments && msg.attachments.length > 0 && msg.fileSize) {
+        msg.attachments = msg.attachments.map(att => ({
+          ...att,
+          fileSize: att.fileSize || msg.fileSize
+        }));
+      }
+      
       const enriched = {
         ...msg,
         numberInList: index + 1 + offset,
@@ -2123,7 +2161,13 @@ export class MessagesService {
   // 🚀 NUEVO: Normalización para readBy - MAYÚSCULAS para compatibilidad
   // Los datos existentes ya están en MAYÚSCULAS, mantenemos el formato
   private normalizeForReadBy(username: string): string {
-    return username?.toUpperCase().trim() || '';
+    return (
+      username
+        ?.toUpperCase()
+        .trim()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '') || ''
+    );
   }
 
   // 🔥 NUEVO: Búsqueda global de mensajes (tipo WhatsApp) con paginación

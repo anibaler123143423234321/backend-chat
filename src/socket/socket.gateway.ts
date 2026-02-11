@@ -19,6 +19,7 @@ import { TemporaryConversationsService } from '../temporary-conversations/tempor
 import { PollsService } from '../polls/polls.service';
 import { User } from '../users/entities/user.entity';
 import { RoomFavoritesService } from '../room-favorites/room-favorites.service';
+import { TemporaryRoom } from '../temporary-rooms/entities/temporary-room.entity';
 import { getPeruDate, formatPeruTime } from '../utils/date.utils';
 
 @WebSocketGateway({
@@ -871,11 +872,27 @@ export class SocketGateway
         }
 
         //  🚀 OPTIMIZADO: Restaurar salas del usuario desde BD
-        // ANTES: findAll() obtenía TODAS las salas y filtraba en memoria (muy costoso)
-        // AHORA: Solo obtener salas donde el usuario es miembro
+        // ANTES: solo buscaba por username. AHORA: busca por username Y displayName (Full Name)
         try {
-            // Usar método específico para buscar salas del usuario
-            const userRooms = await this.temporaryRoomsService.findByMember(username);
+            const displayName =
+                userData?.nombre && userData?.apellido
+                    ? `${userData.nombre} ${userData.apellido}`
+                    : username;
+
+            // Usar método específico para buscar salas del usuario por ambos términos
+            // console.log(`🔍 Buscando salas para ${username} y ${displayName}...`);
+            const roomsByUsername = await this.temporaryRoomsService.findByMember(username);
+            const roomsByDisplayName = (displayName !== username)
+                ? await this.temporaryRoomsService.findByMember(displayName)
+                : [];
+
+            // Combinar y eliminar duplicados de salas encontradas
+            const allUserRoomsMap = new Map<string, TemporaryRoom>();
+            roomsByUsername.forEach(r => allUserRoomsMap.set(r.roomCode, r));
+            roomsByDisplayName.forEach(r => allUserRoomsMap.set(r.roomCode, r));
+
+            const userRooms = Array.from(allUserRoomsMap.values());
+            // console.log(`✅ Salas encontradas para ${username}: ${userRooms.length}`);
 
             for (const room of userRooms) {
                 // Agregar usuario a la sala en memoria
@@ -1844,6 +1861,7 @@ export class SocketGateway
                                         senderNumeroAgente,
                                         group: to,
                                         groupName: to,
+                                        roomName: to, // 🔥 AGREGADO: Para alerts de SweetAlert
                                         roomCode: groupRoomCode,
                                         message,
                                         isGroup: true,
@@ -3517,15 +3535,16 @@ export class SocketGateway
                     }
                 }
 
-                // Notificar al remitente que sus mensajes fueron le�dos
+                // Notificar al remitente que sus mensajes fueron ledos
                 if (senderUser && senderUser.socket.connected) {
                     // console.log(
-                    //     `?? Notificando a ${data.from} que sus mensajes fueron le�dos por ${data.to}`,
+                    //     `?? Notificando a ${data.from} que sus mensajes fueron ledos por ${data.to}`,
                     // );
                     senderUser.socket.emit('conversationRead', {
                         readBy: data.to,
                         messageIds: messages.map((m) => m.id),
                         readAt: getPeruDate(),
+                        conversationId: messages[0]?.conversationId // 🔥 Incluir ID de conversación
                     });
                 } else {
                     // console.log(

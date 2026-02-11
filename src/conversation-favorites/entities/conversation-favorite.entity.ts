@@ -6,7 +6,10 @@ import {
   UpdateDateColumn,
   Unique,
   Index,
+  ManyToOne,
+  JoinColumn,
 } from 'typeorm';
+import { TemporaryConversation } from '../../temporary-conversations/entities/temporary-conversation.entity';
 
 // 🚀 ÍNDICES PARA OPTIMIZAR CONSULTAS DE FAVORITOS
 @Entity('conversation_favorites')
@@ -32,5 +35,9 @@ export class ConversationFavorite {
 
   @UpdateDateColumn()
   updatedAt: Date;
+
+  @ManyToOne(() => TemporaryConversation, { eager: false, createForeignKeyConstraints: false })
+  @JoinColumn({ name: 'conversationId', referencedColumnName: 'id' })
+  conversation: TemporaryConversation;
 }
 

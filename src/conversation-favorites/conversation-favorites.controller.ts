@@ -69,5 +69,14 @@ export class ConversationFavoritesController {
     const conversationIds = await this.conversationFavoritesService.getUserFavoriteConversationIds(username);
     return { conversationIds };
   }
+
+  // 🔥 NUEVO: Obtener favoritos con datos completos de la conversación
+  @Get('full/:username')
+  @ApiOperation({ summary: 'Obtener favoritos con datos embebidos de la conversación' })
+  @ApiParam({ name: 'username' })
+  @ApiResponse({ status: 200, description: 'Lista de favoritos con datos' })
+  async getFullUserFavorites(@Param('username') username: string) {
+    return await this.conversationFavoritesService.getUserFavoritesWithConversationData(username);
+  }
 }
 

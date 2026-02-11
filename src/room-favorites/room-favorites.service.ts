@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull } from 'typeorm';
 import { RoomFavorite } from './entities/room-favorite.entity';
 import { Message } from '../messages/entities/message.entity';
+import { ConversationFavoritesService } from '../conversation-favorites/conversation-favorites.service';
 
 @Injectable()
 export class RoomFavoritesService {
@@ -11,6 +12,7 @@ export class RoomFavoritesService {
     private roomFavoriteRepository: Repository<RoomFavorite>,
     @InjectRepository(Message)
     private messageRepository: Repository<Message>,
+    private conversationFavoritesService: ConversationFavoritesService,
   ) { }
 
   // Agregar sala a favoritos
@@ -82,18 +84,23 @@ export class RoomFavoritesService {
   }
 
   // 🔥 NUEVO: Obtener favoritos con datos completos de la sala (JOIN)
+  // 🚀 MODIFICADO: Ahora trae tanto grupos (Rooms) como conversaciones (Chats)
   async getUserFavoritesWithRoomData(username: string): Promise<any[]> {
-    const favorites = await this.roomFavoriteRepository.find({
+    // 1. Obtener salas favoritas
+    const roomFavorites = await this.roomFavoriteRepository.find({
       where: { username },
       relations: ['room'],
       order: { createdAt: 'DESC' },
     });
 
-    // Retornar formato consistente con myActiveRooms, filtrando salas inactivas o eliminadas
-    // Retornar formato consistente con myActiveRooms, filtrando salas inactivas o eliminadas
-    const enrichedFavorites = await Promise.all(
-      favorites
-        .filter(fav => fav.room && fav.room.isActive)
+    // Enriquecer salas
+    const enrichedRoomFavorites = await Promise.all(
+      roomFavorites
+        .filter(fav => {
+          if (!fav.room || !fav.room.isActive) return false;
+          const members = fav.room.members || [];
+          return members.includes(username);
+        })
         .map(async fav => {
           const code = fav.room?.roomCode || fav.roomCode;
           const lastMessage = code ? await this.messageRepository.findOne({
@@ -101,20 +108,57 @@ export class RoomFavoritesService {
             order: { sentAt: 'DESC' },
           }) : null;
 
+          // Obtener unreadCount para la sala
+          // (Simulado o calculado, aquí usamos el de la entidad si existe)
+          const unreadCount = 0; // Se podría implementar conteo real aquí
+
           return {
             id: fav.room.id,
             name: fav.room.name,
             roomCode: fav.roomCode,
-            description: fav.room.description, // 🔥 Picture/imagen del grupo
+            description: fav.room.description, // picture URL
+            type: 'room', // 🔥 Discriminador
             isFavorite: true,
-            lastMessage: lastMessage ? {
+            unreadCount: unreadCount,
+            lastMessageInternal: lastMessage ? {
               id: lastMessage.id,
               sentAt: lastMessage.sentAt,
+              text: lastMessage.message,
+              from: lastMessage.from,
             } : null,
           };
         })
     );
 
-    return enrichedFavorites;
+    // 2. Obtener conversaciones favoritas
+    let conversationFavorites = [];
+    try {
+      conversationFavorites = await this.conversationFavoritesService.getUserFavoritesWithConversationData(username);
+    } catch (error) {
+      console.error('Error al obtener conversaciones favoritas:', error);
+    }
+
+    // Normalizar conversaciones para la misma estructura
+    const normalizedConvFavorites = conversationFavorites.map(({ updatedAt, createdAt, lastMessageInternal, ...conv }) => ({
+      ...conv,
+      roomCode: conv.id.toString(), // Para conv usamos el ID como roomCode en el frontend
+      description: conv.picture, // Picture de la conversación
+      type: 'conv', // 🔥 Discriminador
+      isFavorite: true,
+      lastMessageInternal, // 🔥 Para ordenar pero no para el return
+    }));
+
+    // 3. Combinar ambos
+    const allFavorites = [...enrichedRoomFavorites, ...normalizedConvFavorites];
+
+    // Ordenar por fecha del último mensaje (más reciente primero)
+    allFavorites.sort((a, b) => {
+      const dateA = new Date(a.lastMessageInternal?.sentAt || 0).getTime();
+      const dateB = new Date(b.lastMessageInternal?.sentAt || 0).getTime();
+      return dateB - dateA;
+    });
+
+    // 🔥 NUEVO: Eliminar campos según pedido del usuario
+    return allFavorites.map(({ lastMessageInternal, ...rest }) => rest);
   }
 }
