@@ -562,7 +562,6 @@ export class MessagesService {
           fileSize: att.fileSize || msg.fileSize
         }));
       }
-      
       // Extraer readBy y convertir a conteo
       const { readBy, ...msgWithoutReadBy } = msg as any;
       const readByCount = Array.isArray(readBy) ? readBy.length : 0;
@@ -862,7 +861,6 @@ export class MessagesService {
           fileSize: att.fileSize || msg.fileSize
         }));
       }
-      
       const enriched = {
         ...msg,
         numberInList: index + 1 + offset,

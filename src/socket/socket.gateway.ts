@@ -3505,7 +3505,7 @@ export class SocketGateway
     @SubscribeMessage('markConversationAsRead')
     async handleMarkConversationAsRead(
         @ConnectedSocket() client: Socket,
-        @MessageBody() data: { from: string; to: string },
+        @MessageBody() data: { from: string; to: string; conversationId?: number },
     ) {
         // console.log(
         //     `? WS: markConversationAsRead - Conversaci�n de ${data.from} a ${data.to} marcada como le�da`,
@@ -3519,6 +3519,23 @@ export class SocketGateway
             );
 
             if (messages.length > 0) {
+                // 🔥 NUEVO: Emitir reset de contador para conversación asignada
+                // Esto asegura que el contador se resetee en favoritos y en la lista normal
+                if (data.conversationId) {
+                    console.log(`📬 Emitiendo unreadCountReset para conversación ${data.conversationId} a ${data.to}`);
+                    
+                    // Emitir a TODAS las variantes del nombre del usuario (igual que en assignedConversationUpdated)
+                    this.server.to(data.to).emit('unreadCountReset', {
+                        conversationId: data.conversationId,
+                    });
+                    this.server.to(data.to.toLowerCase()).emit('unreadCountReset', {
+                        conversationId: data.conversationId,
+                    });
+                    this.server.to(data.to.toUpperCase()).emit('unreadCountReset', {
+                        conversationId: data.conversationId,
+                    });
+                }
+
                 // ?? B�squeda case-insensitive del remitente
                 let senderUser = this.users.get(data.from);
 
