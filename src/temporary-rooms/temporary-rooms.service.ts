@@ -15,6 +15,7 @@ import { User } from '../users/entities/user.entity';
 import { Message } from '../messages/entities/message.entity';
 import { randomBytes } from 'crypto';
 import { RoomFavoritesService } from '../room-favorites/room-favorites.service';
+import { MessagesService } from '../messages/messages.service';
 
 export interface TemporaryRoomWithUrl {
   id: number;
@@ -39,6 +40,8 @@ export class TemporaryRoomsService {
     @InjectRepository(Message)
     private messageRepository: Repository<Message>,
     private roomFavoritesService: RoomFavoritesService,
+    @Inject(forwardRef(() => MessagesService))
+    private messagesService: MessagesService,
   ) { }
 
   // Método para inyectar el gateway de WebSocket (evita dependencia circular)
@@ -732,6 +735,21 @@ export class TemporaryRoomsService {
     const paginatedRooms = sortedNonFavorites
       .slice(skip, skip + limitNum)
       .map(({ _sortTime, ...rest }) => rest);
+
+    // 🔥 NUEVO: Calcular unreadCount para cada sala paginada
+    // Esto resuelve el bug donde SUPERADMIN ve contadores incorrectos después de F5
+    if (username && paginatedRooms.length > 0) {
+      const roomCodes = paginatedRooms.map(room => room.roomCode);
+      const unreadCounts = await this.messagesService.getUnreadCountsForUserInRooms(
+        roomCodes,
+        username,
+      );
+
+      // Agregar unreadCount a cada sala
+      paginatedRooms.forEach(room => {
+        room['unreadCount'] = unreadCounts[room.roomCode] || 0;
+      });
+    }
 
     return {
       data: paginatedRooms, // 🔥 Solo NO-favoritos

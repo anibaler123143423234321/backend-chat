@@ -1,9 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull } from 'typeorm';
 import { RoomFavorite } from './entities/room-favorite.entity';
 import { Message } from '../messages/entities/message.entity';
 import { ConversationFavoritesService } from '../conversation-favorites/conversation-favorites.service';
+import { MessagesService } from '../messages/messages.service';
 
 @Injectable()
 export class RoomFavoritesService {
@@ -13,6 +14,8 @@ export class RoomFavoritesService {
     @InjectRepository(Message)
     private messageRepository: Repository<Message>,
     private conversationFavoritesService: ConversationFavoritesService,
+    @Inject(forwardRef(() => MessagesService))
+    private messagesService: MessagesService,
   ) { }
 
   // Agregar sala a favoritos
@@ -108,9 +111,8 @@ export class RoomFavoritesService {
             order: { sentAt: 'DESC' },
           }) : null;
 
-          // Obtener unreadCount para la sala
-          // (Simulado o calculado, aquí usamos el de la entidad si existe)
-          const unreadCount = 0; // Se podría implementar conteo real aquí
+          // 🔥 CORREGIDO: Calcular unreadCount real para la sala
+          const unreadCount = code ? await this.messagesService.getUnreadCountForUserInRoom(code, username) : 0;
 
           return {
             id: fav.room.id,
