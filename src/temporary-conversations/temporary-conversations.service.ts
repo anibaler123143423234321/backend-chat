@@ -335,6 +335,7 @@ export class TemporaryConversationsService {
         chunk.map(async (conv) => {
           const participants = conv.participants || [];
           let unreadCount = 0;
+          let lastMessage = null;
 
           try {
             if (participants.length >= 2 && username && usernameNormalized) {
@@ -344,7 +345,6 @@ export class TemporaryConversationsService {
 
               if (otherParticipants.length > 0) {
                 // 🔥 SQL OPTIMIZATION: Usar count() directo en DB
-                // Filtramos por mensaje dirigido a m y que no est marcado ledo por m
                 const qb = this.messageRepository.createQueryBuilder('msg');
                 unreadCount = await qb
                   .where('msg.to = :me', { me: username })
@@ -352,18 +352,33 @@ export class TemporaryConversationsService {
                   .andWhere('msg.isDeleted = :isDeleted', { isDeleted: false })
                   .andWhere('msg.threadId IS NULL')
                   .andWhere('msg.isGroup = :isGroup', { isGroup: false })
-                  // Sintaxis MySQL para verificar si un valor NO está en un array JSON
                   .andWhere('NOT JSON_CONTAINS(COALESCE(msg.readBy, "[]"), :meJson)', {
-                    meJson: JSON.stringify(usernameNormalized), // 🔥 Usar versión normalizada (Uppercase)
+                    meJson: JSON.stringify(usernameNormalized),
                   })
                   .getCount();
+              }
+
+              // 🔥 Obtener último mensaje para ordenamiento y display
+              const lastMessages = await this.messageRepository.find({
+                where: {
+                  conversationId: conv.id,
+                  isDeleted: false,
+                  threadId: IsNull(),
+                  isGroup: false,
+                },
+                order: { sentAt: 'DESC' },
+                take: 1,
+              });
+
+              if (lastMessages.length > 0) {
+                lastMessage = { sentAt: lastMessages[0].sentAt };
               }
             }
           } catch (error) {
             console.error(`Error al contar unread en conv ${conv.id}:`, error);
           }
 
-          // 🔥 Obtener informacin del otro participante
+          // 🔥 Obtener información del otro participante
           let otherParticipantRole = null;
           let otherParticipantNumeroAgente = null;
           let otherParticipantPicture = null;
@@ -387,9 +402,12 @@ export class TemporaryConversationsService {
           return {
             id: conv.id,
             name: conv.name,
+            linkId: conv.linkId,
             participants: conv.participants,
+            assignedUsers: conv.assignedUsers,
             settings: conv.settings,
             unreadCount,
+            lastMessage,
             role: otherParticipantRole,
             numeroAgente: otherParticipantNumeroAgente,
             picture: otherParticipantPicture,
@@ -398,6 +416,16 @@ export class TemporaryConversationsService {
       );
       enrichedConversations.push(...enrichedChunk);
     }
+
+    // 🔥 Ordenar por último mensaje (más reciente primero)
+    enrichedConversations.sort((a, b) => {
+      const aTime = a.lastMessage?.sentAt;
+      const bTime = b.lastMessage?.sentAt;
+      if (!aTime && !bTime) return 0;
+      if (!aTime) return 1;
+      if (!bTime) return -1;
+      return new Date(bTime).getTime() - new Date(aTime).getTime();
+    });
 
     return {
       conversations: enrichedConversations,

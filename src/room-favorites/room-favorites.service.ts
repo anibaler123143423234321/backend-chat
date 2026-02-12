@@ -99,11 +99,7 @@ export class RoomFavoritesService {
     // Enriquecer salas
     const enrichedRoomFavorites = await Promise.all(
       roomFavorites
-        .filter(fav => {
-          if (!fav.room || !fav.room.isActive) return false;
-          const members = fav.room.members || [];
-          return members.includes(username);
-        })
+        .filter(fav => fav.room && fav.room.isActive)
         .map(async fav => {
           const code = fav.room?.roomCode || fav.roomCode;
           const lastMessage = code ? await this.messageRepository.findOne({
