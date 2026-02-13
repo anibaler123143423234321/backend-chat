@@ -13,16 +13,26 @@ export const databaseConfig: TypeOrmModuleOptions = {
   database: process.env.DB_DATABASE,
 
   entities: [__dirname + '/../**/*.entity{.ts,.js}'],
-  synchronize: false,        // 🔥 clave
+  synchronize: false,
   timezone: 'Z',
   logging: false,
 
+  // 🔥 Retry automático si MySQL reinicia o cierra conexión
+  retryAttempts: 5,
+  retryDelay: 3000,
+
   extra: {
-    connectionLimit: 15,
+    // Pool: 20 × 4 workers PM2 = 80 conexiones (MySQL tiene 3000)
+    connectionLimit: 20,
     waitForConnections: true,
-    queueLimit: 50,
-    acquireTimeout: 8000,
+    queueLimit: 100,
+
+    // Timeouts
     connectTimeout: 10000,
-    idleTimeout: 10000,
+    acquireTimeout: 10000,
+
+    // 🔥 CLAVE: Evita ECONNRESET manteniendo conexiones TCP vivas
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 30000, // Ping cada 30s
   },
 };
