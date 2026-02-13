@@ -82,8 +82,19 @@ export class RoomFavoritesService {
 
   // Obtener códigos de salas favoritas de un usuario (para filtrado rápido)
   async getUserFavoriteRoomCodes(username: string): Promise<string[]> {
-    const favorites = await this.getUserFavorites(username);
-    return favorites.map(f => f.roomCode);
+    const roomFavorites = await this.getUserFavorites(username);
+    const roomCodes = roomFavorites.map(f => f.roomCode);
+
+    // 🔥 NUEVO: También incluir IDs de conversaciones favoritas
+    let conversationIds = [];
+    try {
+      conversationIds = await this.conversationFavoritesService.getUserFavoriteConversationIds(username);
+    } catch (e) {
+      console.error('Error fetching favorite conversation IDs:', e);
+    }
+
+    // Combinar ambos (roomCodes y convIds como strings)
+    return [...roomCodes, ...conversationIds.map(id => id.toString())];
   }
 
   // 🔥 NUEVO: Obtener favoritos con datos completos de la sala (JOIN)
@@ -155,7 +166,14 @@ export class RoomFavoritesService {
       return dateB - dateA;
     });
 
-    // 🔥 NUEVO: Eliminar campos según pedido del usuario
-    return allFavorites.map(({ lastMessageInternal, ...rest }) => rest);
+    // 🔥 NUEVO: Devolver metadata del mensaje (lastMessage) para que el frontend pueda ordenar inicialmente
+    return allFavorites.map(({ lastMessageInternal, ...rest }) => ({
+      ...rest,
+      lastMessage: lastMessageInternal ? {
+        text: lastMessageInternal.text,
+        from: lastMessageInternal.from,
+        sentAt: lastMessageInternal.sentAt
+      } : null
+    }));
   }
 }

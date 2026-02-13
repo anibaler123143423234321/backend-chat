@@ -29,11 +29,11 @@ import { getPeruDate, formatPeruTime } from '../utils/date.utils';
     },
     transports: ['websocket', 'polling'],
     path: '/socket.io/',
-    // 🔥 OPTIMIZADO: Timeouts reducidos para detectar desconexiones más rápido
-    pingTimeout: 10000,    // 🔥 10 segundos (antes 20s) - detectar desconexiones más rápido
-    pingInterval: 15000,   // 🔥 15 segundos (antes 25s) - verificar conexiones más frecuentemente
+    // 🔥 OPTIMIZADO: Timeouts relajados para evitar desconexiones en segundo plano
+    pingTimeout: 60000,    //  60 segundos (antes 10s) - mayor tolerancia para pestañas en segundo plano
+    pingInterval: 10000,   //  25 segundos (antes 15s)
     maxHttpBufferSize: 10 * 1024 * 1024, // 10MB - límite de tamaño de mensaje
-    connectTimeout: 30000, // 🔥 30 segundos (antes 45s) - timeout más corto
+    connectTimeout: 30000, //  30 segundos (antes 45s) - timeout más corto
     upgradeTimeout: 10000, // 10 segundos - timeout de upgrade de polling a websocket
     // ✅ Permitir reconexión después de desconexión temporal
     allowEIO3: true,       // Compatibilidad con clientes Engine.IO v3
@@ -146,19 +146,34 @@ export class SocketGateway
     public async getOnlineUsersSet(): Promise<Set<string>> {
         const onlineSet = new Set<string>();
 
-        // 1. Añadir usuarios de memoria local
-        for (const username of this.users.keys()) {
+        // 1. Añadir usuarios de memoria local (username + displayName)
+        for (const [username, { userData }] of this.users.entries()) {
             onlineSet.add(username);
             onlineSet.add(username.toLowerCase().trim());
+            // 🔥 FIX: También agregar display name (nombre + apellido) para match con participantes de conversaciones
+            if (userData?.nombre && userData?.apellido) {
+                const displayName = `${userData.nombre} ${userData.apellido}`;
+                onlineSet.add(displayName);
+                onlineSet.add(displayName.toLowerCase().trim());
+            }
         }
 
-        // 2. Añadir usuarios de Redis (para cluster)
+        // 2. Añadir usuarios de Redis (para cluster) - username + displayName
         if (this.isRedisReady()) {
             try {
                 const usersHash = await this.redisClient.hGetAll(this.REDIS_ONLINE_USERS_KEY);
-                for (const username of Object.keys(usersHash)) {
+                for (const [username, jsonData] of Object.entries(usersHash)) {
                     onlineSet.add(username);
                     onlineSet.add(username.toLowerCase().trim());
+                    // 🔥 FIX: Parsear datos de Redis para obtener display name
+                    try {
+                        const userData = JSON.parse(jsonData as string);
+                        if (userData?.nombre && userData?.apellido) {
+                            const displayName = `${userData.nombre} ${userData.apellido}`;
+                            onlineSet.add(displayName);
+                            onlineSet.add(displayName.toLowerCase().trim());
+                        }
+                    } catch { /* ignorar errores de parseo */ }
                 }
             } catch (error) {
                 console.error(`❌ Error obteniendo usuarios online de Redis:`, error.message);
@@ -588,11 +603,21 @@ export class SocketGateway
             let sentCount = 0;
             for (const user of onlineUsers) {
                 const targetUsername = user.username?.toLowerCase().trim();
+                // 🔥 FIX: También construir display name para comparar contra whitelist
+                // La whitelist tiene display names de participantes (ej: "karen garcia")
+                // pero targetUsername es el username crudo de Redis (ej: "kgarcia")
+                const targetDisplayName = user.nombre && user.apellido
+                    ? `${user.nombre} ${user.apellido}`.toLowerCase().trim()
+                    : null;
 
                 //  FILTRO: Solo enviar si es relevante o si es el mismo usuario (para confirmación)
-                if (relevantUsers.has(targetUsername) || targetUsername === username.toLowerCase().trim()) {
+                const isRelevant = relevantUsers.has(targetUsername) ||
+                    (targetDisplayName && relevantUsers.has(targetDisplayName)) ||
+                    targetUsername === username.toLowerCase().trim();
+
+                if (isRelevant) {
                     socket.emit('userStatusChanged', {
-                        username: user.nombre && user.apellido
+                        username: targetDisplayName
                             ? `${user.nombre} ${user.apellido}`
                             : user.username,
                         originalUsername: user.username,
@@ -1056,6 +1081,12 @@ export class SocketGateway
                     isOnline: true,
                 };
                 connectedUsersMap.set(username, userInfo);
+                // 🔥 FIX: También indexar por display name (nombre + apellido)
+                // Los participantes de conversaciones se guardan como display name
+                if (ud?.nombre && ud?.apellido) {
+                    const displayName = `${ud.nombre} ${ud.apellido}`;
+                    connectedUsersMap.set(displayName, userInfo);
+                }
                 return userInfo;
             },
         );
@@ -1079,27 +1110,32 @@ export class SocketGateway
             const ownUserData = connectedUsersMap.get(userData?.username);
             if (ownUserData) usersToSend.push(ownUserData);
 
-            // Agregar usuarios de conversaciones asignadas (solo los conectados)
-            if (assignedConversations && assignedConversations.length > 0) {
-                const currentUserFullName =
-                    userData?.nombre && userData?.apellido
-                        ? `${userData.nombre} ${userData.apellido}`
-                        : userData?.username;
+            // 🔥 NUEVO: Agregar usuarios de conversaciones FAVORITAS (aunque no estén asignadas activamente)
+            try {
+                const favoriteConversations = await this.conversationFavoritesService.getUserFavoritesWithConversationData(userData?.username);
+                if (favoriteConversations && favoriteConversations.length > 0) {
+                    const currentUserFullName =
+                        userData?.nombre && userData?.apellido
+                            ? `${userData.nombre} ${userData.apellido}`
+                            : userData?.username;
 
-                for (const conv of assignedConversations) {
-                    if (conv.participants && Array.isArray(conv.participants)) {
-                        for (const participantName of conv.participants) {
-                            if (participantName !== currentUserFullName) {
-                                if (!usersToSend.some((u) => u.username === participantName)) {
-                                    const participantData = connectedUsersMap.get(participantName);
-                                    if (participantData) {
-                                        usersToSend.push(participantData);
+                    for (const conv of favoriteConversations) {
+                        if (conv.participants && Array.isArray(conv.participants)) {
+                            for (const participantName of conv.participants) {
+                                if (participantName !== currentUserFullName) {
+                                    if (!usersToSend.some((u) => u.username === participantName)) {
+                                        const participantData = connectedUsersMap.get(participantName);
+                                        if (participantData) {
+                                            usersToSend.push(participantData);
+                                        }
                                     }
                                 }
                             }
                         }
                     }
                 }
+            } catch (favError) {
+                console.error(`❌ Error obteniendo favoritos para userList individual:`, favError.message);
             }
 
             socket.emit('userList', { users: usersToSend });
@@ -1199,11 +1235,10 @@ export class SocketGateway
                 });
             }
 
-            // Crear lista de usuarios conectados con toda su informacin
-            // Crear lista de usuarios conectados con toda su informaci�n
+            // Crear lista de usuarios conectados con toda su información
             const connectedUsersMap = new Map<string, any>();
             Array.from(this.users.entries()).forEach(([uname, { userData }]) => {
-                connectedUsersMap.set(uname, {
+                const userInfo = {
                     id: userData?.id || null,
                     username: uname,
                     nombre: userData?.nombre || null,
@@ -1215,10 +1250,17 @@ export class SocketGateway
                     sede_id: userData?.sede_id || null,
                     numeroAgente: userData?.numeroAgente || null,
                     isOnline: true, // Usuario conectado
-                });
+                };
+                connectedUsersMap.set(uname, userInfo);
+                // 🔥 FIX: También indexar por display name (nombre + apellido)
+                // Los participantes de conversaciones se guardan como display name
+                if (userData?.nombre && userData?.apellido) {
+                    const displayName = `${userData.nombre} ${userData.apellido}`;
+                    connectedUsersMap.set(displayName, userInfo);
+                }
             });
 
-            // Incluir informaci�n del usuario actual + usuarios de conversaciones asignadas
+            // Incluir informacin del usuario actual + usuarios de conversaciones asignadas
             const usersToSend = [];
 
             // Agregar informaci�n del usuario actual
@@ -2762,7 +2804,7 @@ export class SocketGateway
         }
         this.lastBroadcastUserList = now;
 
-        // Crear lista de usuarios conectados con toda su informaci�n
+        // Crear lista de usuarios conectados con toda su información
         const connectedUsersMap = new Map<string, any>();
         const userListWithData = Array.from(this.users.entries()).map(
             ([username, { userData }]) => {
@@ -2780,11 +2822,15 @@ export class SocketGateway
                     isOnline: true, // Usuario conectado
                 };
                 connectedUsersMap.set(username, userInfo);
+                // 🔥 FIX: También indexar por display name (nombre + apellido)
+                // Los participantes de conversaciones se guardan como display name
+                if (userData?.nombre && userData?.apellido) {
+                    const displayName = `${userData.nombre} ${userData.apellido}`;
+                    connectedUsersMap.set(displayName, userInfo);
+                }
                 return userInfo;
             },
         );
-
-        // console.log('?? Enviando lista de usuarios con datos completos:', userListWithData);
 
         // Log optimizado: evitar log por cada broadcast
         // console.log(`?? broadcastUserList - Total usuarios conectados: ${this.users.size}`);
