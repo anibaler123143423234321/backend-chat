@@ -7,6 +7,7 @@ import { TemporaryConversationsModule } from '../temporary-conversations/tempora
 import { User } from '../users/entities/user.entity';
 import { PollsModule } from '../polls/polls.module';
 import { RoomFavoritesModule } from '../room-favorites/room-favorites.module';
+import { ConversationFavoritesModule } from '../conversation-favorites/conversation-favorites.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { RoomFavoritesModule } from '../room-favorites/room-favorites.module';
     TemporaryConversationsModule,
     PollsModule,
     RoomFavoritesModule,
+    ConversationFavoritesModule,
   ],
   providers: [SocketGateway],
   exports: [SocketGateway],

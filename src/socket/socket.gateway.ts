@@ -19,6 +19,7 @@ import { TemporaryConversationsService } from '../temporary-conversations/tempor
 import { PollsService } from '../polls/polls.service';
 import { User } from '../users/entities/user.entity';
 import { RoomFavoritesService } from '../room-favorites/room-favorites.service';
+import { ConversationFavoritesService } from '../conversation-favorites/conversation-favorites.service';
 import { TemporaryRoom } from '../temporary-rooms/entities/temporary-room.entity';
 import { getPeruDate, formatPeruTime } from '../utils/date.utils';
 
@@ -333,6 +334,7 @@ export class SocketGateway
         private temporaryConversationsService: TemporaryConversationsService,
         private pollsService: PollsService,
         private roomFavoritesService: RoomFavoritesService, //  NUEVO: Inyectar servicio de favoritos
+        private conversationFavoritesService: ConversationFavoritesService, // 🔥 NUEVO: Inyectar servicio de favoritos de conversaciones
         @InjectRepository(User)
         private userRepository: Repository<User>,
     ) {
@@ -552,6 +554,34 @@ export class SocketGateway
                 if (members.has(username)) {
                     members.forEach(m => relevantUsers.add(m.toLowerCase().trim()));
                 }
+            }
+
+            // C. 🔥 NUEVO: Añadir favoritos (para que aparezcan online de inmediato)
+            try {
+                // 1. Favoritos de salas (Grupos)
+                const favoriteRoomCodes = await this.roomFavoritesService.getUserFavoriteRoomCodes(username);
+                if (favoriteRoomCodes && favoriteRoomCodes.length > 0) {
+                    favoriteRoomCodes.forEach(code => {
+                        relevantUsers.add(code.toLowerCase().trim());
+                    });
+                }
+
+                // 2. 🔥 NUEVO: Favoritos de conversaciones privadas (Karen, etc.)
+                const favoriteConversations = await this.conversationFavoritesService.getUserFavoritesWithConversationData(username);
+                if (favoriteConversations && favoriteConversations.length > 0) {
+                    favoriteConversations.forEach(conv => {
+                        if (conv.participants && Array.isArray(conv.participants)) {
+                            conv.participants.forEach(p => {
+                                // No añadirnos a nosotros mismos (aunque no hace daño, ya está en la whitelist)
+                                if (p.toLowerCase().trim() !== username.toLowerCase().trim()) {
+                                    relevantUsers.add(p.toLowerCase().trim());
+                                }
+                            });
+                        }
+                    });
+                }
+            } catch (favError) {
+                console.error(`❌ Error obteniendo favoritos para whitelist online:`, favError.message);
             }
 
             // Filtrar y enviar
@@ -1978,7 +2008,7 @@ export class SocketGateway
 
                     // NUEVO: Emitir evento de actualizaci�n de conversaci�n asignada
                     // Esto permite que ambos participantes reordenen sus listas autom�ticamente
-                    if (data.isAssignedConversation && data.conversationId) {
+                    if (data.conversationId) {
                         // console.log(`?? Emitiendo assignedConversationUpdated para conversaci�n ${data.conversationId}`);
 
                         // Determinar el texto del mensaje para mostrar
@@ -3523,7 +3553,7 @@ export class SocketGateway
                 // Esto asegura que el contador se resetee en favoritos y en la lista normal
                 if (data.conversationId) {
                     console.log(`📬 Emitiendo unreadCountReset para conversación ${data.conversationId} a ${data.to}`);
-                    
+
                     // Emitir a TODAS las variantes del nombre del usuario (igual que en assignedConversationUpdated)
                     this.server.to(data.to).emit('unreadCountReset', {
                         conversationId: data.conversationId,
