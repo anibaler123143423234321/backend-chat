@@ -149,19 +149,16 @@ export class ConversationFavoritesService {
             }).length;
           }
 
-          // Obtener información del otro participante para la imagen/rol
-          let otherParticipantRole = null;
-          let otherParticipantNumeroAgente = null;
+          // Obtener información del otro participante para la imagen
           let otherParticipantPicture = null;
 
           const otherParticipants = participants.filter(p => this.normalizeUsername(p) !== usernameNormalized);
           if (otherParticipants.length > 0) {
             const otherUser = await this.userRepository.findOne({
               where: { username: otherParticipants[0] },
+              select: ['picture'],
             });
             if (otherUser) {
-              otherParticipantRole = otherUser.role;
-              otherParticipantNumeroAgente = otherUser.numeroAgente;
               otherParticipantPicture = otherUser.picture;
             }
           }
@@ -174,8 +171,6 @@ export class ConversationFavoritesService {
             isFavorite: true,
             unreadCount,
             lastMessageInternal,
-            role: otherParticipantRole,
-            numeroAgente: otherParticipantNumeroAgente,
             picture: otherParticipantPicture,
           };
         })

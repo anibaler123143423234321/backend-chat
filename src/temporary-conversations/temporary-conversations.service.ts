@@ -378,9 +378,7 @@ export class TemporaryConversationsService {
             console.error(`Error al contar unread en conv ${conv.id}:`, error);
           }
 
-          // 🔥 Obtener información del otro participante
-          let otherParticipantRole = null;
-          let otherParticipantNumeroAgente = null;
+          // 🔥 Obtener información del otro participante (solo imagen)
           let otherParticipantPicture = null;
 
           if (participants.length > 0 && username) {
@@ -388,12 +386,10 @@ export class TemporaryConversationsService {
             if (others.length > 0) {
               const otherUser = await this.userRepository.findOne({
                 where: { username: others[0] },
-                select: ['role', 'numeroAgente', 'picture'],
+                select: ['picture'],
               });
 
               if (otherUser) {
-                otherParticipantRole = otherUser.role;
-                otherParticipantNumeroAgente = otherUser.numeroAgente;
                 otherParticipantPicture = otherUser.picture;
               }
             }
@@ -408,8 +404,6 @@ export class TemporaryConversationsService {
             settings: conv.settings,
             unreadCount,
             lastMessage,
-            role: otherParticipantRole,
-            numeroAgente: otherParticipantNumeroAgente,
             picture: otherParticipantPicture,
           };
         }),
