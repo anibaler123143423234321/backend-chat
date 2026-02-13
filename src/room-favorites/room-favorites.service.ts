@@ -140,7 +140,6 @@ export class RoomFavoritesService {
     const normalizedConvFavorites = conversationFavorites.map(({ updatedAt, createdAt, lastMessageInternal, ...conv }) => ({
       ...conv,
       roomCode: conv.id.toString(), // Para conv usamos el ID como roomCode en el frontend
-      description: conv.picture, // Picture de la conversación
       type: 'conv', // 🔥 Discriminador
       isFavorite: true,
       lastMessageInternal, // 🔥 Para ordenar pero no para el return
