@@ -739,6 +739,17 @@ export class SocketGateway
 
         const { username, userData, assignedConversations } = data;
 
+        // 🔍 DEBUG TEMPORAL: Interceptar TODOS los eventos del socket de KAREN
+        if (username?.toUpperCase().includes('KAREN')) {
+            console.log(`🔍🔍🔍 INTERCEPTANDO TODOS LOS EVENTOS DE KAREN (socket: ${client.id})`);
+            const originalOnAny = client.onAny;
+            client.onAny((eventName: string, ...args: any[]) => {
+                if (eventName !== 'register') {
+                    console.log(`🔍🔍🔍 KAREN EMITIÓ EVENTO: "${eventName}" args: ${JSON.stringify(args)?.substring(0, 200)}`);
+                }
+            });
+        }
+
         //  CLUSTER FIX: Tracking global de sockets via Redis
         // Antes usábamos this.users (local), ahora verificamos en Redis para detectar
         // conexiones duplicadas en CUALQUIER cluster
@@ -2127,6 +2138,37 @@ export class SocketGateway
                         if (data.isGroup && finalRoomCode) {
                             this.server.to(finalRoomCode).emit('messageIdUpdate', updatePayload);
                         }
+                    }
+
+                    // 🔥 NUEVO: Emitir assignedConversationUpdated con ID real si es chat asignado
+                    // Esto asegura que el evento se emita incluso si el mensaje se guardó en background
+                    if (savedMessage.conversationId && !data.isGroup) {
+                        let messageText = data.message;
+                        if (!messageText && data.mediaType) {
+                            if (data.mediaType === 'image') messageText = '📷 Imagen';
+                            else if (data.mediaType === 'video') messageText = '🎥 Video';
+                            else if (data.mediaType === 'audio') messageText = '🎵 Audio';
+                            else if (data.mediaType === 'document') messageText = '📄 Documento';
+                            else messageText = '📎 Archivo';
+                        } else if (!messageText && data.fileName) {
+                            messageText = '📎 Archivo';
+                        }
+
+                        const conversationUpdateData = {
+                            conversationId: savedMessage.conversationId,
+                            lastMessage: messageText,
+                            lastMessageTime: savedMessage.sentAt || new Date().toISOString(),
+                            lastMessageFrom: from,
+                            lastMessageMediaType: data.mediaType,
+                            messageId: savedMessage.id // Incluir ID real del mensaje
+                        };
+
+                        // Emitir a ambos participantes
+                        const recipientUsername = data.actualRecipient || data.to;
+                        const participants = [from, recipientUsername].filter(Boolean);
+                        participants.forEach(participantName => {
+                            this.server.to(participantName).emit('assignedConversationUpdated', conversationUpdateData);
+                        });
                     }
 
                     // 🚀 Si es encuesta, crearla después de guardar
@@ -3536,9 +3578,10 @@ export class SocketGateway
         @ConnectedSocket() client: Socket,
         @MessageBody() data: { messageId: number; username: string; from: string },
     ) {
-        // console.log(
-        //     `? WS: markAsRead - Mensaje ${data.messageId} le�do por ${data.username}`,
-        // );
+        // 🔍 DEBUG: Log para detectar quién marca mensajes como leídos
+        if (data.username?.toUpperCase().includes('KAREN')) {
+            console.log(`🚨🚨🚨 handleMarkAsRead (genérico) KAREN - msgId: ${data.messageId}, from: ${data.from}`);
+        }
 
         try {
             // Marcar el mensaje como le�do en la base de datos
@@ -3665,6 +3708,11 @@ export class SocketGateway
         @MessageBody()
         data: { messageId: number; username: string; roomCode: string },
     ) {
+        // 🔍 DEBUG: Log para detectar quién marca mensajes como leídos
+        if (data.username?.toUpperCase().includes('KAREN')) {
+            console.log(`🚨🚨🚨 handleMarkRoomMessageAsRead KAREN - msgId: ${data.messageId}, room: ${data.roomCode}, stack: ${new Error().stack?.split('\n').slice(1, 4).join(' | ')}`);
+        }
+
         // 🔥 DEDUPLICACIÓN: Bloquear eventos duplicados del frontend viejo (cacheado)
         const dedupeKey = `markRead:${data.messageId}:${data.username}`;
 
@@ -3888,6 +3936,25 @@ export class SocketGateway
                 if (fromRoom && fromRoom !== toRoom) {
                     this.server.to(fromRoom).emit('threadCountUpdated', updatePayload);
                 }
+            }
+
+            // 🔥 NUEVO: Emitir assignedConversationUpdated si es un chat asignado
+            if (!isGroup && savedMessage?.conversationId) {
+                const messageText = data.message || (data.mediaType ? `📎 ${data.mediaType}` : '📎 Archivo');
+                
+                const conversationUpdateData = {
+                    conversationId: savedMessage.conversationId,
+                    lastMessage: messageText,
+                    lastMessageTime: savedMessage.sentAt || new Date().toISOString(),
+                    lastMessageFrom: from,
+                    lastMessageMediaType: data.mediaType
+                };
+
+                // Emitir a ambos participantes (remitente y destinatario)
+                const participants = [from, to].filter(Boolean);
+                participants.forEach(participantName => {
+                    this.server.to(participantName).emit('assignedConversationUpdated', conversationUpdateData);
+                });
             }
 
             console.log('✅ threadMessage procesado completamente');

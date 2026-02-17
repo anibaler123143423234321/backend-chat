@@ -88,7 +88,46 @@ export class MessagesController {
 
     const savedMessage = await this.messagesService.create(createMessageDto);
 
+    // 🔥 NUEVO: Emitir assignedConversationUpdated si es un chat asignado
+    if (savedMessage.conversationId && !savedMessage.isGroup) {
+      const messageText = this.getMessagePreview(savedMessage);
+      
+      const conversationUpdateData = {
+        conversationId: savedMessage.conversationId,
+        lastMessage: messageText,
+        lastMessageTime: savedMessage.sentAt || new Date().toISOString(),
+        lastMessageFrom: savedMessage.from,
+        lastMessageMediaType: savedMessage.mediaType
+      };
+
+      // Emitir a ambos participantes (remitente y destinatario)
+      const participants = [savedMessage.from, savedMessage.to].filter(Boolean);
+      participants.forEach(participantName => {
+        this.socketGateway.server.to(participantName).emit('assignedConversationUpdated', conversationUpdateData);
+      });
+    }
+
     return savedMessage;
+  }
+
+  private getMessagePreview(message: any): string {
+    if (message.message) {
+      return message.message;
+    }
+    
+    if (message.mediaType) {
+      if (message.mediaType === 'image') return '📷 Imagen';
+      if (message.mediaType === 'video') return '🎥 Video';
+      if (message.mediaType === 'audio') return '🎵 Audio';
+      if (message.mediaType === 'document') return '📄 Documento';
+      return '📎 Archivo';
+    }
+    
+    if (message.fileName) {
+      return '📎 Archivo';
+    }
+    
+    return '';
   }
   @Get('room/:roomCode')
   @ApiOperation({ summary: 'Obtener mensajes por código de sala (orden descendente)' })

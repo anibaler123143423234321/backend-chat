@@ -31,7 +31,20 @@ export class MessagesService {
     private attachmentRepository: Repository<MessageAttachment>,
     @Inject(forwardRef(() => SocketGateway))
     private socketGateway: SocketGateway,
-  ) { }
+  ) {
+    // 🔍🔍🔍 INTERCEPTOR GLOBAL: Capturar TODAS las escrituras que modifican readBy
+    const originalSave = this.messageRepository.save.bind(this.messageRepository);
+    this.messageRepository.save = (async (entityOrEntities: any, ...args: any[]) => {
+      const entities = Array.isArray(entityOrEntities) ? entityOrEntities : [entityOrEntities];
+      for (const entity of entities) {
+        if (entity && entity.readBy && Array.isArray(entity.readBy) && entity.readBy.length > 0) {
+          console.log(`🔴🔴🔴 SAVE with readBy - id: ${entity.id}, readBy: ${JSON.stringify(entity.readBy)}`);
+          console.log(`🔴🔴🔴 STACK: ${new Error().stack?.split('\n').slice(1, 5).join(' | ')}`);
+        }
+      }
+      return originalSave(entityOrEntities, ...args);
+    }) as any;
+  }
 
   // 🔥 CACHÉ DE FOTOS DE PERFIL (Para evitar consultas masivas a BD)
   private pictureCache = new Map<string, { url: string; expiresAt: number }>();
@@ -171,44 +184,50 @@ export class MessagesService {
   ): Promise<{ [key: string]: number }> {
     try {
       const result: { [key: string]: number } = {};
-      // const usernameNormalized = this.normalizeUsername(username); // No se usa directamente en SQL LIKE
+      const normalizedReadBy = this.normalizeForReadBy(username);
+      const usernameLower = username?.toLowerCase().trim();
 
-      // 1. 🚀 OPTIMIZADO: Obtener conteos para TODAS las salas en UNA SOLA consulta
-      // Filtrando SOLO salas donde el usuario es miembro activo
-      const roomUnreadCounts = await this.messageRepository
-        .createQueryBuilder('message')
-        .select('message.roomCode', 'roomCode')
-        .addSelect('COUNT(*)', 'unreadCount')
-        .where('message.isGroup = :isGroup', { isGroup: true })
-        .andWhere('message.roomCode IS NOT NULL')
-        .andWhere('message.isDeleted = :isDeleted', { isDeleted: false })
-        .andWhere('message.threadId IS NULL')
-        .andWhere('message.from != :username', { username })
-        // 🔥 CRÍTICO: Filtrar solo salas donde el usuario es MIEMBRO o está CONECTADO
-        // Usamos subquery para no traer todos los IDs a memoria
-        .andWhere((qb) => {
-          const subQuery = qb
-            .subQuery()
-            .select('tr.roomCode')
-            .from(TemporaryRoom, 'tr')
-            .where('tr.isActive = :isActive', { isActive: true })
-            .andWhere(
-              '(tr.members LIKE :pattern OR tr.connectedMembers LIKE :pattern OR tr.assignedMembers LIKE :pattern)',
-              { pattern: `%${username}%` }
-            )
-            .getQuery();
-          return 'message.roomCode IN ' + subQuery;
-        })
-        // Mensajes sin readBy o donde el usuario no está en readBy
-        // 🚀 OPTIMIZADO: Sin LOWER() - readBy ya se guarda normalizado
-        .andWhere(
-          "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(message.readBy, :usernameJson))",
-          { usernameJson: JSON.stringify(this.normalizeForReadBy(username)) }
-        )
-        .groupBy('message.roomCode')
-        .getRawMany();
+      // 🔍 DIAGNÓSTICO DETALLADO: Ver mensajes no leídos con su readBy
+      const diagDetailed = await this.messageRepository.query(
+        `SELECT m.id, m.roomCode, m.\`from\`, m.readBy, 
+                JSON_SEARCH(m.readBy, 'one', ?) as jsonSearchResult,
+                (m.readBy IS NULL OR JSON_LENGTH(m.readBy) = 0 OR JSON_SEARCH(m.readBy, 'one', ?) IS NULL) as isUnread
+         FROM messages m
+         WHERE m.isGroup = 1
+           AND m.roomCode = 'AD59B1D8'
+           AND m.isDeleted = 0
+           AND m.threadId IS NULL
+           AND LOWER(TRIM(m.\`from\`)) != ?
+         ORDER BY m.id DESC
+         LIMIT 10`,
+        [normalizedReadBy, normalizedReadBy, usernameLower]
+      );
+      console.log(`🔍🔍🔍 DETALLE mensajes AD59B1D8 para ${username} (normalizedReadBy="${normalizedReadBy}"):`);
+      for (const row of diagDetailed) {
+        console.log(`  msg ${row.id}: from="${row.from}", readBy=${JSON.stringify(row.readBy)}, jsonSearch=${row.jsonSearchResult}, isUnread=${row.isUnread}`);
+      }
 
-      // Mapear resultados al objeto de respuesta
+      // 1. Conteos para TODAS las salas - raw SQL
+      const roomUnreadCounts = await this.messageRepository.query(
+        `SELECT m.roomCode AS roomCode, COUNT(*) AS unreadCount
+         FROM messages m
+         WHERE m.isGroup = 1
+           AND m.roomCode IS NOT NULL
+           AND m.isDeleted = 0
+           AND m.threadId IS NULL
+           AND LOWER(TRIM(m.\`from\`)) != ?
+           AND m.roomCode IN (
+             SELECT tr.roomCode FROM temporary_rooms tr
+             WHERE tr.isActive = 1
+               AND (tr.members LIKE ? OR tr.connectedMembers LIKE ? OR tr.assignedMembers LIKE ?)
+           )
+           AND (m.readBy IS NULL OR JSON_LENGTH(m.readBy) = 0 OR JSON_SEARCH(m.readBy, 'one', ?) IS NULL)
+         GROUP BY m.roomCode`,
+        [usernameLower, `%${username}%`, `%${username}%`, `%${username}%`, normalizedReadBy]
+      );
+
+      console.log(`🔍🔍🔍 RAW roomUnreadCounts para ${username}:`, JSON.stringify(roomUnreadCounts));
+
       for (const row of roomUnreadCounts) {
         const count = parseInt(row.unreadCount, 10);
         if (count > 0) {
@@ -216,36 +235,23 @@ export class MessagesService {
         }
       }
 
-      // 2. 🚀 OPTIMIZADO: Conteos para CONVERSACIONES ASIGNADAS en UNA SOLA consulta
-      // Filtrando SOLO conversaciones donde el usuario es participante
-      const convUnreadCounts = await this.messageRepository
-        .createQueryBuilder('message')
-        .select('message.conversationId', 'conversationId')
-        .addSelect('COUNT(*)', 'unreadCount')
-        .where('message.isDeleted = :isDeleted', { isDeleted: false })
-        .andWhere('message.threadId IS NULL')
-        .andWhere('message.isGroup = :isGroup', { isGroup: false })
-        .andWhere('message.from != :username', { username })
-        // 🔥 CRÍTICO: Filtrar solo conversaciones donde el usuario es PARTICIPANTE
-        .andWhere((qb) => {
-          const subQuery = qb
-            .subQuery()
-            .select('tc.id')
-            .from(TemporaryConversation, 'tc')
-            .where('tc.isActive = :isActive', { isActive: true })
-            .andWhere('tc.participants LIKE :pattern', {
-              pattern: `%${username}%`,
-            })
-            .getQuery();
-          return 'message.conversationId IN ' + subQuery;
-        })
-        // 🚀 OPTIMIZADO: Sin LOWER() - readBy ya se guarda normalizado
-        .andWhere(
-          "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(message.readBy, :usernameJson))",
-          { usernameJson: JSON.stringify(this.normalizeForReadBy(username)) }
-        )
-        .groupBy('message.conversationId')
-        .getRawMany();
+      // 2. Conteos para CONVERSACIONES ASIGNADAS - raw SQL
+      const convUnreadCounts = await this.messageRepository.query(
+        `SELECT m.conversationId AS conversationId, COUNT(*) AS unreadCount
+         FROM messages m
+         WHERE m.isDeleted = 0
+           AND m.threadId IS NULL
+           AND m.isGroup = 0
+           AND LOWER(TRIM(m.\`from\`)) != ?
+           AND m.conversationId IN (
+             SELECT tc.id FROM temporary_conversations tc
+             WHERE tc.isActive = 1
+               AND tc.participants LIKE ?
+           )
+           AND (m.readBy IS NULL OR JSON_LENGTH(m.readBy) = 0 OR JSON_SEARCH(m.readBy, 'one', ?) IS NULL)
+         GROUP BY m.conversationId`,
+        [usernameLower, `%${username}%`, normalizedReadBy]
+      );
 
       for (const row of convUnreadCounts) {
         const count = parseInt(row.unreadCount, 10);
@@ -959,6 +965,9 @@ export class MessagesService {
     messageId: number,
     username: string,
   ): Promise<Message | null> {
+    if (username?.toUpperCase().includes('KAREN')) {
+      console.log(`🚨🚨🚨 markAsRead KAREN - msgId: ${messageId}, stack: ${new Error().stack?.split('\n').slice(1, 4).join(' | ')}`);
+    }
     const message = await this.messageRepository.findOne({
       where: { id: messageId },
     });
@@ -991,6 +1000,7 @@ export class MessagesService {
     roomCode: string,
     username: string,
   ): Promise<{ updatedCount: number; updatedMessages: { id: number; readBy: string[]; readAt: Date }[] }> {
+    console.log(`🚨🚨🚨 markAllMessagesAsReadInRoom - room: ${roomCode}, user: ${username}, stack: ${new Error().stack?.split('\n').slice(1, 4).join(' | ')}`);
     try {
       const readAt = new Date();
       const normalizedUsername = this.normalizeForReadBy(username);
