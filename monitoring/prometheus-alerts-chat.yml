@@ -1,0 +1,98 @@
+groups:
+  - name: chat-backend-alerts
+    rules:
+      # === ALERTA DE DISPONIBILIDAD ===
+      - alert: ChatBackendDown
+        expr: up{job="chat-backend-monitoring"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: chat-backend
+        annotations:
+          summary: "Chat Backend Worker is DOWN"
+          description: "El monitor del Chat Backend no responde desde hace 1 minuto."
+
+      # === ALERTA DE SALUD GENERAL ===
+      - alert: ChatBackendHealthCritical
+        expr: backend_overall_health == 2
+        for: 30s
+        labels:
+          severity: critical
+          service: chat-backend
+        annotations:
+          summary: "Chat Backend Health is CRITICAL"
+          description: "El estado de salud global es CRÍTICO (Event Loop, CPU o Memoria saturados)."
+
+      - alert: ChatBackendHealthDegraded
+        expr: backend_overall_health == 1
+        for: 2m
+        labels:
+          severity: warning
+          service: chat-backend
+        annotations:
+          summary: "Chat Backend Health is DEGRADED"
+          description: "El estado de salud global está DEGRADADO."
+
+      # === EVENT LOOP (Latencia de Node.js) ===
+      - alert: HighEventLoopLag
+        expr: backend_event_loop_lag_ms > 100
+        for: 1m
+        labels:
+          severity: warning
+          service: chat-backend
+        annotations:
+          summary: "High Event Loop Lag (> 100ms)"
+          description: "El Event Loop tiene un retraso de {{ $value }}ms. El servidor puede estar bloqueado."
+
+      - alert: CriticalEventLoopLag
+        expr: backend_event_loop_lag_ms > 200
+        for: 30s
+        labels:
+          severity: critical
+          service: chat-backend
+        annotations:
+          summary: "Critical Event Loop Lag (> 200ms)"
+          description: "El Event Loop está severamente bloqueado ({{ $value }}ms)."
+
+      # === MEMORIA ===
+      - alert: HighMemoryUsage
+        expr: backend_heap_used_percent > 85
+        for: 5m
+        labels:
+          severity: warning
+          service: chat-backend
+        annotations:
+          summary: "High Memory Usage (> 85%)"
+          description: "El uso de Heap está al {{ $value }}%."
+
+      # === CPU ===
+      - alert: HighCpuLoad
+        expr: backend_cpu_normalized_load > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          service: chat-backend
+        annotations:
+          summary: "High CPU Load (> 80%)"
+          description: "La carga de CPU normalizada es {{ $value }}."
+
+      # === ENDPOINTS / DEPENDENCIAS ===
+      - alert: ChatEndpointDown
+        expr: backend_endpoint_up == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: chat-backend
+        annotations:
+          summary: "Internal Endpoint {{ $labels.name }} is DOWN"
+          description: "El endpoint interno {{ $labels.name }} no responde correctamente."
+
+      - alert: SlowEndpointResponse
+        expr: backend_endpoint_response_ms > 1000
+        for: 1m
+        labels:
+          severity: warning
+          service: chat-backend
+        annotations:
+          summary: "Slow Endpoint {{ $labels.name }}"
+          description: "El endpoint {{ $labels.name }} está respondiendo lento ({{ $value }}ms)."
