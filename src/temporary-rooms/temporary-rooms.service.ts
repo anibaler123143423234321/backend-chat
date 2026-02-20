@@ -126,6 +126,46 @@ export class TemporaryRoomsService {
     });
   }
 
+  // 🔥 NUEVO: Listar TODAS las salas paginadas (para el modal de gestión)
+  async findAllPaginated(
+    page: number = 1,
+    limit: number = 10,
+    search?: string,
+  ): Promise<{ data: any[]; total: number; page: number; totalPages: number }> {
+    const queryBuilder = this.temporaryRoomRepository
+      .createQueryBuilder('room')
+      .where('room.isActive = :isActive', { isActive: true });
+
+    if (search && search.trim()) {
+      queryBuilder.andWhere(
+        '(room.name LIKE :search OR room.roomCode LIKE :search)',
+        { search: `%${search.trim()}%` },
+      );
+    }
+
+    queryBuilder.orderBy('room.createdAt', 'DESC');
+
+    const total = await queryBuilder.getCount();
+    const totalPages = Math.ceil(total / limit);
+    const skip = (page - 1) * limit;
+
+    const rooms = await queryBuilder.skip(skip).take(limit).getMany();
+
+    const data = rooms.map(room => ({
+      id: room.id,
+      name: room.name,
+      description: room.description,
+      roomCode: room.roomCode,
+      currentMembers: room.currentMembers,
+      members: room.members || [], // 🔥 AGREGADO: Para que el modal pueda mostrar quiénes están unidos
+      maxCapacity: room.maxCapacity,
+      isActive: room.isActive,
+      createdAt: room.createdAt,
+    }));
+
+    return { data, total, page, totalPages };
+  }
+
   async findUserRooms(
     username: string,
     page: number = 1,

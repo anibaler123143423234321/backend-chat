@@ -1700,7 +1700,8 @@ export class MessagesService {
   ): Promise<{ data: Message[]; total: number; hasMore: boolean; page: number; totalPages: number }> {
     // 🔥 CORREGIDO: Usar ID en lugar de sentAt para ordenamiento consistente
     // sentAt puede estar corrupto, así que usamos ID que es más confiable
-    const where: any = { threadId, isDeleted: false };
+    // 🔥 INCLUIR mensajes eliminados para mostrarlos como "Mensaje eliminado por..." en la UI
+    const where: any = { threadId };
     if (attachmentId) {
       where.replyToAttachmentId = attachmentId;
     }

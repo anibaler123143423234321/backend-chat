@@ -44,6 +44,22 @@ export class TemporaryRoomsController {
     );
   }
 
+  @Get('all')
+  @ApiOperation({ summary: 'Obtener todas las salas paginadas (Admin Modal)' })
+  @ApiQuery({ name: 'page', required: false })
+  @ApiQuery({ name: 'limit', required: false })
+  @ApiQuery({ name: 'search', required: false })
+  @ApiResponse({ status: 200, description: 'Lista de salas paginada' })
+  findAllPaginated(
+    @Query('page') page: string = '1',
+    @Query('limit') limit: string = '10',
+    @Query('search') search?: string,
+  ) {
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.max(1, Math.min(50, parseInt(limit) || 10));
+    return this.temporaryRoomsService.findAllPaginated(pageNum, limitNum, search);
+  }
+
   @Get()
   findAll() {
     return this.temporaryRoomsService.findAll();
