@@ -28,6 +28,7 @@ export class TemporaryConversationsController {
   @ApiQuery({ name: 'search', required: false })
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'limit', required: false })
+  @ApiQuery({ name: 'status', required: false, description: 'all | active | inactive' })
   @ApiResponse({ status: 200, description: 'Lista de conversaciones paginada' })
   findAll(
     @Query('username') username?: string,
@@ -35,6 +36,7 @@ export class TemporaryConversationsController {
     @Query('search') search?: string,
     @Query('page') page: string = '1',
     @Query('limit') limit: string = '20',
+    @Query('status') status?: string,
   ) {
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.max(1, parseInt(limit) || 20);
@@ -44,6 +46,7 @@ export class TemporaryConversationsController {
       search,
       pageNum,
       limitNum,
+      status,
     );
   }
 

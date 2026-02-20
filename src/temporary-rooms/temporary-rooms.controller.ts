@@ -49,15 +49,17 @@ export class TemporaryRoomsController {
   @ApiQuery({ name: 'page', required: false })
   @ApiQuery({ name: 'limit', required: false })
   @ApiQuery({ name: 'search', required: false })
+  @ApiQuery({ name: 'status', required: false, description: 'all | active | inactive' })
   @ApiResponse({ status: 200, description: 'Lista de salas paginada' })
   findAllPaginated(
     @Query('page') page: string = '1',
     @Query('limit') limit: string = '10',
     @Query('search') search?: string,
+    @Query('status') status?: string,
   ) {
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.max(1, Math.min(50, parseInt(limit) || 10));
-    return this.temporaryRoomsService.findAllPaginated(pageNum, limitNum, search);
+    return this.temporaryRoomsService.findAllPaginated(pageNum, limitNum, search, status);
   }
 
   @Get()

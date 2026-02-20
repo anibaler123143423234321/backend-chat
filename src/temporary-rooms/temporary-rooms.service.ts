@@ -131,10 +131,20 @@ export class TemporaryRoomsService {
     page: number = 1,
     limit: number = 10,
     search?: string,
+    status?: string,
   ): Promise<{ data: any[]; total: number; page: number; totalPages: number }> {
     const queryBuilder = this.temporaryRoomRepository
-      .createQueryBuilder('room')
-      .where('room.isActive = :isActive', { isActive: true });
+      .createQueryBuilder('room');
+
+    // Filter by status
+    if (status === 'inactive') {
+      queryBuilder.where('room.isActive = :isActive', { isActive: false });
+    } else if (status === 'all') {
+      // No filter — show everything
+    } else {
+      // Default: only active
+      queryBuilder.where('room.isActive = :isActive', { isActive: true });
+    }
 
     if (search && search.trim()) {
       queryBuilder.andWhere(

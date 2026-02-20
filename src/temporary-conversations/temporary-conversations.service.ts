@@ -49,14 +49,26 @@ export class TemporaryConversationsService {
     search?: string,
     page: number = 1,
     limit: number = 20,
+    status?: string,
   ): Promise<{
     data: any[];
     total: number;
     page: number;
     totalPages: number;
   }> {
+    // Build where condition based on status filter
+    const whereCondition: any = {};
+    if (status === 'inactive') {
+      whereCondition.isActive = false;
+    } else if (status === 'all') {
+      // No isActive filter — show everything
+    } else {
+      // Default: only active
+      whereCondition.isActive = true;
+    }
+
     const allConversations = await this.temporaryConversationRepository.find({
-      where: { isActive: true },
+      where: whereCondition,
       order: { createdAt: 'DESC' },
     });
 
