@@ -132,6 +132,7 @@ export class TemporaryRoomsService {
     limit: number = 10,
     search?: string,
     status?: string,
+    capacity?: string,
   ): Promise<{ data: any[]; total: number; page: number; totalPages: number }> {
     const queryBuilder = this.temporaryRoomRepository
       .createQueryBuilder('room');
@@ -151,6 +152,13 @@ export class TemporaryRoomsService {
         '(room.name LIKE :search OR room.roomCode LIKE :search)',
         { search: `%${search.trim()}%` },
       );
+    }
+
+    // Filter by capacity
+    if (capacity === 'available') {
+      queryBuilder.andWhere('room.currentMembers < room.maxCapacity');
+    } else if (capacity === 'full') {
+      queryBuilder.andWhere('room.currentMembers >= room.maxCapacity');
     }
 
     queryBuilder.orderBy('room.createdAt', 'DESC');

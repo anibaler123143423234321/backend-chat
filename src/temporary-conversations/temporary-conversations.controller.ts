@@ -34,6 +34,7 @@ export class TemporaryConversationsController {
     @Query('username') username?: string,
     @Query('role') role?: string,
     @Query('search') search?: string,
+    @Query('search2') search2?: string,
     @Query('page') page: string = '1',
     @Query('limit') limit: string = '20',
     @Query('status') status?: string,
@@ -44,6 +45,7 @@ export class TemporaryConversationsController {
       username,
       role,
       search,
+      search2,
       pageNum,
       limitNum,
       status,
@@ -113,7 +115,7 @@ export class TemporaryConversationsController {
   @Put(':id')
   update(
     @Param('id') id: string,
-    @Body() updateData: { name?: string; expiresAt?: Date },
+    @Body() updateData: { name?: string },
   ) {
     return this.temporaryConversationsService.update(+id, updateData);
   }

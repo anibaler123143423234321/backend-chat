@@ -2534,7 +2534,6 @@ export class SocketGateway
         client.emit('temporaryLinkCreated', {
             linkId,
             linkUrl,
-            expiresAt: this.temporaryLinks.get(linkId).expiresAt.toISOString(),
             linkType: data.linkType,
             participants: data.participants || [],
             roomName: data.roomName || null,
@@ -2549,7 +2548,7 @@ export class SocketGateway
         const { linkId, from } = data;
         const link = this.temporaryLinks.get(linkId);
 
-        if (link && link.isActive && link.expiresAt > getPeruDate()) {
+        if (link && link.isActive) {
             if (link.type === 'conversation') {
                 const groupName = `Conversaci�n Temporal ${linkId.substring(0, 8)}`;
                 const tempGroup = new Set<string>(
@@ -2560,7 +2559,6 @@ export class SocketGateway
 
                 client.emit('joinedTemporaryConversation', {
                     groupName,
-                    expiresAt: link.expiresAt.toISOString(),
                     participants: Array.from(tempGroup),
                 });
 
@@ -2568,7 +2566,6 @@ export class SocketGateway
             } else if (link.type === 'room') {
                 client.emit('joinedTemporaryRoom', {
                     roomName: link.roomName || 'Sala Temporal',
-                    expiresAt: link.expiresAt.toISOString(),
                 });
             }
         } else {
@@ -2807,12 +2804,10 @@ export class SocketGateway
         createdBy: string,
     ): string {
         const linkId = crypto.randomBytes(16).toString('hex');
-        const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutos
 
         this.temporaryLinks.set(linkId, {
             type,
             participants,
-            expiresAt,
             createdBy,
             isActive: true,
             createdAt: getPeruDate(),
@@ -2822,12 +2817,7 @@ export class SocketGateway
     }
 
     private cleanExpiredLinks() {
-        const now = getPeruDate();
-        for (const [linkId, link] of this.temporaryLinks.entries()) {
-            if (link.expiresAt < now) {
-                this.temporaryLinks.delete(linkId);
-            }
-        }
+        // Obsoleto, ya no hay expiración
     }
 
     private async broadcastUserList(assignedConversations?: any[]) {
@@ -3941,7 +3931,7 @@ export class SocketGateway
             // 🔥 NUEVO: Emitir assignedConversationUpdated si es un chat asignado
             if (!isGroup && savedMessage?.conversationId) {
                 const messageText = data.message || (data.mediaType ? `📎 ${data.mediaType}` : '📎 Archivo');
-                
+
                 const conversationUpdateData = {
                     conversationId: savedMessage.conversationId,
                     lastMessage: messageText,

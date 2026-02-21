@@ -28,13 +28,10 @@ export class TemporaryConversationsService {
     userId: number,
   ): Promise<TemporaryConversation> {
     const linkId = this.generateLinkId();
-    const expiresAt = getPeruDate();
-    expiresAt.setHours(expiresAt.getHours() + createDto.durationHours);
 
     const conversation = this.temporaryConversationRepository.create({
       ...createDto,
       linkId,
-      expiresAt,
       createdBy: userId,
       currentParticipants: 0,
       isActive: true,
@@ -47,6 +44,7 @@ export class TemporaryConversationsService {
     username?: string,
     role?: string,
     search?: string,
+    search2?: string,
     page: number = 1,
     limit: number = 20,
     status?: string,
@@ -92,17 +90,23 @@ export class TemporaryConversationsService {
       });
     }
 
-    // 🔥 BÚSQUEDA: Filtrar por nombre o participantes si hay término de búsqueda
-    if (search && search.trim()) {
-      const searchNormalized = this.normalizeUsername(search);
+    // 🔥 BÚSQUEDA: Filtrar por cada palabra clave ingresada (permite buscar "Usuario1 Usuario2")
+    const combinedSearch = `${search || ''} ${search2 || ''}`.trim();
+    if (combinedSearch) {
+      const searchTerms = this.normalizeUsername(combinedSearch).split(/\s+/).filter((word) => word.length > 0);
+
       conversationsToEnrich = conversationsToEnrich.filter((conv) => {
-        // Buscar en nombre de conversación
-        const nameMatch = this.normalizeUsername(conv.name || '').includes(searchNormalized);
-        // Buscar en participantes
-        const participantMatch = (conv.participants || []).some((p) =>
-          this.normalizeUsername(p).includes(searchNormalized),
+        const convNameNormalized = this.normalizeUsername(conv.name || '');
+        const participantsNormalized = (conv.participants || []).map((p) =>
+          this.normalizeUsername(p),
         );
-        return nameMatch || participantMatch;
+
+        // Para que la conversación pase el filtro, DEBE coincidir con TODOS los términos (búsqueda AND)
+        return searchTerms.every((term) => {
+          const nameMatch = convNameNormalized.includes(term);
+          const participantMatch = participantsNormalized.some((p) => p.includes(term));
+          return nameMatch || participantMatch;
+        });
       });
     }
 
@@ -634,10 +638,6 @@ export class TemporaryConversationsService {
       throw new NotFoundException('Enlace de conversación no válido');
     }
 
-    if (new Date() > conversation.expiresAt) {
-      throw new BadRequestException('La conversación ha expirado');
-    }
-
     return conversation;
   }
 
@@ -697,14 +697,10 @@ export class TemporaryConversationsService {
     }
 
     const linkId = this.generateLinkId();
-    const expiresAt = getPeruDate();
-    // Conversaciones asignadas por admin no expiran (o expiran en 1 año)
-    expiresAt.setFullYear(expiresAt.getFullYear() + 1);
 
     const conversation = this.temporaryConversationRepository.create({
       name,
       linkId,
-      expiresAt,
       createdBy: adminId,
       currentParticipants: 2,
       maxParticipants: 2,
@@ -721,16 +717,12 @@ export class TemporaryConversationsService {
 
   async update(
     id: number,
-    updateData: { name?: string; expiresAt?: Date },
+    updateData: { name?: string },
   ): Promise<TemporaryConversation> {
     const conversation = await this.findOne(id);
 
     if (updateData.name) {
       conversation.name = updateData.name;
-    }
-
-    if (updateData.expiresAt) {
-      conversation.expiresAt = new Date(updateData.expiresAt);
     }
 
     return await this.temporaryConversationRepository.save(conversation);
