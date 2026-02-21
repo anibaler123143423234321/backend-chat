@@ -96,10 +96,10 @@ export class TemporaryConversationsController {
   findMonitoringConversations(
     @Query('username') username?: string,
     @Query('page') page: string = '1',
-    @Query('limit') limit: string = '10',
+    @Query('limit') limit: string = '20',
   ) {
     const pageNum = Math.max(1, parseInt(page) || 1);
-    const limitNum = Math.max(1, Math.min(10, parseInt(limit) || 10)); // Máximo 10 por página
+    const limitNum = Math.max(1, Math.min(30, parseInt(limit) || 20)); // Máximo 30 por página
     return this.temporaryConversationsService.findMonitoringConversations(
       username,
       pageNum,
