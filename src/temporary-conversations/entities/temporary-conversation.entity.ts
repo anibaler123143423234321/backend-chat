@@ -27,8 +27,6 @@ export class TemporaryConversation {
   @Column({ length: 50, unique: true })
   linkId: string;
 
-
-
   @Column({ type: 'int', default: 0 })
   maxParticipants: number;
 

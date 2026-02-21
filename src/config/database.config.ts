@@ -17,7 +17,7 @@ export const databaseConfig: TypeOrmModuleOptions = {
   timezone: 'Z',
   logging: false,
 
-  // 🔥 Retry automático si MySQL reinicia o cierra conexión
+  //  Retry automático si MySQL reinicia o cierra conexión
   retryAttempts: 5,
   retryDelay: 3000,
 
@@ -31,7 +31,7 @@ export const databaseConfig: TypeOrmModuleOptions = {
     connectTimeout: 10000,
     acquireTimeout: 10000,
 
-    // 🔥 CLAVE: Evita ECONNRESET manteniendo conexiones TCP vivas
+    //  CLAVE: Evita ECONNRESET manteniendo conexiones TCP vivas
     enableKeepAlive: true,
     keepAliveInitialDelay: 30000, // Ping cada 30s
   },

@@ -12,10 +12,8 @@ async function bootstrap() {
   // Configurar CORS
   app.enableCors({
     origin: [
-      'http://localhost:5173',
-      'http://localhost:5174',
+      'http://localhost:3005',
       'http://localhost:3000',
-      'http://localhost:4200',
       'https://apisozarusac.com',
       'https://apisozarusac.com/BackendJava',
       'https://apisozarusac.com/BackendJavaMidas',
