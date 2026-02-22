@@ -15,8 +15,8 @@ import { RoomFavoritesModule } from './room-favorites/room-favorites.module';
 import { ConversationFavoritesModule } from './conversation-favorites/conversation-favorites.module';
 import { PollsModule } from './polls/polls.module';
 import { RecentSearchesModule } from './recent-searches/recent-searches.module';
-import { databaseConfig } from './config/database.config';
-import { DatabaseErrorInterceptor } from './common/interceptors/database-error.interceptor';
+import { databaseConfig } from './01.-Infraestructura/config/database.config';
+import { DatabaseErrorInterceptor } from './01.-Infraestructura/interceptors/database-error.interceptor';
 
 @Module({
   imports: [
