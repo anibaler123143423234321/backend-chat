@@ -13,7 +13,7 @@ async function bootstrap() {
   app.enableCors({
     origin: [
       'http://localhost:3005',
-      'http://localhost:3000',
+      'http://localhost:5173',
       'https://apisozarusac.com',
       'https://apisozarusac.com/BackendJava',
       'https://apisozarusac.com/BackendJavaMidas',
