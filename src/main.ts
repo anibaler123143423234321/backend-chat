@@ -4,45 +4,21 @@ import { ValidationPipe } from '@nestjs/common';
 import { RedisIoAdapter } from './01.-Infraestructura/redis/redis-io.adapter';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import * as basicAuth from 'express-basic-auth';
+import { corsConfig } from './01.-Infraestructura/security/cors.config';
+import { swaggerConfig, swaggerOptions } from './01.-Infraestructura/config/swagger.config';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.useGlobalPipes(new ValidationPipe({ forbidUnknownValues: false }));
 
   // Configurar CORS
-  app.enableCors({
-    origin: [
-      'http://localhost:3005',
-      'http://localhost:5173',
-      'https://apisozarusac.com',
-      'https://apisozarusac.com/BackendJava',
-      'https://apisozarusac.com/BackendJavaMidas',
-      'https://apisozarusac.com/BackendChat',
-      'https://chat.mass34.com',
-    ],
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
-    credentials: true,
-  });
+  app.enableCors(corsConfig);
 
   // Configurar prefijo global para todas las rutas
   app.setGlobalPrefix('api');
 
   // Configurar Swagger
-  const config = new DocumentBuilder()
-    .setTitle('Backend Chat API')
-    .setDescription('Documentación de las APIs del sistema de Chat')
-    .setVersion('1.0')
-    .addTag('Mensajería', 'Envío, recepción y gestión de mensajes')
-    .addTag('Salas y Grupos', 'Gestión de salas temporales y grupos de chat')
-    .addTag('Favoritos (Salas)', 'Gestión de salas marcadas como favoritas')
-    .addTag('Chats Asignados', 'Conversaciones directas entre usuarios asignadas')
-    .addTag('Configuración', 'Ajustes globales del sistema de chat')
-    .addTag('Favoritos (Chats)', 'Gestión de conversaciones favoritas')
-    .addTag('Búsquedas Recientes', 'Historial de términos buscados por el usuario')
-    .addBearerAuth()
-    .build();
-  const document = SwaggerModule.createDocument(app, config);
+  const document = SwaggerModule.createDocument(app, swaggerConfig);
 
   // Protección de Swagger con Basic Auth
   app.use(
@@ -55,12 +31,7 @@ async function bootstrap() {
     }),
   );
 
-  SwaggerModule.setup('api/docs', app, document, {
-    swaggerOptions: {
-      persistAuthorization: true,
-      docExpansion: 'none',
-    },
-  });
+  SwaggerModule.setup('api/docs', app, document, swaggerOptions);
 
   // Configurar Redis Adapter para Socket.IO
   const redisIoAdapter = new RedisIoAdapter(app);
