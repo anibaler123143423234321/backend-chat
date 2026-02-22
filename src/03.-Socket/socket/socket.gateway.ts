@@ -2059,40 +2059,8 @@ export class SocketGateway
                         attachments: data.attachments, // 🔥 NUEVO: Enviar adjuntos en tiempo real
                     });
 
-                    // NUEVO: Emitir evento de actualizaci�n de conversaci�n asignada
-                    // Esto permite que ambos participantes reordenen sus listas autom�ticamente
-                    if (data.conversationId) {
-                        // console.log(`?? Emitiendo assignedConversationUpdated para conversaci�n ${data.conversationId}`);
-
-                        // Determinar el texto del mensaje para mostrar
-                        let messageText = message;
-                        if (!messageText && mediaType) {
-                            if (mediaType === 'image') messageText = '?? Imagen';
-                            else if (mediaType === 'video') messageText = '?? Video';
-                            else if (mediaType === 'audio') messageText = '?? Audio';
-                            else if (mediaType === 'document') messageText = '?? Documento';
-                            else messageText = '?? Archivo';
-                        } else if (!messageText && fileName) {
-                            messageText = '?? Archivo';
-                        }
-
-                        const conversationUpdateData = {
-                            conversationId: data.conversationId,
-                            lastMessage: messageText,
-                            lastMessageTime: msgContext.savedMessage?.sentAt || new Date().toISOString(),
-                            lastMessageFrom: from,
-                            lastMessageMediaType: mediaType
-                        };
-
-                        // Emitir a ambos participantes (remitente y destinatario)
-                        // 🚀 CLUSTER FIX: Usar server.to() para que pase por Redis Adapter
-                        const participants = [from, recipientUsername];
-                        participants.forEach(participantName => {
-                            // Usar server.to() en lugar de socket.emit() directo para cluster
-                            this.server.to(participantName).emit('assignedConversationUpdated', conversationUpdateData);
-                            // console.log(`✅ Evento assignedConversationUpdated emitido a ${participantName} vía Redis`);
-                        });
-                    }
+                    // assignedConversationUpdated se emite en saveMessageInBackground()
+                    // para evitar duplicación y para incluir el messageId real de BD
 
                 }
             } catch (broadcastError) {
