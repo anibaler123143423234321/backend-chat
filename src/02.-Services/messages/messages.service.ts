@@ -1035,28 +1035,27 @@ export class MessagesService {
         const batchIds = messageIds.slice(i, i + BATCH_SIZE);
         const batchMessages = messagesToUpdate.slice(i, i + BATCH_SIZE);
 
-        // Actualizar cada mensaje del lote con su nuevo readBy
-        const updatePromises = batchMessages.map(async (msg) => {
-          const newReadBy = [...(msg.readBy || []), normalizedUsername];
-          await this.messageRepository
-            .createQueryBuilder()
-            .update()
-            .set({
-              readBy: () => `JSON_ARRAY_APPEND(COALESCE(readBy, JSON_ARRAY()), '$', '${normalizedUsername}')`,
-              isRead: true,
-              readAt: readAt
-            })
-            .where('id = :id', { id: msg.id })
-            .execute();
+        // 🚀 OPTIMIZADO: Una sola query SQL para actualizar todo el lote
+        await this.messageRepository
+          .createQueryBuilder()
+          .update()
+          .set({
+            readBy: () => `JSON_ARRAY_APPEND(COALESCE(readBy, JSON_ARRAY()), '$', '${normalizedUsername}')`,
+            isRead: true,
+            readAt: readAt
+          })
+          .where('id IN (:...ids)', { ids: batchIds })
+          .execute();
 
+        // Actualizar objetos en memoria para devolver
+        batchMessages.forEach((msg) => {
           updatedMessages.push({
             id: msg.id,
-            readBy: newReadBy,
+            readBy: [...(msg.readBy || []), normalizedUsername],
             readAt: readAt,
           });
         });
 
-        await Promise.all(updatePromises);
         updatedCount += batchIds.length;
       }
 
@@ -1100,24 +1099,25 @@ export class MessagesService {
 
     for (let i = 0; i < messagesToUpdate.length; i += BATCH_SIZE) {
       const batch = messagesToUpdate.slice(i, i + BATCH_SIZE);
-      const updatePromises = batch.map(async (message) => {
-        await this.messageRepository
-          .createQueryBuilder()
-          .update()
-          .set({
-            readBy: () => `JSON_ARRAY_APPEND(COALESCE(readBy, JSON_ARRAY()), '$', '${normalizedUsername}')`,
-            isRead: true,
-            readAt: readAt
-          })
-          .where('id = :id', { id: message.id })
-          .execute();
+      const batchIds = batch.map((m) => m.id);
 
+      await this.messageRepository
+        .createQueryBuilder()
+        .update()
+        .set({
+          readBy: () => `JSON_ARRAY_APPEND(COALESCE(readBy, JSON_ARRAY()), '$', '${normalizedUsername}')`,
+          isRead: true,
+          readAt: readAt
+        })
+        .where('id IN (:...ids)', { ids: batchIds })
+        .execute();
+
+      batch.forEach((message) => {
         message.readBy = [...(message.readBy || []), normalizedUsername];
         message.isRead = true;
         message.readAt = readAt;
         updatedMessages.push(message);
       });
-      await Promise.all(updatePromises);
     }
 
     return updatedMessages;
@@ -1151,25 +1151,26 @@ export class MessagesService {
 
     for (let i = 0; i < messages.length; i += BATCH_SIZE) {
       const batch = messages.slice(i, i + BATCH_SIZE);
-      const updatePromises = batch.map(async (message) => {
-        const newReadBy = [...(message.readBy || []), normalizedTo];
-        await this.messageRepository
-          .createQueryBuilder()
-          .update()
-          .set({
-            readBy: () => `JSON_ARRAY_APPEND(COALESCE(readBy, JSON_ARRAY()), '$', '${normalizedTo}')`,
-            isRead: true,
-            readAt: readAt
-          })
-          .where('id = :id', { id: message.id })
-          .execute();
+      const batchIds = batch.map((m) => m.id);
 
+      await this.messageRepository
+        .createQueryBuilder()
+        .update()
+        .set({
+          readBy: () => `JSON_ARRAY_APPEND(COALESCE(readBy, JSON_ARRAY()), '$', '${normalizedTo}')`,
+          isRead: true,
+          readAt: readAt
+        })
+        .where('id IN (:...ids)', { ids: batchIds })
+        .execute();
+
+      batch.forEach((message) => {
+        const newReadBy = [...(message.readBy || []), normalizedTo];
         message.readBy = newReadBy;
         message.isRead = true;
         message.readAt = readAt;
         updatedMessages.push(message);
       });
-      await Promise.all(updatePromises);
     }
 
     return updatedMessages;

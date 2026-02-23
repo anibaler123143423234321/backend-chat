@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull } from 'typeorm';
 import { RoomFavorite } from 'src/02.-Services/room-favorites/entities/room-favorite.entity';
 import { Message } from 'src/02.-Services/messages/entities/message.entity';
+import { TemporaryRoom } from 'src/02.-Services/temporary-rooms/entities/temporary-room.entity';
 import { ConversationFavoritesService } from 'src/02.-Services/conversation-favorites/conversation-favorites.service';
 import { MessagesService } from 'src/02.-Services/messages/messages.service';
 
@@ -13,6 +14,8 @@ export class RoomFavoritesService {
     private roomFavoriteRepository: Repository<RoomFavorite>,
     @InjectRepository(Message)
     private messageRepository: Repository<Message>,
+    @InjectRepository(TemporaryRoom)
+    private temporaryRoomRepository: Repository<TemporaryRoom>,
     private conversationFavoritesService: ConversationFavoritesService,
     @Inject(forwardRef(() => MessagesService))
     private messagesService: MessagesService,
@@ -20,6 +23,15 @@ export class RoomFavoritesService {
 
   // Agregar sala a favoritos
   async addFavorite(username: string, roomCode: string, roomId: number): Promise<RoomFavorite> {
+    if (!roomId) {
+      const room = await this.temporaryRoomRepository.findOne({ where: { roomCode } });
+      if (room) {
+        roomId = room.id;
+      } else {
+        throw new Error('Sala temporal no encontrada para obtener el roomId');
+      }
+    }
+
     // Verificar si ya existe
     const existing = await this.roomFavoriteRepository.findOne({
       where: { username, roomCode },
