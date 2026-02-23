@@ -29,7 +29,6 @@ export const databaseConfig: TypeOrmModuleOptions = {
 
     // Timeouts
     connectTimeout: 10000,
-    acquireTimeout: 10000,
 
     //  CLAVE: Evita ECONNRESET manteniendo conexiones TCP vivas
     enableKeepAlive: true,
