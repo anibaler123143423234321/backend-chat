@@ -101,7 +101,7 @@ export class Message {
   time: string; // Formato HH:MM
 
   // Campos para responder mensajes
-  @Column({ type: 'int', nullable: true })
+  @Column({ type: 'int', nullable: true, default: null })
   replyToMessageId: number; // ID del mensaje al que se responde
 
   @Column({ type: 'varchar', length: 255, nullable: true })
@@ -113,11 +113,11 @@ export class Message {
   @Column({ type: 'varchar', length: 20, nullable: true })
   replyToSenderNumeroAgente: string; // Número de agente del remitente original
 
-  @Column({ type: 'int', nullable: true })
+  @Column({ type: 'int', nullable: true, default: null })
   replyToAttachmentId: number; // 🔥 NUEVO: ID del adjunto específico al que se responde
 
   // Campos para hilos de conversación
-  @Column({ type: 'int', nullable: true })
+  @Column({ type: 'int', nullable: true, default: null })
   threadId: number; // ID del mensaje principal del hilo (null si es mensaje principal)
 
   @Column({ type: 'int', default: 0 })
@@ -153,10 +153,10 @@ export class Message {
   @JoinColumn({ name: 'roomId' })
   room: TemporaryRoom;
 
-  @Column({ type: 'int', nullable: true })
+  @Column({ type: 'int', nullable: true, default: null })
   conversationId: number; // 🔥 NUEVO: ID de la conversación asignada (TemporaryConversation)
 
-  @Column({ type: 'int', nullable: true })
+  @Column({ type: 'int', nullable: true, default: null })
   roomId: number;
 
   // 🔥 Campo simple para indicar mensaje reenviado

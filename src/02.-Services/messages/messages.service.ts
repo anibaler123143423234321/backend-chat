@@ -102,6 +102,14 @@ export class MessagesService {
       ...restDto
     } = createMessageDto;
 
+    // 🔥 FIX: Validar IDs numéricos para evitar ER_TRUNCATED_WRONG_VALUE_FOR_FIELD
+    // Si vienen como strings no numéricos (ej: 'gallery-218309'), TypeORM fallará
+    const cleanConversationId = (conversationId && !isNaN(Number(conversationId))) ? Number(conversationId) : null;
+    const cleanThreadId = (threadId && !isNaN(Number(threadId))) ? Number(threadId) : null;
+    const cleanRoomId = (createMessageDto.roomId && !isNaN(Number(createMessageDto.roomId))) ? Number(createMessageDto.roomId) : null;
+    const cleanReplyToMessageId = (createMessageDto.replyToMessageId && !isNaN(Number(createMessageDto.replyToMessageId))) ? Number(createMessageDto.replyToMessageId) : null;
+    const cleanReplyToAttachmentId = (createMessageDto.replyToAttachmentId && !isNaN(Number(createMessageDto.replyToAttachmentId))) ? Number(createMessageDto.replyToAttachmentId) : null;
+
     // 🔥 CRÍTICO: SIEMPRE generar sentAt en el servidor con zona horaria de Perú
     // NO aceptar sentAt del frontend para evitar problemas de zona horaria y duplicados
     const peruDate = getPeruDate();
@@ -109,18 +117,23 @@ export class MessagesService {
     // Log eliminado para optimización
 
     // 🔥 NO incluir 'id' - dejar que la BD auto-genere
-    const message = this.messageRepository.create({
+    const messageData: any = {
       from,
       to,
       message: messageText,
       isGroup,
       roomCode,
-      threadId,
-      conversationId, // 🔥 CRÍTICO: Incluir conversationId explícitamente
+      threadId: cleanThreadId,
+      conversationId: cleanConversationId,
+      roomId: cleanRoomId,
+      replyToMessageId: cleanReplyToMessageId,
+      replyToAttachmentId: cleanReplyToAttachmentId,
       ...restDto,
       sentAt: peruDate, // 🔥 SIEMPRE usar getPeruDate() del servidor
       time: formatPeruTime(peruDate), // 🔥 Calcular time automáticamente
-    });
+    };
+
+    const message = this.messageRepository.create(messageData as any) as any as Message;
 
     const savedMessage = await this.messageRepository.save(message);
 
@@ -1000,20 +1013,21 @@ export class MessagesService {
     roomCode: string,
     username: string,
   ): Promise<{ updatedCount: number; updatedMessages: { id: number; readBy: string[]; readAt: Date }[] }> {
-    console.log(`🚨🚨🚨 markAllMessagesAsReadInRoom - room: ${roomCode}, user: ${username}, stack: ${new Error().stack?.split('\n').slice(1, 4).join(' | ')}`);
+    // console.log(`🚨 markAllMessagesAsReadInRoom - room: ${roomCode}, user: ${username}`);
     try {
+      if (!roomCode || !username) return { updatedCount: 0, updatedMessages: [] };
+
       const readAt = new Date();
       const normalizedUsername = this.normalizeForReadBy(username);
+      const usernameLower = username?.toLowerCase().trim();
 
-      // 🚀 OPTIMIZADO: Primero obtenemos solo los IDs de mensajes que necesitan actualización
-      // Esto es mucho más rápido que cargar todos los mensajes completos
+      // 🚀 OPTIMIZADO: Obtener IDs y readBy actual de una vez
       const messagesToUpdate = await this.messageRepository
         .createQueryBuilder('message')
         .select(['message.id', 'message.readBy'])
         .where('message.roomCode = :roomCode', { roomCode })
         .andWhere('message.isDeleted = :isDeleted', { isDeleted: false })
-        .andWhere('LOWER(TRIM(message.from)) != :username', { username: username?.toLowerCase().trim() })
-        // Mensajes que el usuario aún no ha leído
+        .andWhere('LOWER(TRIM(message.from)) != :usernameLower', { usernameLower })
         .andWhere(
           "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(message.readBy, :usernameJson))",
           { usernameJson: JSON.stringify(normalizedUsername) }
@@ -1025,17 +1039,17 @@ export class MessagesService {
       }
 
       const messageIds = messagesToUpdate.map(m => m.id);
-      const updatedMessages: { id: number; readBy: string[]; readAt: Date }[] = [];
 
-      // 🚀 OPTIMIZADO: Procesar en lotes de 100 para evitar bloqueos largos
-      const BATCH_SIZE = 100;
+      // 🚀 OPTIMIZADO: Usar una sola transacción para actualizar todo si el lote no es gigante
+      // Si hay más de 500 mensajes, lo dividimos en lotes un poco más grandes para reducir overhead de conexión
+      const BATCH_SIZE = 250;
+      const updatedMessages: { id: number; readBy: string[]; readAt: Date }[] = [];
       let updatedCount = 0;
 
       for (let i = 0; i < messageIds.length; i += BATCH_SIZE) {
         const batchIds = messageIds.slice(i, i + BATCH_SIZE);
-        const batchMessages = messagesToUpdate.slice(i, i + BATCH_SIZE);
+        const batchObjects = messagesToUpdate.slice(i, i + BATCH_SIZE);
 
-        // 🚀 OPTIMIZADO: Una sola query SQL para actualizar todo el lote
         await this.messageRepository
           .createQueryBuilder()
           .update()
@@ -1047,8 +1061,7 @@ export class MessagesService {
           .where('id IN (:...ids)', { ids: batchIds })
           .execute();
 
-        // Actualizar objetos en memoria para devolver
-        batchMessages.forEach((msg) => {
+        batchObjects.forEach((msg) => {
           updatedMessages.push({
             id: msg.id,
             readBy: [...(msg.readBy || []), normalizedUsername],
@@ -1065,6 +1078,7 @@ export class MessagesService {
         `❌ Error en markAllMessagesAsReadInRoom - Sala: ${roomCode}, Usuario: ${username}:`,
         error,
       );
+      // No lanzamos error para no romper el flujo, pero registramos
       return { updatedCount: 0, updatedMessages: [] };
     }
   }

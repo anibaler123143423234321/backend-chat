@@ -674,24 +674,30 @@ export class TemporaryConversationsService {
     name: string,
     adminId: number,
   ): Promise<TemporaryConversation> {
-    // ?? VALIDAR: Verificar si ya existe una conversaci�n activa entre estos usuarios
+    // 🔥 NORMALIZAR: Asegurar que la comparación sea consistente
+    const u1 = this.normalizeUsername(user1);
+    const u2 = this.normalizeUsername(user2);
+
+    // 🚀 VALIDAR: Verificar si ya existe una conversación entre estos usuarios (incluyendo INACTIVAS)
     const allAssignedConversations =
       await this.temporaryConversationRepository.find({
-        where: { isActive: true, isAssignedByAdmin: true },
+        where: { isAssignedByAdmin: true }, // Buscar en todas, activas o inactivas
       });
 
-    // Buscar si existe una conversaci�n con los mismos participantes
-    const existingConversation = allAssignedConversations.find((conv) => {
-      const participants = conv.participants || [];
-      // Verificar si ambos usuarios est�n en los participantes
-      return participants.includes(user1) && participants.includes(user2);
+    // Buscar si existe una conversación con los mismos participantes (normalizados)
+    let existingConversation = allAssignedConversations.find((conv) => {
+      const participants = (conv.participants || []).map(p => this.normalizeUsername(p));
+      return participants.includes(u1) && participants.includes(u2);
     });
 
     if (existingConversation) {
-      // Retornar la conversaci�n existente en lugar de crear una nueva
-      // console.log(
-      // `?? Conversaci�n duplicada detectada entre ${user1} y ${user2}. Retornando existente.`,
-      // );
+      // 🔥 Si ya existe pero está inactiva, REACTIVARLA en lugar de crear una nueva
+      if (!existingConversation.isActive) {
+        existingConversation.isActive = true;
+        // Opcional: Actualizar el nombre si cambió
+        if (name) existingConversation.name = name;
+        await this.temporaryConversationRepository.save(existingConversation);
+      }
       return existingConversation;
     }
 

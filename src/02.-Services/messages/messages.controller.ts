@@ -184,10 +184,16 @@ export class MessagesController {
     @Param('messageId') messageId: string,
     @Query('limit') limit: string = '30',
   ) {
+    const mid = parseInt(messageId);
+    const lim = parseInt(limit);
+
+    if (isNaN(mid)) throw new BadRequestException('messageId must be a valid number');
+    if (isNaN(lim)) throw new BadRequestException('limit must be a valid number');
+
     return await this.messagesService.findAroundMessage(
       roomCode,
-      parseInt(messageId),
-      parseInt(limit),
+      mid,
+      lim,
     );
   }
 
@@ -316,11 +322,17 @@ export class MessagesController {
     @Param('messageId') messageId: string,
     @Query('limit') limit: string = '30',
   ) {
+    const mid = parseInt(messageId);
+    const lim = parseInt(limit);
+
+    if (isNaN(mid)) throw new BadRequestException('messageId must be a valid number');
+    if (isNaN(lim)) throw new BadRequestException('limit must be a valid number');
+
     return await this.messagesService.findAroundMessageForUser(
       from,
       to,
-      parseInt(messageId),
-      parseInt(limit),
+      mid,
+      lim,
     );
   }
 
@@ -761,11 +773,12 @@ export class MessagesController {
   @ApiParam({ name: 'id', description: 'ID del mensaje' })
   @ApiResponse({ status: 200, description: 'Mensaje recuperado' })
   async findOne(@Param('id') id: string) {
-    // Validar que sea un número (para no interceptar rutas como 'recent' si estuvieran mal ordenadas)
-    if (isNaN(+id)) {
-      return null;
+    const numericId = +id;
+    // Validar que sea un número
+    if (isNaN(numericId)) {
+      throw new BadRequestException('ID must be a valid number');
     }
-    return this.messagesService.findOne(+id);
+    return this.messagesService.findOne(numericId);
   }
 
 }
