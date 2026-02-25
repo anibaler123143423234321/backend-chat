@@ -18,11 +18,16 @@ export class UsersService {
       password: '',
       nombre: userData.nombre || '',
       apellido: userData.apellido || '',
-      dni: userData.dni || '',
+      tipoTrabajo: userData.tipoTrabajo || '',
       email: userData.email || '',
       fechaCreacion: new Date(),
       estado: 'A',
       role: userData.role || 'ASESOR',
+      picture: userData.picture || '',
+      token: userData.token || '',
+      sede_id: userData.sede_id || 0,
+      sede: userData.sede || '',
+      numeroAgente: userData.numeroAgente || null,
     } as User;
   }
 }

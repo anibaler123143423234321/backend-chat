@@ -197,30 +197,27 @@ export class MessagesService {
   ): Promise<{ [key: string]: number }> {
     try {
       const result: { [key: string]: number } = {};
-      const normalizedReadBy = this.normalizeForReadBy(username);
+      const normalizedReadByDni = this.normalizeForReadBy(username);
       const usernameLower = username?.toLowerCase().trim();
 
-      // 🔍 DIAGNÓSTICO DETALLADO: Ver mensajes no leídos con su readBy
-      const diagDetailed = await this.messageRepository.query(
-        `SELECT m.id, m.roomCode, m.\`from\`, m.readBy, 
-                JSON_SEARCH(m.readBy, 'one', ?) as jsonSearchResult,
-                (m.readBy IS NULL OR JSON_LENGTH(m.readBy) = 0 OR JSON_SEARCH(m.readBy, 'one', ?) IS NULL) as isUnread
-         FROM messages m
-         WHERE m.isGroup = 1
-           AND m.roomCode = 'AD59B1D8'
-           AND m.isDeleted = 0
-           AND m.threadId IS NULL
-           AND LOWER(TRIM(m.\`from\`)) != ?
-         ORDER BY m.id DESC
-         LIMIT 10`,
-        [normalizedReadBy, normalizedReadBy, usernameLower]
-      );
-      console.log(`🔍🔍🔍 DETALLE mensajes AD59B1D8 para ${username} (normalizedReadBy="${normalizedReadBy}"):`);
-      for (const row of diagDetailed) {
-        console.log(`  msg ${row.id}: from="${row.from}", readBy=${JSON.stringify(row.readBy)}, jsonSearch=${row.jsonSearchResult}, isUnread=${row.isUnread}`);
+      // 🔥 FIX: Resolver nombre completo desde DNI para buscar en readBy histórico
+      const fullName = await this.resolveFullNameForReadBy(username);
+      const normalizedReadByFullName = this.normalizeForReadBy(fullName);
+      const fullNameLower = fullName?.toLowerCase().trim();
+
+      // 🔥 FIX: Crear un patrón de búsqueda "fuzzy" para nombres históricos incompletos
+      // ej. "MOISES FERNANDO MARIN TANTALEAN" -> "%MOISES%TANTALEAN%"
+      let fuzzyFullName = `%${fullName}%`;
+      if (fullName) {
+        const parts = fullName.trim().split(/\s+/);
+        if (parts.length > 1) {
+          fuzzyFullName = `%${parts[0]}%${parts[parts.length - 1]}%`;
+        }
       }
 
       // 1. Conteos para TODAS las salas - raw SQL
+      // 🔥 FIX: Excluir mensajes propios verificando TANTO DNI como nombre completo
+      // 🔥 FIX: Verificar readBy buscando AMBOS formatos (DNI y nombre completo)
       const roomUnreadCounts = await this.messageRepository.query(
         `SELECT m.roomCode AS roomCode, COUNT(*) AS unreadCount
          FROM messages m
@@ -229,17 +226,24 @@ export class MessagesService {
            AND m.isDeleted = 0
            AND m.threadId IS NULL
            AND LOWER(TRIM(m.\`from\`)) != ?
+           AND LOWER(TRIM(m.\`from\`)) != ?
            AND m.roomCode IN (
              SELECT tr.roomCode FROM temporary_rooms tr
              WHERE tr.isActive = 1
                AND (tr.members LIKE ? OR tr.connectedMembers LIKE ? OR tr.assignedMembers LIKE ?)
            )
-           AND (m.readBy IS NULL OR JSON_LENGTH(m.readBy) = 0 OR JSON_SEARCH(m.readBy, 'one', ?) IS NULL)
+           AND (
+             m.readBy IS NULL
+             OR JSON_LENGTH(m.readBy) = 0
+             OR (
+               JSON_SEARCH(m.readBy, 'one', ?) IS NULL
+               AND JSON_SEARCH(m.readBy, 'one', ?) IS NULL
+               AND JSON_SEARCH(m.readBy, 'one', ?) IS NULL
+             )
+           )
          GROUP BY m.roomCode`,
-        [usernameLower, `%${username}%`, `%${username}%`, `%${username}%`, normalizedReadBy]
+        [usernameLower, fullNameLower, `%${username}%`, `%${username}%`, `%${username}%`, normalizedReadByDni, normalizedReadByFullName, fuzzyFullName]
       );
-
-      console.log(`🔍🔍🔍 RAW roomUnreadCounts para ${username}:`, JSON.stringify(roomUnreadCounts));
 
       for (const row of roomUnreadCounts) {
         const count = parseInt(row.unreadCount, 10);
@@ -249,6 +253,7 @@ export class MessagesService {
       }
 
       // 2. Conteos para CONVERSACIONES ASIGNADAS - raw SQL
+      // 🔥 FIX: Misma lógica dual para conversaciones directas
       const convUnreadCounts = await this.messageRepository.query(
         `SELECT m.conversationId AS conversationId, COUNT(*) AS unreadCount
          FROM messages m
@@ -256,14 +261,15 @@ export class MessagesService {
            AND m.threadId IS NULL
            AND m.isGroup = 0
            AND LOWER(TRIM(m.\`from\`)) != ?
+           AND LOWER(TRIM(m.\`from\`)) != ?
            AND m.conversationId IN (
              SELECT tc.id FROM temporary_conversations tc
              WHERE tc.isActive = 1
                AND tc.participants LIKE ?
            )
-           AND (m.readBy IS NULL OR JSON_LENGTH(m.readBy) = 0 OR JSON_SEARCH(m.readBy, 'one', ?) IS NULL)
+           AND m.isRead = 0
          GROUP BY m.conversationId`,
-        [usernameLower, `%${username}%`, normalizedReadBy]
+        [usernameLower, fullNameLower, `%${username}%`]
       );
 
       for (const row of convUnreadCounts) {
@@ -978,27 +984,31 @@ export class MessagesService {
     messageId: number,
     username: string,
   ): Promise<Message | null> {
-    if (username?.toUpperCase().includes('KAREN')) {
-      console.log(`🚨🚨🚨 markAsRead KAREN - msgId: ${messageId}, stack: ${new Error().stack?.split('\n').slice(1, 4).join(' | ')}`);
-    }
     const message = await this.messageRepository.findOne({
       where: { id: messageId },
     });
 
-    if (message && message.from !== username) {
+    // 🔥 FIX: Resolver nombre completo desde DNI para compatibilidad con readBy histórico
+    const fullName = await this.resolveFullNameForReadBy(username);
+    const fromLower = message?.from?.toLowerCase().trim();
+    const usernameLower = username?.toLowerCase().trim();
+    const fullNameLower = fullName?.toLowerCase().trim();
+
+    if (message && fromLower !== usernameLower && fromLower !== fullNameLower) {
       // Solo marcar como leído si el usuario NO es el remitente
       if (!message.readBy) {
         message.readBy = [];
       }
 
-      // 🔥 Normalizar para verificar si ya leyó
-      const alreadyRead = message.readBy.some(
-        (u) => u.toLowerCase().trim() === username.toLowerCase().trim(),
-      );
+      // 🔥 FIX: Verificar si ya leyó comparando TANTO DNI como nombre completo
+      const alreadyRead = message.readBy.some((u) => {
+        const rLower = u?.toLowerCase().trim();
+        return rLower === usernameLower || rLower === fullNameLower;
+      });
 
       if (!alreadyRead) {
-        // 🚀 OPTIMIZADO: Guardar normalizado para evitar LOWER() en queries
-        message.readBy.push(this.normalizeForReadBy(username));
+        // 🔥 FIX: Guardar NOMBRE COMPLETO (no DNI) para mantener compatibilidad con readBy existente
+        message.readBy.push(this.normalizeForReadBy(fullName));
         message.isRead = true;
         message.readAt = new Date();
         await this.messageRepository.save(message);
@@ -1018,19 +1028,23 @@ export class MessagesService {
       if (!roomCode || !username) return { updatedCount: 0, updatedMessages: [] };
 
       const readAt = new Date();
-      const normalizedUsername = this.normalizeForReadBy(username);
+      // 🔥 FIX: Resolver nombre completo desde DNI
+      const fullName = await this.resolveFullNameForReadBy(username);
+      const normalizedFullName = this.normalizeForReadBy(fullName);
       const usernameLower = username?.toLowerCase().trim();
+      const fullNameLower = fullName?.toLowerCase().trim();
 
       // 🚀 OPTIMIZADO: Obtener IDs y readBy actual de una vez
+      // 🔥 FIX: Excluir mensajes del usuario verificando TANTO DNI como nombre completo
       const messagesToUpdate = await this.messageRepository
         .createQueryBuilder('message')
         .select(['message.id', 'message.readBy'])
         .where('message.roomCode = :roomCode', { roomCode })
         .andWhere('message.isDeleted = :isDeleted', { isDeleted: false })
-        .andWhere('LOWER(TRIM(message.from)) != :usernameLower', { usernameLower })
+        .andWhere('LOWER(TRIM(message.from)) != :usernameLower AND LOWER(TRIM(message.from)) != :fullNameLower', { usernameLower, fullNameLower })
         .andWhere(
-          "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(message.readBy, :usernameJson))",
-          { usernameJson: JSON.stringify(normalizedUsername) }
+          "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR (NOT JSON_CONTAINS(message.readBy, :usernameJson) AND NOT JSON_CONTAINS(message.readBy, :fullNameJson)))",
+          { usernameJson: JSON.stringify(this.normalizeForReadBy(username)), fullNameJson: JSON.stringify(normalizedFullName) }
         )
         .getMany();
 
@@ -1040,8 +1054,6 @@ export class MessagesService {
 
       const messageIds = messagesToUpdate.map(m => m.id);
 
-      // 🚀 OPTIMIZADO: Usar una sola transacción para actualizar todo si el lote no es gigante
-      // Si hay más de 500 mensajes, lo dividimos en lotes un poco más grandes para reducir overhead de conexión
       const BATCH_SIZE = 250;
       const updatedMessages: { id: number; readBy: string[]; readAt: Date }[] = [];
       let updatedCount = 0;
@@ -1050,11 +1062,12 @@ export class MessagesService {
         const batchIds = messageIds.slice(i, i + BATCH_SIZE);
         const batchObjects = messagesToUpdate.slice(i, i + BATCH_SIZE);
 
+        // 🔥 FIX: Guardar NOMBRE COMPLETO en readBy (no DNI)
         await this.messageRepository
           .createQueryBuilder()
           .update()
           .set({
-            readBy: () => `JSON_ARRAY_APPEND(COALESCE(readBy, JSON_ARRAY()), '$', '${normalizedUsername}')`,
+            readBy: () => `JSON_ARRAY_APPEND(COALESCE(readBy, JSON_ARRAY()), '$', '${normalizedFullName}')`,
             isRead: true,
             readAt: readAt
           })
@@ -1064,7 +1077,7 @@ export class MessagesService {
         batchObjects.forEach((msg) => {
           updatedMessages.push({
             id: msg.id,
-            readBy: [...(msg.readBy || []), normalizedUsername],
+            readBy: [...(msg.readBy || []), normalizedFullName],
             readAt: readAt,
           });
         });
@@ -1092,16 +1105,20 @@ export class MessagesService {
     if (messageIds.length === 0) return [];
 
     const readAt = new Date();
-    const normalizedUsername = this.normalizeForReadBy(username);
+    // 🔥 FIX: Resolver nombre completo desde DNI
+    const fullName = await this.resolveFullNameForReadBy(username);
+    const normalizedFullName = this.normalizeForReadBy(fullName);
+    const fullNameLower = fullName?.toLowerCase().trim();
 
-    // 🚀 Obtener solo los mensajes que necesitan actualización en una sola query
+    // 🚀 Obtener solo los mensajes que necesitan actualización
+    // 🔥 FIX: Verificar TANTO DNI como nombre completo
     const messagesToUpdate = await this.messageRepository
       .createQueryBuilder('message')
       .where('message.id IN (:...ids)', { ids: messageIds })
-      .andWhere('message.from != :username', { username })
+      .andWhere('LOWER(TRIM(message.from)) != :usernameLower AND LOWER(TRIM(message.from)) != :fullNameLower', { usernameLower: username?.toLowerCase().trim(), fullNameLower })
       .andWhere(
-        "(message.readBy IS NULL OR NOT JSON_CONTAINS(message.readBy, :usernameJson))",
-        { usernameJson: JSON.stringify(normalizedUsername) }
+        "(message.readBy IS NULL OR (NOT JSON_CONTAINS(message.readBy, :usernameJson) AND NOT JSON_CONTAINS(message.readBy, :fullNameJson)))",
+        { usernameJson: JSON.stringify(this.normalizeForReadBy(username)), fullNameJson: JSON.stringify(normalizedFullName) }
       )
       .getMany();
 
@@ -1115,11 +1132,12 @@ export class MessagesService {
       const batch = messagesToUpdate.slice(i, i + BATCH_SIZE);
       const batchIds = batch.map((m) => m.id);
 
+      // 🔥 FIX: Guardar NOMBRE COMPLETO en readBy (no DNI)
       await this.messageRepository
         .createQueryBuilder()
         .update()
         .set({
-          readBy: () => `JSON_ARRAY_APPEND(COALESCE(readBy, JSON_ARRAY()), '$', '${normalizedUsername}')`,
+          readBy: () => `JSON_ARRAY_APPEND(COALESCE(readBy, JSON_ARRAY()), '$', '${normalizedFullName}')`,
           isRead: true,
           readAt: readAt
         })
@@ -1127,7 +1145,7 @@ export class MessagesService {
         .execute();
 
       batch.forEach((message) => {
-        message.readBy = [...(message.readBy || []), normalizedUsername];
+        message.readBy = [...(message.readBy || []), normalizedFullName];
         message.isRead = true;
         message.readAt = readAt;
         updatedMessages.push(message);
@@ -1140,18 +1158,28 @@ export class MessagesService {
   // 🚀 OPTIMIZADO: Marcar todos los mensajes de una conversación como leídos
   async markConversationAsRead(from: string, to: string): Promise<Message[]> {
     const readAt = new Date();
-    const normalizedTo = this.normalizeForReadBy(to);
+    // 🔥 FIX: Resolver nombres completos desde DNIs para ambos participantes
+    const fullNameFrom = await this.resolveFullNameForReadBy(from);
+    const fullNameTo = await this.resolveFullNameForReadBy(to);
+    const normalizedFullNameTo = this.normalizeForReadBy(fullNameTo);
+
+    // 🔥 FIX: Usar LOWER y verificar TANTO DNI como nombre completo para from/to
+    const fromLower = from?.toLowerCase().trim();
+    const fullNameFromLower = fullNameFrom?.toLowerCase().trim();
+    const toLower = to?.toLowerCase().trim();
+    const fullNameToLower = fullNameTo?.toLowerCase().trim();
 
     // 🚀 Obtener solo los mensajes que necesitan actualización
+    // 🔥 FIX: Buscar mensajes donde from/to coincidan con DNI O nombre completo
     const messages = await this.messageRepository
       .createQueryBuilder('message')
-      .where('message.from = :from', { from })
-      .andWhere('message.to = :to', { to })
+      .where('(LOWER(TRIM(message.from)) = :fromLower OR LOWER(TRIM(message.from)) = :fullNameFromLower)', { fromLower, fullNameFromLower })
+      .andWhere('(LOWER(TRIM(message.to)) = :toLower OR LOWER(TRIM(message.to)) = :fullNameToLower)', { toLower, fullNameToLower })
       .andWhere('message.isRead = :isRead', { isRead: false })
       .andWhere('message.isDeleted = :isDeleted', { isDeleted: false })
       .andWhere(
-        "(message.readBy IS NULL OR NOT JSON_CONTAINS(message.readBy, :toJson))",
-        { toJson: JSON.stringify(normalizedTo) }
+        "(message.readBy IS NULL OR (NOT JSON_CONTAINS(message.readBy, :toJson) AND NOT JSON_CONTAINS(message.readBy, :fullNameJson)))",
+        { toJson: JSON.stringify(this.normalizeForReadBy(to)), fullNameJson: JSON.stringify(normalizedFullNameTo) }
       )
       .getMany();
 
@@ -1167,11 +1195,12 @@ export class MessagesService {
       const batch = messages.slice(i, i + BATCH_SIZE);
       const batchIds = batch.map((m) => m.id);
 
+      // 🔥 FIX: Guardar NOMBRE COMPLETO en readBy
       await this.messageRepository
         .createQueryBuilder()
         .update()
         .set({
-          readBy: () => `JSON_ARRAY_APPEND(COALESCE(readBy, JSON_ARRAY()), '$', '${normalizedTo}')`,
+          readBy: () => `JSON_ARRAY_APPEND(COALESCE(readBy, JSON_ARRAY()), '$', '${normalizedFullNameTo}')`,
           isRead: true,
           readAt: readAt
         })
@@ -1179,7 +1208,7 @@ export class MessagesService {
         .execute();
 
       batch.forEach((message) => {
-        const newReadBy = [...(message.readBy || []), normalizedTo];
+        const newReadBy = [...(message.readBy || []), normalizedFullNameTo];
         message.readBy = newReadBy;
         message.isRead = true;
         message.readAt = readAt;
@@ -1491,10 +1520,18 @@ export class MessagesService {
         // });
       }
 
+      // 🔥 FIX: Obtener el nombre completo del usuario para la comparación
+      // Ya que readBy y from en DB mantienen el nombre completo, pero el API recibe el DNI
+      const user = await this.userRepository.findOne({ where: { username } });
+      const fullName = user?.nombre && user?.apellido ? `${user.nombre} ${user.apellido}` : username;
+      const usernameLower = username?.toLowerCase().trim();
+      const fullNameLower = fullName?.toLowerCase().trim();
+
       // Contar mensajes que NO han sido leídos por el usuario
       const unreadCount = messages.filter((msg) => {
-        // No contar mensajes propios (comparación case-insensitive)
-        if (msg.from?.toLowerCase().trim() === username?.toLowerCase().trim()) {
+        // No contar mensajes propios (comparación case-insensitive, tanto por DNI como por nombre)
+        const fromLower = msg.from?.toLowerCase().trim();
+        if (fromLower === usernameLower || fromLower === fullNameLower) {
           return false;
         }
 
@@ -1503,11 +1540,11 @@ export class MessagesService {
           return true;
         }
 
-        // Verificar si el usuario está en la lista de lectores (case-insensitive)
-        const isReadByUser = msg.readBy.some(
-          (reader) =>
-            reader?.toLowerCase().trim() === username?.toLowerCase().trim(),
-        );
+        // Verificar si el usuario está en la lista de lectores (buscando por DNI o por nombre completo)
+        const isReadByUser = msg.readBy.some((reader) => {
+          const rLower = reader?.toLowerCase().trim();
+          return rLower === usernameLower || rLower === fullNameLower;
+        });
 
         if (!isReadByUser) {
           // console.log(
@@ -2192,6 +2229,23 @@ export class MessagesService {
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '') || ''
     );
+  }
+
+  // 🔥 FIX: Resolver DNI → Nombre Completo para readBy
+  // readBy históricamente guarda nombres completos (UPPERCASE).
+  // Cuando el username es un DNI, buscamos el nombre completo en la BD.
+  // Si no se encuentra, fallback al username original.
+  private async resolveFullNameForReadBy(username: string): Promise<string> {
+    if (!username) return username;
+    try {
+      const user = await this.userRepository.findOne({ where: { username } });
+      if (user?.nombre && user?.apellido) {
+        return `${user.nombre} ${user.apellido}`;
+      }
+    } catch (error) {
+      console.error(`⚠️ resolveFullNameForReadBy error for ${username}:`, error);
+    }
+    return username; // Fallback: usar el username tal cual
   }
 
   // 🔥 NUEVO: Búsqueda global de mensajes (tipo WhatsApp) con paginación

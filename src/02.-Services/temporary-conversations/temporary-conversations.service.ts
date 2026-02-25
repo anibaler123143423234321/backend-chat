@@ -393,26 +393,40 @@ export class TemporaryConversationsService {
             console.error(`Error al contar unread en conv ${conv.id}:`, error);
           }
 
-          // 🔥 Obtener información del otro participante (solo imagen)
+          // 🔥 Obtener información del otro participante (imagen y nombre completo)
           let otherParticipantPicture = null;
+          let otherParticipantFullName = null;
+          let fallbackName = conv.name;
 
           if (participants.length > 0 && username) {
             const others = participants.filter((p) => this.normalizeUsername(p) !== usernameNormalized);
             if (others.length > 0) {
+              const otherId = others[0];
+
+              // Si el ID del otro no es un número (DNI), significa que es un nombre antiguo hardcodeado.
+              // Usamos ese nombre antiguo como fallback en lugar de `conv.name` (que a veces tiene el nombre del usuario actual).
+              const isDniOrEmail = /^\d+$/.test(otherId) || otherId.includes('@');
+              if (!isDniOrEmail && otherId) {
+                fallbackName = otherId; // Ej: "JOSÉ TORRES CHIRINOS"
+              }
+
               const otherUser = await this.userRepository.findOne({
-                where: { username: others[0] },
-                select: ['picture'],
+                where: { username: otherId },
+                select: ['picture', 'nombre', 'apellido'],
               });
 
               if (otherUser) {
                 otherParticipantPicture = otherUser.picture;
+                if (otherUser.nombre && otherUser.apellido) {
+                  otherParticipantFullName = `${otherUser.nombre} ${otherUser.apellido}`;
+                }
               }
             }
           }
 
           return {
             id: conv.id,
-            name: conv.name,
+            name: otherParticipantFullName || fallbackName, // 🔥 Mostrar el nombre real del contacto, fallback inteligente
             linkId: conv.linkId,
             participants: conv.participants,
             assignedUsers: conv.assignedUsers,

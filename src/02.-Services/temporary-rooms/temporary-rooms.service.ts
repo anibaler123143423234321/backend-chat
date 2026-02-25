@@ -738,11 +738,14 @@ export class TemporaryRoomsService {
 
     // Mapear resultados
     const allRooms = entities.map((room, index) => {
-      // ?? FILTRADO POR ROL EN MEMORIA
+      // 🔥 FILTRADO POR ROL EN MEMORIA (Revisar DNI y Nombre Completo)
       if (['ADMIN', 'JEFEPISO'].includes(role)) {
         const userFullName = displayName || '';
+        const userDni = username || '';
         const members = room.members || [];
-        if (!members.includes(userFullName)) {
+
+        // El arreglo members ahora contiene DNIs. Verificamos tanto DNI como nombre por seguridad.
+        if (!members.includes(userDni) && (userFullName === '' || !members.includes(userFullName))) {
           return null; // Filtrar si no es miembro
         }
       }

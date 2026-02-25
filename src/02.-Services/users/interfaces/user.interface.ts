@@ -5,21 +5,21 @@ export interface User {
   nombre: string;
   apellido: string;
   tipoTrabajo?: string;
-  dni: string;
   telefono?: string;
   email?: string;
   fechaCreacion: Date;
   fechaCese?: Date;
   estado: string;
   role: Role;
-  foto?: string;
-  sede?: Sede;
+  picture?: string;
+  sede?: Sede | string;
   sede_id?: number;
   coordinador?: User;
   coordinador_id?: number;
   numeroServidor?: string;
   googleAccountEmail?: string;
   numeroAgente?: string;
+  token?: string;
 }
 
 export interface Sede {

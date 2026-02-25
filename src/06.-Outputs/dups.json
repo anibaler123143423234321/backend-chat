@@ -1,0 +1,20 @@
+[
+  {
+    "id": 174,
+    "email": "48577886@midas.pe",
+    "username": "48577886",
+    "nombre": "MARYORITH JAHAIRA",
+    "apellido": "TANTALEAN MINCHAN",
+    "role": "COORDINADOR",
+    "picture": null
+  },
+  {
+    "id": 309,
+    "email": "73193256@midas.pe",
+    "username": "73193256",
+    "nombre": "MOISES FERNANDO",
+    "apellido": "MARIN TANTALEAN",
+    "role": "ADMIN",
+    "picture": "https://apisozarusac.com/BackendJava/api/files/usuarios/Pato-Engenheiro_0e20a00f.png"
+  }
+]
