@@ -52,34 +52,74 @@ export class MessagesService {
   /**
    * 🔥 NUEVO: Resolver todos los posibles identificadores de un usuario
    * para asegurar que se carguen mensajes antiguos (Nombre, Email, DNI)
+   * MEJORADO: Ahora es más flexible con cambios de nombre y múltiples registros
    */
   async resolveUserAliases(identifier: string): Promise<string[]> {
     if (!identifier) return [];
 
     const aliases = new Set<string>();
     aliases.add(identifier);
+    aliases.add(identifier.trim());
 
     try {
-      // Intentar encontrar al usuario en la BD para obtener sus otros IDs
-      const user = await this.userRepository.createQueryBuilder('user')
+      // 1. Buscar todos los registros que coincidan con el identificador (DNI, Email o Nombre Completo)
+      const users = await this.userRepository.createQueryBuilder('user')
         .where('user.username = :id', { id: identifier })
         .orWhere('user.email = :id', { id: identifier })
         .orWhere("CONCAT(user.nombre, ' ', user.apellido) = :id", { id: identifier })
-        .getOne();
+        .getMany();
 
-      if (user) {
-        if (user.username) aliases.add(user.username);
-        if (user.email) aliases.add(user.email);
-        if (user.nombre || user.apellido) {
-          const fullName = `${user.nombre || ''} ${user.apellido || ''}`.trim();
-          if (fullName) aliases.add(fullName);
+      if (users.length > 0) {
+        // Para cada usuario encontrado, agregar sus alias
+        for (const user of users) {
+          if (user.username) aliases.add(user.username);
+          if (user.email) {
+            aliases.add(user.email);
+            // 🔥 TRICK: Si tenemos el email, buscar OTROS registros con el mismo email
+            // Esto captura casos donde el usuario cambió de DNI o Nombre pero mantuvo el email
+            const sameEmailUsers = await this.userRepository.find({ where: { email: user.email } });
+            for (const seu of sameEmailUsers) {
+              if (seu.username) aliases.add(seu.username);
+              if (seu.nombre || seu.apellido) {
+                aliases.add(`${seu.nombre || ''} ${seu.apellido || ''}`.trim());
+              }
+            }
+          }
+          if (user.nombre || user.apellido) {
+            const fullName = `${user.nombre || ''} ${user.apellido || ''}`.trim();
+            if (fullName) {
+              aliases.add(fullName);
+              // Agregar también variante sin segundos nombres si existen
+              const nameParts = (user.nombre || '').split(' ');
+              const lastNameParts = (user.apellido || '').split(' ');
+              if (nameParts.length > 1 || lastNameParts.length > 1) {
+                const simpleName = `${nameParts[0]} ${lastNameParts[0]}`.trim();
+                aliases.add(simpleName);
+              }
+            }
+          }
+        }
+      } else if (identifier.includes(' ')) {
+        // 2. Si es un nombre compuesto y no hubo match exacto, intentar búsqueda parcial inteligente
+        const parts = identifier.split(' ').filter(p => p.length > 2);
+        if (parts.length >= 2) {
+          const fuzzyUsers = await this.userRepository.createQueryBuilder('user')
+            .where('user.nombre LIKE :first', { first: `%${parts[0]}%` })
+            .andWhere('user.apellido LIKE :last', { last: `%${parts[parts.length - 1]}%` })
+            .getMany();
+
+          for (const u of fuzzyUsers) {
+            if (u.username) aliases.add(u.username);
+            const fn = `${u.nombre || ''} ${u.apellido || ''}`.trim();
+            if (fn) aliases.add(fn);
+          }
         }
       }
     } catch (error) {
       console.error(`❌ Error resolviendo alias para [${identifier}]:`, error);
     }
 
-    return Array.from(aliases);
+    return Array.from(aliases).filter(a => !!a);
   }
 
   async markThreadAsRead(threadId: number, username: string) {
