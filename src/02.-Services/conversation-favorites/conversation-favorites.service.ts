@@ -1,9 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull } from 'typeorm';
 import { ConversationFavorite } from 'src/02.-Services/conversation-favorites/entities/conversation-favorite.entity';
 import { Message } from 'src/02.-Services/messages/entities/message.entity';
 import { User } from 'src/02.-Services/users/entities/user.entity';
+import { MessagesService } from 'src/02.-Services/messages/messages.service';
 
 @Injectable()
 export class ConversationFavoritesService {
@@ -14,6 +15,8 @@ export class ConversationFavoritesService {
     private messageRepository: Repository<Message>,
     @InjectRepository(User)
     private userRepository: Repository<User>,
+    @Inject(forwardRef(() => MessagesService))
+    private messagesService: MessagesService,
   ) { }
 
   // Agregar conversación a favoritos
@@ -132,21 +135,8 @@ export class ConversationFavoritesService {
               };
             }
 
-            // Contar mensajes no leídos
-            const allMessages = await this.messageRepository.find({
-              where: {
-                conversationId: conv.id,
-                isDeleted: false,
-                threadId: IsNull(),
-                isGroup: false,
-              },
-            });
-
-            unreadCount = allMessages.filter((msg) => {
-              if (this.normalizeUsername(msg.from) === usernameNormalized) return false;
-              if (!msg.readBy || msg.readBy.length === 0) return true;
-              return !msg.readBy.some(reader => this.normalizeUsername(reader) === usernameNormalized);
-            }).length;
+            // 🔥 FIX: Usar lógica centralizada de conteo de no leídos (soporta alias DNI/Nombre)
+            unreadCount = await this.messagesService.getUnreadCountForUserInConversation(conv.id, username);
           }
 
           // Obtener información del otro participante para la imagen y el nombre

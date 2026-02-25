@@ -46,9 +46,41 @@ export class MessagesService {
     }) as any;
   }
 
-  // 🔥 CACHÉ DE FOTOS DE PERFIL (Para evitar consultas masivas a BD)
   private pictureCache = new Map<string, { url: string; expiresAt: number }>();
   private readonly PICTURE_CACHE_TTL = 1000 * 60 * 60 * 24 * 30; // 30 días
+
+  /**
+   * 🔥 NUEVO: Resolver todos los posibles identificadores de un usuario
+   * para asegurar que se carguen mensajes antiguos (Nombre, Email, DNI)
+   */
+  async resolveUserAliases(identifier: string): Promise<string[]> {
+    if (!identifier) return [];
+
+    const aliases = new Set<string>();
+    aliases.add(identifier);
+
+    try {
+      // Intentar encontrar al usuario en la BD para obtener sus otros IDs
+      const user = await this.userRepository.createQueryBuilder('user')
+        .where('user.username = :id', { id: identifier })
+        .orWhere('user.email = :id', { id: identifier })
+        .orWhere("CONCAT(user.nombre, ' ', user.apellido) = :id", { id: identifier })
+        .getOne();
+
+      if (user) {
+        if (user.username) aliases.add(user.username);
+        if (user.email) aliases.add(user.email);
+        if (user.nombre || user.apellido) {
+          const fullName = `${user.nombre || ''} ${user.apellido || ''}`.trim();
+          if (fullName) aliases.add(fullName);
+        }
+      }
+    } catch (error) {
+      console.error(`❌ Error resolviendo alias para [${identifier}]:`, error);
+    }
+
+    return Array.from(aliases);
+  }
 
   async markThreadAsRead(threadId: number, username: string) {
     // 🚀 OPTIMIZADO para MySQL: Normalizar username antes de guardar
@@ -283,6 +315,54 @@ export class MessagesService {
     } catch (error) {
       console.error(`❌ Error en getAllUnreadCountsForUser:`, error);
       throw error;
+    }
+  }
+
+  // 🔥 NUEVO: Obtener conteo de mensajes no leídos por usuario en una conversación específica
+  async getUnreadCountForUserInConversation(
+    conversationId: number,
+    username: string,
+  ): Promise<number> {
+    try {
+      const messages = await this.messageRepository.find({
+        where: {
+          conversationId,
+          isDeleted: false,
+          threadId: IsNull(),
+          isGroup: false,
+        },
+        select: ['id', 'from', 'readBy'],
+      });
+
+      // 🔥 RESOLVER ALIAS
+      const userAliases = await this.resolveUserAliases(username);
+      const userAliasesLower = userAliases.map(a => a.toLowerCase().trim());
+
+      const unreadCount = messages.filter((msg) => {
+        // No contar mensajes propios
+        const fromLower = msg.from?.toLowerCase().trim();
+        if (userAliasesLower.includes(fromLower)) {
+          return false;
+        }
+
+        // Si no tiene readBy o está vacío, no ha sido leído
+        if (!msg.readBy || msg.readBy.length === 0) {
+          return true;
+        }
+
+        // Verificar si el usuario está en la lista de lectores (usando alias)
+        const isReadByUser = msg.readBy.some((reader) => {
+          const rLower = reader?.toLowerCase().trim();
+          return userAliasesLower.includes(rLower);
+        });
+
+        return !isReadByUser;
+      }).length;
+
+      return unreadCount;
+    } catch (error) {
+      console.error('❌ Error al obtener conteo de no leídos en conversación:', error);
+      return 0;
     }
   }
 
@@ -738,7 +818,11 @@ export class MessagesService {
     limit: number = 15,
     offset: number = 0,
   ): Promise<any[]> {
-    // � OPTIMIZADO: Usar QueryBuilder con campos específicos
+    // 🔥 RESOLVER ALIAS: Obtener todos los IDs posibles para ambos usuarios
+    const fromAliases = await this.resolveUserAliases(from);
+    const toAliases = await this.resolveUserAliases(to);
+
+    //  OPTIMIZADO: Usar QueryBuilder con campos específicos
     // 🔥 FIX: NO incluir threadId en el SELECT para conversaciones directas
     // Solo los mensajes principales (threadId IS NULL) deben devolverse
     const messages = await this.messageRepository
@@ -786,8 +870,8 @@ export class MessagesService {
         'attachments.fileSize',
       ])
       .where(
-        '(message.from = :from AND message.to = :to) OR (message.from = :to AND message.to = :from)',
-        { from, to },
+        '((message.from IN (:...fromAliases) AND message.to IN (:...toAliases)) OR (message.from IN (:...toAliases) AND message.to IN (:...fromAliases)))',
+        { fromAliases, toAliases },
       )
       .andWhere('message.threadId IS NULL')
       .andWhere('message.isGroup = :isGroup', { isGroup: false })
@@ -1158,28 +1242,27 @@ export class MessagesService {
   // 🚀 OPTIMIZADO: Marcar todos los mensajes de una conversación como leídos
   async markConversationAsRead(from: string, to: string): Promise<Message[]> {
     const readAt = new Date();
-    // 🔥 FIX: Resolver nombres completos desde DNIs para ambos participantes
-    const fullNameFrom = await this.resolveFullNameForReadBy(from);
-    const fullNameTo = await this.resolveFullNameForReadBy(to);
-    const normalizedFullNameTo = this.normalizeForReadBy(fullNameTo);
+    // 🔥 RESOLVER ALIAS para asegurar que encontramos mensajes viejos
+    const fromAliases = await this.resolveUserAliases(from);
+    const toAliases = await this.resolveUserAliases(to);
 
-    // 🔥 FIX: Usar LOWER y verificar TANTO DNI como nombre completo para from/to
-    const fromLower = from?.toLowerCase().trim();
-    const fullNameFromLower = fullNameFrom?.toLowerCase().trim();
-    const toLower = to?.toLowerCase().trim();
-    const fullNameToLower = fullNameTo?.toLowerCase().trim();
+    // 🔥 Resolver nombre completo para marcar en 'readBy' (compatibilidad)
+    const fullNameFrom = await this.resolveFullNameForReadBy(from);
+    const normalizedFullNameFrom = this.normalizeForReadBy(fullNameFrom);
 
     // 🚀 Obtener solo los mensajes que necesitan actualización
-    // 🔥 FIX: Buscar mensajes donde from/to coincidan con DNI O nombre completo
+    // (Mensajes enviados por 'to' hacia 'from' que yo no he leído)
     const messages = await this.messageRepository
       .createQueryBuilder('message')
-      .where('(LOWER(TRIM(message.from)) = :fromLower OR LOWER(TRIM(message.from)) = :fullNameFromLower)', { fromLower, fullNameFromLower })
-      .andWhere('(LOWER(TRIM(message.to)) = :toLower OR LOWER(TRIM(message.to)) = :fullNameToLower)', { toLower, fullNameToLower })
+      .where('message.from IN (:...toAliases) AND message.to IN (:...fromAliases)', {
+        fromAliases,
+        toAliases,
+      })
       .andWhere('message.isRead = :isRead', { isRead: false })
       .andWhere('message.isDeleted = :isDeleted', { isDeleted: false })
       .andWhere(
-        "(message.readBy IS NULL OR (NOT JSON_CONTAINS(message.readBy, :toJson) AND NOT JSON_CONTAINS(message.readBy, :fullNameJson)))",
-        { toJson: JSON.stringify(this.normalizeForReadBy(to)), fullNameJson: JSON.stringify(normalizedFullNameTo) }
+        "(message.readBy IS NULL OR NOT JSON_CONTAINS(message.readBy, :userJson))",
+        { userJson: JSON.stringify(normalizedFullNameFrom) }
       )
       .getMany();
 
@@ -1200,7 +1283,7 @@ export class MessagesService {
         .createQueryBuilder()
         .update()
         .set({
-          readBy: () => `JSON_ARRAY_APPEND(COALESCE(readBy, JSON_ARRAY()), '$', '${normalizedFullNameTo}')`,
+          readBy: () => `JSON_ARRAY_APPEND(COALESCE(readBy, JSON_ARRAY()), '$', '${normalizedFullNameFrom}')`,
           isRead: true,
           readAt: readAt
         })
@@ -1208,7 +1291,7 @@ export class MessagesService {
         .execute();
 
       batch.forEach((message) => {
-        const newReadBy = [...(message.readBy || []), normalizedFullNameTo];
+        const newReadBy = [...(message.readBy || []), normalizedFullNameFrom];
         message.readBy = newReadBy;
         message.isRead = true;
         message.readAt = readAt;
@@ -1520,18 +1603,15 @@ export class MessagesService {
         // });
       }
 
-      // 🔥 FIX: Obtener el nombre completo del usuario para la comparación
-      // Ya que readBy y from en DB mantienen el nombre completo, pero el API recibe el DNI
-      const user = await this.userRepository.findOne({ where: { username } });
-      const fullName = user?.nombre && user?.apellido ? `${user.nombre} ${user.apellido}` : username;
-      const usernameLower = username?.toLowerCase().trim();
-      const fullNameLower = fullName?.toLowerCase().trim();
+      // 🔥 RESOLVER ALIAS para asegurar que contamos correctamente
+      const userAliases = await this.resolveUserAliases(username);
+      const userAliasesLower = userAliases.map(a => a.toLowerCase().trim());
 
       // Contar mensajes que NO han sido leídos por el usuario
       const unreadCount = messages.filter((msg) => {
-        // No contar mensajes propios (comparación case-insensitive, tanto por DNI como por nombre)
+        // No contar mensajes propios
         const fromLower = msg.from?.toLowerCase().trim();
-        if (fromLower === usernameLower || fromLower === fullNameLower) {
+        if (userAliasesLower.includes(fromLower)) {
           return false;
         }
 
@@ -1540,10 +1620,10 @@ export class MessagesService {
           return true;
         }
 
-        // Verificar si el usuario está en la lista de lectores (buscando por DNI o por nombre completo)
+        // Verificar si el usuario está en la lista de lectores (usando alias)
         const isReadByUser = msg.readBy.some((reader) => {
           const rLower = reader?.toLowerCase().trim();
-          return rLower === usernameLower || rLower === fullNameLower;
+          return userAliasesLower.includes(rLower);
         });
 
         if (!isReadByUser) {
@@ -1601,51 +1681,20 @@ export class MessagesService {
       return [];
     }
 
-    // 🔥 Buscar TODOS los mensajes del usuario
-    // El problema es que algunos mensajes tienen "from" como username (73583958)
-    // y otros como nombre completo (BAGNER ANIBAL CHUQUIMIA)
-    // Por eso buscamos TODOS los mensajes y luego filtramos
-    const allMessages = await this.messageRepository.find({
-      where: {
-        isDeleted: false,
-        threadId: IsNull(),
-      },
-      order: { sentAt: 'DESC' },
-      take: 1000, // Aumentar límite para buscar en más mensajes
-    });
+    // 🔥 RESOLVER ALIAS para buscar por todos los IDs del usuario
+    const userAliases = await this.resolveUserAliases(username);
 
-    // console.log('📊 Total de mensajes en BD:', allMessages.length);
+    // 🔥 Buscar mensajes donde el usuario participe (ya sea como from o to)
+    const messages = await this.messageRepository.createQueryBuilder('message')
+      .where('(message.from IN (:...aliases) OR message.to IN (:...aliases))', { aliases: userAliases })
+      .andWhere('(message.message LIKE :search OR message.fileName LIKE :search)', { search: `%${searchTerm.trim()}%` })
+      .andWhere('message.isDeleted = :isDeleted', { isDeleted: false })
+      .andWhere('message.threadId IS NULL')
+      .orderBy('message.sentAt', 'DESC')
+      .take(limit)
+      .getMany();
 
-    // Filtrar mensajes del usuario (por username o que contengan el username en el campo from)
-    const userMessages = allMessages.filter((msg) => {
-      // Buscar por username exacto o que el campo "from" contenga el username
-      return msg.from === username || msg.from?.includes(username);
-    });
-
-    // console.log('📊 Mensajes del usuario encontrados:', userMessages.length);
-    if (userMessages.length > 0) {
-      // console.log('📝 Primer mensaje del usuario:', {
-      //   from: userMessages[0].from,
-      //   message: userMessages[0].message,
-      //   to: userMessages[0].to,
-      //   isGroup: userMessages[0].isGroup,
-      // });
-    }
-
-    // Filtrar por búsqueda en mensaje o nombre de archivo
-    const filteredMessages = userMessages.filter((msg) => {
-      const searchLower = searchTerm.toLowerCase();
-      const messageText = (msg.message || '').toLowerCase();
-      const fileName = (msg.fileName || '').toLowerCase();
-      return (
-        messageText.includes(searchLower) || fileName.includes(searchLower)
-      );
-    });
-
-    // console.log('✅ Mensajes filtrados por búsqueda:', filteredMessages.length);
-
-    // Limitar resultados al límite especificado
-    const limitedResults = filteredMessages.slice(0, limit);
+    const limitedResults = messages;
 
     // Retornar los mensajes con información de la conversación
     return limitedResults.map((msg) => {
@@ -1972,23 +2021,31 @@ export class MessagesService {
     search: string = '', // 🔥 Filtro de búsqueda
   ): Promise<{ data: any[]; total: number; hasMore: boolean }> {
 
-    // Construir condiciones base
-    const baseWhere1: any = { from, to, threadId: IsNull(), isDeleted: false, threadCount: MoreThan(0) };
-    const baseWhere2: any = { from: to, to: from, threadId: IsNull(), isDeleted: false, threadCount: MoreThan(0) };
+    // 🔥 RESOLVER ALIAS
+    const fromAliases = await this.resolveUserAliases(from);
+    const toAliases = await this.resolveUserAliases(to);
+
+    const queryBuilder = this.messageRepository
+      .createQueryBuilder('message')
+      .leftJoinAndSelect('message.attachments', 'attachments')
+      .where(
+        '((message.from IN (:...fromAliases) AND message.to IN (:...toAliases)) OR (message.from IN (:...toAliases) AND message.to IN (:...fromAliases)))',
+        { fromAliases, toAliases },
+      )
+      .andWhere('message.threadId IS NULL')
+      .andWhere('message.isDeleted = :isDeleted', { isDeleted: false })
+      .andWhere('message.threadCount > :threadCount', { threadCount: 0 });
 
     if (search && search.trim()) {
-      const searchLike = Like(`%${search.trim()}%`);
-      baseWhere1.message = searchLike;
-      baseWhere2.message = searchLike;
+      queryBuilder.andWhere('message.message LIKE :search', { search: `%${search.trim()}%` });
     }
 
     // Buscar mensajes entre ambos usuarios (en ambas direcciones)
-    const [threads, total] = await this.messageRepository.findAndCount({
-      where: [baseWhere1, baseWhere2],
-      order: { id: 'DESC' },
-      take: limit, // 🔥 Paginación DB
-      skip: offset, // 🔥 Paginación DB
-    });
+    const [threads, total] = await queryBuilder
+      .orderBy('message.id', 'DESC')
+      .take(limit)
+      .skip(offset)
+      .getManyAndCount();
 
     const data = threads.map((msg) => ({
       id: msg.id,
