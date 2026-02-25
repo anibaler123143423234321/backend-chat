@@ -879,9 +879,27 @@ export class SocketGateway
             if (needsDbUpdate) {
                 let dbUser = await this.userRepository.findOne({ where: { username } });
 
+                // 🛡️ RACE CONDITION / DUPLICATION FIX: Si no se encuentra por username, intentar por email
+                if (!dbUser && userData?.email) {
+                    dbUser = await this.userRepository.findOne({ where: { email: userData.email } });
+                    if (dbUser) {
+                        console.log(`♻️ Usuario ${username} recuperado por EMAIL (${userData.email}) - Vinculando a cuenta existente.`);
+                    }
+                }
+
                 if (dbUser) {
                     // Actualizar usuario existente solo si hay cambios
                     let hasChanges = false;
+
+                    // 🛠️ AUTO-NORMALIZACIÓN: Si el username en BD es un nombre y el que viene es un DNI, actualizar
+                    const isNewUsernameNumeric = /^\d+$/.test(username);
+                    const isOldUsernameNumeric = /^\d+$/.test(dbUser.username);
+                    if (isNewUsernameNumeric && !isOldUsernameNumeric) {
+                        console.log(`✅ Normalizando USERNAME de [${dbUser.username}] a [${username}] (DNI)`);
+                        dbUser.username = username;
+                        hasChanges = true;
+                    }
+
                     if (userData?.nombre && dbUser.nombre !== userData.nombre) {
                         dbUser.nombre = userData.nombre;
                         hasChanges = true;

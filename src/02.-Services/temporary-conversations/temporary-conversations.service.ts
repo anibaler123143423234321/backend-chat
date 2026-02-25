@@ -27,23 +27,29 @@ export class TemporaryConversationsService {
     // 1. Intentar buscar por username (DNI)
     let user = await this.userRepository.findOne({ where: { username } });
 
-    // 2. Si no se encuentra, intentar buscar por Nombre Completo (exacto)
-    if (!user && username.includes(' ')) {
+    // 2. Si no se encuentra, intentar buscar por Nombre Completo (normalizado)
+    const normalizedSearch = username.trim().replace(/\s+/g, ' ');
+
+    if (!user && normalizedSearch.includes(' ')) {
       user = await this.userRepository
         .createQueryBuilder('user')
-        .where("CONCAT(user.nombre, ' ', user.apellido) = :fullName", { fullName: username.trim() })
+        .where("TRIM(CONCAT(user.nombre, ' ', user.apellido)) = :fullName", { fullName: normalizedSearch })
         .getOne();
     }
 
-    // 3. Si aún no se encuentra, intentar búsqueda flexible con LIKE (para nombres con segundos nombres omitidos)
-    if (!user && username.includes(' ')) {
-      const words = username.trim().split(/\s+/);
+    // 3. Si aún no se encuentra, intentar búsqueda flexible por palabras (AND)
+    if (!user && normalizedSearch.includes(' ')) {
+      const words = normalizedSearch.split(' ').filter(w => w.length > 2);
       if (words.length >= 2) {
-        const pattern = `%${words.join('%')}%`;
-        user = await this.userRepository
-          .createQueryBuilder('user')
-          .where("CONCAT(user.nombre, ' ', user.apellido) LIKE :pattern", { pattern })
-          .getOne();
+        let builder = this.userRepository.createQueryBuilder('user');
+        words.forEach((word, idx) => {
+          if (idx === 0) {
+            builder = builder.where("CONCAT(user.nombre, ' ', user.apellido) LIKE :term" + idx, { ["term" + idx]: `%${word}%` });
+          } else {
+            builder = builder.andWhere("CONCAT(user.nombre, ' ', word) LIKE :term" + idx, { ["term" + idx]: `%${word}%` });
+          }
+        });
+        user = await builder.getOne();
       }
     }
 

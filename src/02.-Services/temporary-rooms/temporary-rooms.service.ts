@@ -54,23 +54,29 @@ export class TemporaryRoomsService {
     // 1. Intentar buscar por username (DNI)
     let user = await this.userRepository.findOne({ where: { username } });
 
-    // 2. Si no se encuentra, intentar buscar por Nombre Completo (exacto)
-    if (!user && username.includes(' ')) {
+    // 2. Si no se encuentra, intentar buscar por Nombre Completo (normalizado)
+    const normalizedSearch = username.trim().replace(/\s+/g, ' ');
+
+    if (!user && normalizedSearch.includes(' ')) {
       user = await this.userRepository
         .createQueryBuilder('user')
-        .where("CONCAT(user.nombre, ' ', user.apellido) = :fullName", { fullName: username.trim() })
+        .where("TRIM(CONCAT(user.nombre, ' ', user.apellido)) = :fullName", { fullName: normalizedSearch })
         .getOne();
     }
 
-    // 3. Si aún no se encuentra, intentar búsqueda flexible con LIKE (para nombres con segundos nombres omitidos)
-    if (!user && username.includes(' ')) {
-      const words = username.trim().split(/\s+/);
+    // 3. Si aún no se encuentra, intentar búsqueda flexible por palabras (AND)
+    if (!user && normalizedSearch.includes(' ')) {
+      const words = normalizedSearch.split(' ').filter(w => w.length > 2);
       if (words.length >= 2) {
-        const pattern = `%${words.join('%')}%`;
-        user = await this.userRepository
-          .createQueryBuilder('user')
-          .where("CONCAT(user.nombre, ' ', user.apellido) LIKE :pattern", { pattern })
-          .getOne();
+        let builder = this.userRepository.createQueryBuilder('user');
+        words.forEach((word, idx) => {
+          if (idx === 0) {
+            builder = builder.where("CONCAT(user.nombre, ' ', user.apellido) LIKE :term" + idx, { ["term" + idx]: `%${word}%` });
+          } else {
+            builder = builder.andWhere("CONCAT(user.nombre, ' ', user.apellido) LIKE :term" + idx, { ["term" + idx]: `%${word}%` });
+          }
+        });
+        user = await builder.getOne();
       }
     }
 
@@ -246,6 +252,9 @@ export class TemporaryRoomsService {
         'room.currentMembers',
         'room.isActive',
         'room.isAssignedByAdmin',
+        'room.members',
+        'room.connectedMembers',
+        'room.assignedMembers',
         'room.createdAt',
         'room.updatedAt',
       ])
@@ -268,17 +277,7 @@ export class TemporaryRoomsService {
         'message.id = lastMsg.lastMessageId',
       )
       .addSelect('message.sentAt', 'lastMessageSentAt')
-      .where('room.isActive = :isActive', { isActive: true })
-      // 🔥 MODIFICADO: Buscar tanto por DNI como por Nombre Completo
-      .andWhere(
-        '(room.members LIKE :searchByDni OR room.members LIKE :searchByName OR ' +
-        'room.connectedMembers LIKE :searchByDni OR room.connectedMembers LIKE :searchByName OR ' +
-        'room.assignedMembers LIKE :searchByDni OR room.assignedMembers LIKE :searchByName)',
-        {
-          searchByDni: `%${dni}%`,
-          searchByName: `%${fullName}%`,
-        }
-      );
+      .where('room.isActive = :isActive', { isActive: true });
 
     // 2. Excluir favoritos directamente en SQL para optimización
     queryBuilder.andWhere((qb) => {
@@ -291,11 +290,9 @@ export class TemporaryRoomsService {
       return 'room.roomCode NOT IN ' + subQuery;
     });
 
-    queryBuilder.setParameters({
-      favUsername: dni,
-    });
+    queryBuilder.setParameter('favUsername', dni);
 
-    // 4. Aplicar búsqueda
+    // 3. Aplicar búsqueda por nombre/código si existe
     if (search && search.trim()) {
       queryBuilder.andWhere(
         '(room.name LIKE :search OR room.roomCode LIKE :search)',
@@ -303,23 +300,38 @@ export class TemporaryRoomsService {
       );
     }
 
-    // 5. NO usar skip/take de TypeORM (pierde alias en subquery).
-    //    Traemos TODAS las salas del usuario, ordenamos en JS, y paginamos manualmente.
+    // 4. Ejecutar consulta y filtrar en memoria por membresía
     const { entities, raw } = await queryBuilder.getRawAndEntities();
 
     const allRooms = entities.map((room, index) => {
-      const { members, connectedMembers, assignedMembers, pendingMembers, ...roomData } = room;
+      // Filtrar por membresía (DNI o Nombre Completo)
+      const members = room.members || [];
+      const connected = room.connectedMembers || [];
+      const assigned = room.assignedMembers || [];
+
+      const isMember =
+        members.includes(dni) ||
+        members.includes(fullName) ||
+        connected.includes(dni) ||
+        connected.includes(fullName) ||
+        assigned.includes(dni) ||
+        assigned.includes(fullName);
+
+      if (!isMember) return null;
+
       const rowData = raw[index];
       const lastMessageSentAt = rowData.lastMessageSentAt;
+
+      const { members: _, connectedMembers: __, assignedMembers: ___, pendingMembers: ____, ...roomData } = room;
 
       return {
         ...roomData,
         lastActivity: lastMessageSentAt || room.updatedAt || room.createdAt,
         _sortTime: lastMessageSentAt ? new Date(lastMessageSentAt).getTime() : 0,
       };
-    });
+    }).filter(room => room !== null);
 
-    // 6. Ordenar en memoria por último mensaje (más reciente primero)
+    // 5. Ordenar en memoria por último mensaje (más reciente primero)
     allRooms.sort((a, b) => b._sortTime - a._sortTime);
 
     const total = allRooms.length;

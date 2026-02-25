@@ -149,23 +149,30 @@ export class ConversationFavoritesService {
             }).length;
           }
 
-          // Obtener información del otro participante para la imagen
+          // Obtener información del otro participante para la imagen y el nombre
           let otherParticipantPicture = null;
+          let otherParticipantName = conv.name;
 
           const otherParticipants = participants.filter(p => this.normalizeUsername(p) !== usernameNormalized);
           if (otherParticipants.length > 0) {
             const otherUser = await this.userRepository.findOne({
               where: { username: otherParticipants[0] },
-              select: ['picture'],
+              select: ['picture', 'nombre', 'apellido'],
             });
             if (otherUser) {
               otherParticipantPicture = otherUser.picture;
+              // Si es una conversación personal (1-on-1), usar el nombre del otro usuario
+              if (participants.length === 2) {
+                otherParticipantName = otherUser.nombre && otherUser.apellido
+                  ? `${otherUser.nombre} ${otherUser.apellido}`.trim()
+                  : otherUser.nombre || otherParticipantName;
+              }
             }
           }
 
           return {
             id: conv.id,
-            name: conv.name,
+            name: otherParticipantName,
             participants: conv.participants,
             isActive: conv.isActive,
             isFavorite: true,
