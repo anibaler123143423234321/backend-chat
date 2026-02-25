@@ -1,0 +1,182 @@
+[
+  {
+    "id": 229458,
+    "message": "PRUEBA 3",
+    "from": "DAGNER ANIBAL CHUMAN LLUEN",
+    "to": "MOISES FERNANDO MARIN TANTALEAN",
+    "isGroup": 0,
+    "conversationId": null,
+    "sentAt": "2026-02-25T06:04:49.000Z"
+  },
+  {
+    "id": 229457,
+    "message": "PRUEBA 2",
+    "from": "DAGNER ANIBAL CHUMAN LLUEN",
+    "to": "MOISES FERNANDO MARIN TANTALEAN",
+    "isGroup": 0,
+    "conversationId": null,
+    "sentAt": "2026-02-25T05:55:49.000Z"
+  },
+  {
+    "id": 229456,
+    "message": "PRUEBA",
+    "from": "DAGNER ANIBAL CHUMAN LLUEN",
+    "to": "MOISES FERNANDO MARIN TANTALEAN",
+    "isGroup": 0,
+    "conversationId": null,
+    "sentAt": "2026-02-25T05:44:26.000Z"
+  },
+  {
+    "id": 229447,
+    "message": "SE ENVIA CONTRATO",
+    "from": "JHONNY JESUS BALLENA TULLUME",
+    "to": "VENTAS YOIGO",
+    "isGroup": 1,
+    "conversationId": null,
+    "sentAt": "2026-02-24T21:09:41.000Z"
+  },
+  {
+    "id": 229446,
+    "message": "CONTRATO ENVIADO",
+    "from": "JHONNY JESUS BALLENA TULLUME",
+    "to": "FILTROS JULCA",
+    "isGroup": 1,
+    "conversationId": null,
+    "sentAt": "2026-02-24T21:09:28.000Z"
+  },
+  {
+    "id": 229445,
+    "message": "CL NO PASA SCORING",
+    "from": "JHONNY JESUS BALLENA TULLUME",
+    "to": "FILTROS JULCA",
+    "isGroup": 1,
+    "conversationId": null,
+    "sentAt": "2026-02-24T21:09:21.000Z"
+  },
+  {
+    "id": 229444,
+    "message": "",
+    "from": "JHONNY JESUS BALLENA TULLUME",
+    "to": "FILTROS JULCA",
+    "isGroup": 1,
+    "conversationId": null,
+    "sentAt": "2026-02-24T21:09:05.000Z"
+  },
+  {
+    "id": 229443,
+    "message": "CARGA MANUAL POR HORA",
+    "from": "JHONNY JESUS BALLENA TULLUME",
+    "to": "FILTROS FRANKLIN NAVARRO",
+    "isGroup": 1,
+    "conversationId": null,
+    "sentAt": "2026-02-24T21:08:04.000Z"
+  },
+  {
+    "id": 229442,
+    "message": "TRAMITADO OK ",
+    "from": "JHONNY JESUS BALLENA TULLUME",
+    "to": "FILTROS FRANKLIN NAVARRO",
+    "isGroup": 1,
+    "conversationId": null,
+    "sentAt": "2026-02-24T21:07:59.000Z"
+  },
+  {
+    "id": 229441,
+    "message": "SCORING @JHONNY JESUS BALLENA TULLUME  ",
+    "from": "CARLOS DANIEL ESTELA FERNANDEZ",
+    "to": "VENTAS YOIGO",
+    "isGroup": 1,
+    "conversationId": null,
+    "sentAt": "2026-02-24T21:07:12.000Z"
+  },
+  {
+    "id": 229440,
+    "message": "",
+    "from": "CARLOS DANIEL ESTELA FERNANDEZ",
+    "to": "VENTAS YOIGO",
+    "isGroup": 1,
+    "conversationId": null,
+    "sentAt": "2026-02-24T21:07:04.000Z"
+  },
+  {
+    "id": 229439,
+    "message": " BIENVENIDO PEREZ JUAREZ\nNIF/NIE:\n26454256R \n CAMPOVERDE CUNYA JEAR CHRISTIAN \nFILTRO OK/ PDT SOLIVESA",
+    "from": "ADRIAMEL TAMARA SEMINARIO SANCHEZ",
+    "to": "B4E859A9",
+    "isGroup": 1,
+    "conversationId": null,
+    "sentAt": "2026-02-24T21:06:46.000Z"
+  },
+  {
+    "id": 229438,
+    "message": ".",
+    "from": "NIKITA EMILIA RUIZ FLORES",
+    "to": null,
+    "isGroup": 1,
+    "conversationId": null,
+    "sentAt": "2026-02-24T21:04:59.000Z"
+  },
+  {
+    "id": 229437,
+    "message": "avanzaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "from": "MELISSA LUCERO REQUEJO RAMOS",
+    "to": "TATIANA  MIÑOPE FLORES",
+    "isGroup": 0,
+    "conversationId": 261,
+    "sentAt": "2026-02-24T21:03:28.000Z"
+  },
+  {
+    "id": 229436,
+    "message": "@JHONNY JESUS BALLENA TULLUME  ",
+    "from": "CARLOS DANIEL ESTELA FERNANDEZ",
+    "to": "VENTAS YOIGO",
+    "isGroup": 1,
+    "conversationId": null,
+    "sentAt": "2026-02-24T21:03:11.000Z"
+  },
+  {
+    "id": 229435,
+    "message": "ADJUNTAR LA FIRMA DEL CLIENTE PARA CARGARLA EN EL SISTEMA\n\nENVIAR CONTRATO A COMERCIAL PARA LA FIRMA",
+    "from": "CARLOS DANIEL ESTELA FERNANDEZ",
+    "to": "VENTAS YOIGO",
+    "isGroup": 1,
+    "conversationId": null,
+    "sentAt": "2026-02-24T21:03:05.000Z"
+  },
+  {
+    "id": 229434,
+    "message": "",
+    "from": "CARLOS DANIEL ESTELA FERNANDEZ",
+    "to": "VENTAS YOIGO",
+    "isGroup": 1,
+    "conversationId": null,
+    "sentAt": "2026-02-24T21:02:57.000Z"
+  },
+  {
+    "id": 229433,
+    "message": "La instalación se realizará el Mart, 3 Marzo 2026, 14:00 - 17:00\n\n",
+    "from": "CARLOS DANIEL ESTELA FERNANDEZ",
+    "to": "VENTAS YOIGO",
+    "isGroup": 1,
+    "conversationId": null,
+    "sentAt": "2026-02-24T21:02:30.000Z"
+  },
+  {
+    "id": 229432,
+    "message": "",
+    "from": "KATHERINE  LISSET BARBA  PURIZACA",
+    "to": "MARYORITH JAHAIRA TANTALEAN MINCHAN",
+    "isGroup": 0,
+    "conversationId": 242,
+    "sentAt": "2026-02-24T21:02:10.000Z"
+  },
+  {
+    "id": 229431,
+    "message": "tramitada ok",
+    "from": "NORMA ANGELICA DURAND HINOSTROZA",
+    "to": "FILTROS YARELLY",
+    "isGroup": 1,
+    "conversationId": null,
+    "sentAt": "2026-02-24T21:01:42.000Z"
+  }
+]

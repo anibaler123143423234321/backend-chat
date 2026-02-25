@@ -49,6 +49,42 @@ export class TemporaryRoomsService {
     this.socketGateway = gateway;
   }
 
+  // 🔥 NUEVO: Obtener DNI y Nombre Completo para verificaciones de membresía robustas
+  private async getUserIdentifiers(username: string): Promise<{ dni: string; fullName: string }> {
+    // 1. Intentar buscar por username (DNI)
+    let user = await this.userRepository.findOne({ where: { username } });
+
+    // 2. Si no se encuentra, intentar buscar por Nombre Completo (exacto)
+    if (!user && username.includes(' ')) {
+      user = await this.userRepository
+        .createQueryBuilder('user')
+        .where("CONCAT(user.nombre, ' ', user.apellido) = :fullName", { fullName: username.trim() })
+        .getOne();
+    }
+
+    // 3. Si aún no se encuentra, intentar búsqueda flexible con LIKE (para nombres con segundos nombres omitidos)
+    if (!user && username.includes(' ')) {
+      const words = username.trim().split(/\s+/);
+      if (words.length >= 2) {
+        const pattern = `%${words.join('%')}%`;
+        user = await this.userRepository
+          .createQueryBuilder('user')
+          .where("CONCAT(user.nombre, ' ', user.apellido) LIKE :pattern", { pattern })
+          .getOne();
+      }
+    }
+
+    if (!user) {
+      return { dni: username, fullName: username };
+    }
+
+    const fullName = user.nombre && user.apellido
+      ? `${user.nombre} ${user.apellido}`.trim()
+      : user.username;
+
+    return { dni: user.username, fullName };
+  }
+
   async create(
     createDto: CreateTemporaryRoomDto,
     userId: number,
@@ -196,7 +232,7 @@ export class TemporaryRoomsService {
     totalPages: number;
     hasMore: boolean;
   }> {
-    const displayName = username;
+    const { dni, fullName } = await this.getUserIdentifiers(username);
 
     // 1. Construir QueryBuilder base
     const queryBuilder = this.temporaryRoomRepository
@@ -214,8 +250,16 @@ export class TemporaryRoomsService {
         'room.updatedAt',
       ])
       .where('room.isActive = :isActive', { isActive: true })
-      // 🔥 MODIFICADO: Usar LIKE para mayor flexibilidad con case-sensitivity y displayNames
-      .andWhere('(room.members LIKE :search OR room.connectedMembers LIKE :search OR room.assignedMembers LIKE :search)', { search: `%${username}%` });
+      // 🔥 MODIFICADO: Buscar tanto por DNI como por Nombre Completo
+      .andWhere(
+        '(room.members LIKE :searchByDni OR room.members LIKE :searchByName OR ' +
+        'room.connectedMembers LIKE :searchByDni OR room.connectedMembers LIKE :searchByName OR ' +
+        'room.assignedMembers LIKE :searchByDni OR room.assignedMembers LIKE :searchByName)',
+        {
+          searchByDni: `%${dni}%`,
+          searchByName: `%${fullName}%`,
+        }
+      );
 
     // 2. Excluir favoritos directamente en SQL para optimización
     queryBuilder.andWhere((qb) => {
@@ -229,8 +273,7 @@ export class TemporaryRoomsService {
     });
 
     queryBuilder.setParameters({
-      username: JSON.stringify(username),
-      favUsername: username,
+      favUsername: dni,
     });
 
     // 4. Aplicar búsqueda
@@ -313,12 +356,15 @@ export class TemporaryRoomsService {
   ): Promise<TemporaryRoom> {
     const room = await this.findByRoomCode(joinDto.roomCode);
 
+    const { dni, fullName } = await this.getUserIdentifiers(username);
+
     if (!room.members) room.members = [];
     if (!room.connectedMembers) room.connectedMembers = [];
     if (!room.pendingMembers) room.pendingMembers = [];
 
-    const wasAlreadyMember = room.members.includes(username);
-    const isPending = room.pendingMembers.includes(username);
+    // 🔥 MODIFICADO: Verificar usando tanto DNI como Nombre Completo
+    const wasAlreadyMember = room.members.includes(dni) || room.members.includes(fullName);
+    const isPending = room.pendingMembers.includes(dni) || room.pendingMembers.includes(fullName);
 
     // Si ya está pendiente, notificar al usuario
     if (isPending) {
@@ -392,12 +438,14 @@ export class TemporaryRoomsService {
       throw new NotFoundException(`No se encontró solicitud pendiente para ${username}`);
     }
 
-    // Mover de pending a members
-    room.pendingMembers = room.pendingMembers.filter(u => u !== username);
+    const { dni, fullName } = await this.getUserIdentifiers(username);
+
+    // Mover de pending a members (limpiar ambos identificadores posibles)
+    room.pendingMembers = room.pendingMembers.filter(u => u !== dni && u !== fullName);
 
     if (!room.members) room.members = [];
-    if (!room.members.includes(username)) {
-      room.members.push(username);
+    if (!room.members.includes(dni) && !room.members.includes(fullName)) {
+      room.members.push(dni);
     }
 
     // Opcional: Agregar también a assignedMembers si se requiere "fijarlo"
@@ -425,18 +473,20 @@ export class TemporaryRoomsService {
 
     const room = await this.findByRoomCode(roomCode);
 
+    const { dni, fullName } = await this.getUserIdentifiers(username);
+
     // Inicializar arrays si no existen
     if (!room.members) room.members = [];
     if (!room.connectedMembers) room.connectedMembers = [];
     if (!room.pendingMembers) room.pendingMembers = [];
 
-    // Verificar si ya es miembro
-    if (room.members.includes(username)) {
+    // Verificar si ya es miembro (por DNI o Nombre)
+    if (room.members.includes(dni) || room.members.includes(fullName)) {
       console.log(`✅ Usuario ${username} ya es miembro, solo agregando a connectedMembers`);
 
       // Solo agregar a connectedMembers si no está
-      if (!room.connectedMembers.includes(username)) {
-        room.connectedMembers.push(username);
+      if (!room.connectedMembers.includes(dni) && !room.connectedMembers.includes(fullName)) {
+        room.connectedMembers.push(dni);
         await this.temporaryRoomRepository.save(room);
       }
 
@@ -491,8 +541,10 @@ export class TemporaryRoomsService {
       return;
     }
 
-    // 1. Verificar si está en pendientes
-    if (room.pendingMembers && room.pendingMembers.includes(username)) {
+    const { dni, fullName } = await this.getUserIdentifiers(username);
+
+    // 1. Verificar si está en pendientes (usando ambos identificadores)
+    if (room.pendingMembers && (room.pendingMembers.includes(dni) || room.pendingMembers.includes(fullName))) {
       throw new ForbiddenException(`Tu solicitud para unirte a "${room.name}" está pendiente de aprobación.`);
     }
   }
@@ -515,15 +567,18 @@ export class TemporaryRoomsService {
       );
     }
 
+    const { dni, fullName } = await this.getUserIdentifiers(username);
+
     if (!room.connectedMembers) {
       room.connectedMembers = [];
     }
 
-    // Remover el usuario solo de connectedMembers (mantener en historial)
-    const userIndex = room.connectedMembers.indexOf(username);
-    if (userIndex !== -1) {
-      room.connectedMembers.splice(userIndex, 1);
-      console.log(`✅ Usuario ${username} removido de connectedMembers. Quedan: ${room.connectedMembers.length}`);
+    // Remover el usuario solo de connectedMembers (limpiar ambos identificadores posibles)
+    const initialLength = room.connectedMembers.length;
+    room.connectedMembers = room.connectedMembers.filter(u => u !== dni && u !== fullName);
+
+    if (room.connectedMembers.length < initialLength) {
+      console.log(`✅ Usuario ${username} (o su nombre) removido de connectedMembers. Quedan: ${room.connectedMembers.length}`);
     }
 
     // ❌ ELIMINADO: Ya NO removemos de 'members'
@@ -559,23 +614,25 @@ export class TemporaryRoomsService {
       throw new NotFoundException('Sala no encontrada');
     }
 
+    const { dni, fullName } = await this.getUserIdentifiers(username);
+
     // Remover el usuario de connectedMembers
-    if (room.connectedMembers && room.connectedMembers.includes(username)) {
+    if (room.connectedMembers) {
       room.connectedMembers = room.connectedMembers.filter(
-        (u) => u !== username,
+        (u) => u !== dni && u !== fullName,
       );
       // 👈 MODIFICADO: currentMembers debe ser el total de usuarios AÑADIDOS (members), no solo conectados
       room.currentMembers = room.members.length;
     }
 
     // Remover el usuario de members (historial)
-    if (room.members && room.members.includes(username)) {
-      room.members = room.members.filter((u) => u !== username);
+    if (room.members) {
+      room.members = room.members.filter((u) => u !== dni && u !== fullName);
     }
 
     // Remover el usuario de assignedMembers si está asignado
-    if (room.assignedMembers && room.assignedMembers.includes(username)) {
-      room.assignedMembers = room.assignedMembers.filter((u) => u !== username);
+    if (room.assignedMembers) {
+      room.assignedMembers = room.assignedMembers.filter((u) => u !== dni && u !== fullName);
     }
 
     await this.temporaryRoomRepository.save(room);
@@ -1028,17 +1085,58 @@ export class TemporaryRoomsService {
 
     if (allUsernames.length > 0) {
       try {
-        // 1. Obtener datos completos de la base de datos
-        const dbUsers = await this.userRepository.find({
+        // 1. Obtener datos completos de la base de datos (Primero por Username/DNI)
+        const dbUsersOriginal = await this.userRepository.find({
           where: { username: In(allUsernames) },
         });
 
-        // 2. 🔥 CLUSTER FIX: Mapear usuarios usando verificación async de estado online
+        // 2. 🔥 Mapear usuarios encontrados para facilitar búsqueda
+        const resolvedUsersMap = new Map<string, any>();
+        dbUsersOriginal.forEach(u => resolvedUsersMap.set(u.username, u));
+
+        // 3. 🔥 FALLBACK: Resolver usuarios que están por "Nombre Completo" en la lista
+        const missingUsernames = allUsernames.filter(u => !resolvedUsersMap.has(u));
+
+        if (missingUsernames.length > 0) {
+          console.log(`🔍 Intentando resolver ${missingUsernames.length} usuarios por Nombre Completo...`);
+          for (const potentialName of missingUsernames) {
+            // Solo intentar si parece un nombre (tiene espacios y no es puramente numérico)
+            if (potentialName.includes(' ') && isNaN(Number(potentialName.replace(/\s/g, '')))) {
+              try {
+                // Buscar coincidencia exacta de nombre + apellido (insensible a mayúsculas y espacios extra)
+                const searchNameNormalized = potentialName.trim().toLowerCase();
+
+                const dbUserByName = await this.userRepository
+                  .createQueryBuilder('user')
+                  .where("LOWER(TRIM(CONCAT(IFNULL(user.nombre, ''), ' ', IFNULL(user.apellido, '')))) = :name", { name: searchNameNormalized })
+                  .getOne();
+
+                if (dbUserByName) {
+                  resolvedUsersMap.set(potentialName, dbUserByName);
+                } else {
+                  // Intento secundario: Búsqueda aproximada si la exacta falla
+                  const approximateMatch = await this.userRepository
+                    .createQueryBuilder('user')
+                    .where("LOWER(CONCAT(user.nombre, ' ', user.apellido)) LIKE :name", { name: `%${searchNameNormalized}%` })
+                    .getOne();
+
+                  if (approximateMatch) {
+                    resolvedUsersMap.set(potentialName, approximateMatch);
+                  }
+                }
+              } catch (err) {
+                console.error(`❌ Error buscando usuario por nombre [${potentialName}]:`, err.message);
+              }
+            }
+          }
+        }
+
+        // 4. 🔥 CLUSTER FIX: Mapear usuarios usando verificación async de estado online
         // Usar Promise.all para verificar estado online en Redis (cluster)
         userList = await Promise.all(
           allUsernames.map(async (username, index) => {
-            // Buscar datos en la respuesta de BD
-            const dbUser = dbUsers.find((u) => u.username === username);
+            // Buscar datos en nuestro mapa de usuarios resueltos (por DNI o por Nombre)
+            const dbUser = resolvedUsersMap.get(username);
 
             // 🔥 Verificar estado online en tiempo real (ahora incluye Redis para cluster)
             const isOnline = this.socketGateway

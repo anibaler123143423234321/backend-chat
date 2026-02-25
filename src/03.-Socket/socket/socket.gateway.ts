@@ -379,6 +379,30 @@ export class SocketGateway
 
     }
 
+    // 🔥 NUEVO: Obtener todas las variantes de identificación de un usuario (DNI y Nombre Completo) para emisión de sockets
+    public async getUserIdentifiersArray(username: string): Promise<string[]> {
+        if (!username) return [];
+        const normalizedInput = username.trim();
+        const user = await this.userRepository.findOne({
+            where: [
+                { username: normalizedInput },
+                { nombre: normalizedInput }
+            ]
+        });
+
+        if (!user) {
+            return [normalizedInput];
+        }
+
+        const fullName = user.nombre && user.apellido ? `${user.nombre} ${user.apellido}` : user.nombre;
+        const identifiers = new Set<string>();
+        identifiers.add(normalizedInput);
+        if (user.username) identifiers.add(user.username);
+        if (fullName) identifiers.add(fullName);
+
+        return Array.from(identifiers);
+    }
+
     //  NUEVO: Cargar grupos al iniciar el servidor y configurar Redis Adapter
     //  Cliente Redis para tracking global de usuarios online
     private redisClient: any = null;
@@ -2145,12 +2169,16 @@ export class SocketGateway
                             messageId: savedMessage.id // Incluir ID real del mensaje
                         };
 
-                        // Emitir a ambos participantes
+                        // Emitir a ambos participantes (a todas sus variantes DNI/Nombre)
                         const recipientUsername = data.actualRecipient || data.to;
                         const participants = [from, recipientUsername].filter(Boolean);
-                        participants.forEach(participantName => {
-                            this.server.to(participantName).emit('assignedConversationUpdated', conversationUpdateData);
-                        });
+
+                        for (const participantName of participants) {
+                            const identifiers = await this.getUserIdentifiersArray(participantName);
+                            identifiers.forEach(identifier => {
+                                this.server.to(identifier).emit('assignedConversationUpdated', conversationUpdateData);
+                            });
+                        }
                     }
 
                     // 🚀 Si es encuesta, crearla después de guardar
@@ -2188,6 +2216,7 @@ export class SocketGateway
             senderRole, //  Extraer role del remitente
             senderNumeroAgente, //  Extraer numeroAgente del remitente
             roomCode, //  CRÍTICO: Extraer roomCode del data
+            groupName, //  NUEVO: Extraer explícitamente el nombre del grupo
             mediaType,
             mediaData,
             fileName,
@@ -2228,7 +2257,7 @@ export class SocketGateway
                 to: isGroup ? null : recipientForDB,
                 message,
                 isGroup,
-                groupName: isGroup ? to : null,
+                groupName: isGroup ? (groupName || to) : null,
                 roomCode: isGroup ? (roomCode || this.getRoomCodeFromUser(from)) : null, //  USAR roomCode del data primero
                 mediaType,
                 mediaData,

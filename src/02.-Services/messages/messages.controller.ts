@@ -63,6 +63,7 @@ export class MessagesController {
   @ApiResponse({ status: 201, description: 'Mensaje creado con éxito' })
   @ApiResponse({ status: 400, description: 'Datos inválidos' })
   async create(@Body() createMessageDto: CreateMessageDto) {
+    console.log(`[MessagesController] CREATING MESSAGE FULL PAYLOAD:`, JSON.stringify(createMessageDto, null, 2));
     // Obtener senderRole y senderNumeroAgente de la BD si no vienen en el DTO
     if (createMessageDto.from && (!createMessageDto.senderRole || !createMessageDto.senderNumeroAgente)) {
       try {
@@ -100,11 +101,14 @@ export class MessagesController {
         lastMessageMediaType: savedMessage.mediaType
       };
 
-      // Emitir a ambos participantes (remitente y destinatario)
+      // Emitir a ambos participantes (a todas sus variantes DNI/Nombre)
       const participants = [savedMessage.from, savedMessage.to].filter(Boolean);
-      participants.forEach(participantName => {
-        this.socketGateway.server.to(participantName).emit('assignedConversationUpdated', conversationUpdateData);
-      });
+      for (const participantName of participants) {
+        const identifiers = await this.socketGateway.getUserIdentifiersArray(participantName);
+        identifiers.forEach(identifier => {
+          this.socketGateway.server.to(identifier).emit('assignedConversationUpdated', conversationUpdateData);
+        });
+      }
     }
 
     return savedMessage;

@@ -22,6 +22,42 @@ export class TemporaryConversationsService {
     private userRepository: Repository<User>,
   ) { }
 
+  // 🔥 NUEVO: Obtener DNI y Nombre Completo para verificaciones robustas
+  private async getUserIdentifiers(username: string): Promise<{ dni: string; fullName: string }> {
+    // 1. Intentar buscar por username (DNI)
+    let user = await this.userRepository.findOne({ where: { username } });
+
+    // 2. Si no se encuentra, intentar buscar por Nombre Completo (exacto)
+    if (!user && username.includes(' ')) {
+      user = await this.userRepository
+        .createQueryBuilder('user')
+        .where("CONCAT(user.nombre, ' ', user.apellido) = :fullName", { fullName: username.trim() })
+        .getOne();
+    }
+
+    // 3. Si aún no se encuentra, intentar búsqueda flexible con LIKE (para nombres con segundos nombres omitidos)
+    if (!user && username.includes(' ')) {
+      const words = username.trim().split(/\s+/);
+      if (words.length >= 2) {
+        const pattern = `%${words.join('%')}%`;
+        user = await this.userRepository
+          .createQueryBuilder('user')
+          .where("CONCAT(user.nombre, ' ', user.apellido) LIKE :pattern", { pattern })
+          .getOne();
+      }
+    }
+
+    if (!user) {
+      return { dni: username, fullName: username };
+    }
+
+    const fullName = user.nombre && user.apellido
+      ? `${user.nombre} ${user.apellido}`.trim()
+      : user.username;
+
+    return { dni: user.username, fullName };
+  }
+
   async create(
     createDto: CreateTemporaryConversationDto,
     userId: number,
@@ -286,31 +322,35 @@ export class TemporaryConversationsService {
     totalPages: number;
     hasMore: boolean;
   }> {
-    // Normalizar username para comparación
-    const usernameNormalized = this.normalizeUsername(username);
-    // Log eliminado para optimización
+    const { dni, fullName } = await this.getUserIdentifiers(username);
+    const dniNormalized = this.normalizeUsername(dni);
+    const fullNameNormalized = this.normalizeUsername(fullName);
 
     // 1. Construir QueryBuilder base
     const queryBuilder = this.temporaryConversationRepository
       .createQueryBuilder('conv')
       .where('conv.isActive = :isActive', { isActive: true });
 
-    // 2. Filtrar por pertenencia (Sintaxis MySQL JSON_CONTAINS)
+    // 2. Filtrar por pertenencia (Sintaxis MySQL LIKE para buscar en JSON array)
     if (username) {
-      // 🚀 MODIFICADO: Usar LIKE para mayor flexibilidad con case-sensitivity y displayNames
-      queryBuilder.andWhere('conv.participants LIKE :pattern', {
-        pattern: `%${username}%`,
-      });
+      // 🚀 MODIFICADO: Buscar tanto por DNI como por Nombre Completo
+      queryBuilder.andWhere(
+        '(conv.participants LIKE :searchByDni OR conv.participants LIKE :searchByName)',
+        {
+          searchByDni: `%${dni}%`,
+          searchByName: `%${fullName}%`,
+        }
+      );
 
       // 3. Excluir favoritos directamente en SQL
-      // 🔥 FIX: Usar subquery con EXISTS para evitar duplicados
+      // 🔥 FIX: Verificar favoritos por DNI
       queryBuilder.andWhere(
         `NOT EXISTS (
           SELECT 1 FROM conversation_favorites cf 
           WHERE cf.conversationId = conv.id 
           AND cf.username = :favUser
         )`,
-        { favUser: username }
+        { favUser: dni }
       );
     }
 
@@ -353,22 +393,27 @@ export class TemporaryConversationsService {
           let lastMessage = null;
 
           try {
-            if (participants.length >= 2 && username && usernameNormalized) {
+            if (participants.length >= 2 && username) {
               const otherParticipants = participants.filter(
-                (p) => this.normalizeUsername(p) !== usernameNormalized,
+                (p) => {
+                  const pNorm = this.normalizeUsername(p);
+                  return pNorm !== dniNormalized && pNorm !== fullNameNormalized;
+                },
               );
 
               if (otherParticipants.length > 0) {
                 // 🔥 SQL OPTIMIZATION: Usar count() directo en DB
                 const qb = this.messageRepository.createQueryBuilder('msg');
                 unreadCount = await qb
-                  .where('msg.to = :me', { me: username })
+                  .where('msg.conversationId = :convId', { convId: conv.id }) // 🔥 Filtrar por conversación primero
+                  .andWhere('(msg.to = :dni OR msg.to = :fullName)', { dni, fullName })
                   .andWhere('msg.from IN (:...others)', { others: otherParticipants })
                   .andWhere('msg.isDeleted = :isDeleted', { isDeleted: false })
                   .andWhere('msg.threadId IS NULL')
                   .andWhere('msg.isGroup = :isGroup', { isGroup: false })
-                  .andWhere('NOT JSON_CONTAINS(COALESCE(msg.readBy, "[]"), :meJson)', {
-                    meJson: JSON.stringify(usernameNormalized),
+                  .andWhere('NOT (JSON_CONTAINS(COALESCE(msg.readBy, "[]"), :dniJson) OR JSON_CONTAINS(COALESCE(msg.readBy, "[]"), :nameJson))', {
+                    dniJson: JSON.stringify(dniNormalized),
+                    nameJson: JSON.stringify(fullNameNormalized),
                   })
                   .getCount();
               }
@@ -399,7 +444,10 @@ export class TemporaryConversationsService {
           let fallbackName = conv.name;
 
           if (participants.length > 0 && username) {
-            const others = participants.filter((p) => this.normalizeUsername(p) !== usernameNormalized);
+            const others = participants.filter((p) => {
+              const pNorm = this.normalizeUsername(p);
+              return pNorm !== dniNormalized && pNorm !== fullNameNormalized;
+            });
             if (others.length > 0) {
               const otherId = others[0];
 
@@ -471,25 +519,23 @@ export class TemporaryConversationsService {
   }
 
   async findByUser(username: string): Promise<any[]> {
+    const { dni, fullName } = await this.getUserIdentifiers(username);
+    const dniNormalized = this.normalizeUsername(dni);
+    const fullNameNormalized = this.normalizeUsername(fullName);
+
     // Obtener todas las conversaciones activas y filtrar en memoria
     const allConversations = await this.temporaryConversationRepository.find({
       where: { isActive: true },
       order: { createdAt: 'DESC' },
     });
 
-    // ?? MODIFICADO: Filtrar conversaciones donde el usuario est� en assignedUsers (normalizado)
-    const usernameNormalized = this.normalizeUsername(username);
-    // Log eliminado para optimizaci�n
-
+    // ?? Filtrar conversaciones donde el usuario esté en assignedUsers (normalizado)
     const userConversations = allConversations.filter((conv) => {
       if (!conv.assignedUsers) return false;
-      const found = conv.assignedUsers.some((u) => {
+      return conv.assignedUsers.some((u) => {
         const uNormalized = this.normalizeUsername(u);
-        const match = uNormalized === usernameNormalized;
-        // Log eliminado para optimizaci�n
-        return match;
+        return uNormalized === dniNormalized || uNormalized === fullNameNormalized;
       });
-      return found;
     });
 
     // Enriquecer cada conversación con el último mensaje y contador de no leídos
@@ -497,40 +543,15 @@ export class TemporaryConversationsService {
       userConversations.map(async (conv) => {
         // Obtener los participantes de la conversación
         const participants = conv.participants || [];
-
-        // Obtener el último mensaje de la conversación
-        // Buscar mensajes entre cualquiera de los participantes
         let lastMessage = null;
         let unreadCount = 0;
 
         if (participants.length >= 2) {
-          // Construir condiciones para buscar mensajes entre los participantes
-          const messageConditions = [];
-
-          for (let i = 0; i < participants.length; i++) {
-            for (let j = i + 1; j < participants.length; j++) {
-              messageConditions.push(
-                {
-                  from: participants[i],
-                  to: participants[j],
-                  isDeleted: false,
-                  threadId: IsNull(),
-                  isGroup: false,
-                },
-                {
-                  from: participants[j],
-                  to: participants[i],
-                  isDeleted: false,
-                  threadId: IsNull(),
-                  isGroup: false,
-                },
-              );
-            }
-          }
-
-          // Obtener el último mensaje
+          // Obtener el último mensaje de la conversación
           const messages = await this.messageRepository.find({
-            where: messageConditions,
+            where: [
+              { conversationId: conv.id, isDeleted: false, threadId: IsNull(), isGroup: false }
+            ],
             order: { sentAt: 'DESC' },
             take: 1,
           });
@@ -565,66 +586,78 @@ export class TemporaryConversationsService {
             };
           }
 
-          // Contar mensajes no leídos (mensajes enviados por otros usuarios que el usuario actual no ha leído)
-          // 🔥 Filtrar solo mensajes dirigidos al usuario actual (case-insensitive)
-          const usernameNormalized = username?.toLowerCase().trim();
-          const filteredConditions = messageConditions.filter(
-            (cond) =>
-              cond.to?.toLowerCase().trim() === usernameNormalized &&
-              cond.from?.toLowerCase().trim() !== usernameNormalized,
-          );
+          // 🔥 CALCULAR UNREAD COUNT
+          try {
+            const otherParticipants = participants.filter((p) => {
+              const pNorm = this.normalizeUsername(p);
+              return pNorm !== dniNormalized && pNorm !== fullNameNormalized;
+            });
 
-          // Filtrar solo los mensajes que no han sido leídos por el usuario actual
-          const allMessages = await this.messageRepository.find({
-            where: filteredConditions,
-          });
-
-          // 🔥 Filtrar mensajes no leídos (case-insensitive en readBy)
-          unreadCount = allMessages.filter((msg) => {
-            if (!msg.readBy || msg.readBy.length === 0) {
-              return true; // No ha sido leído por nadie
+            if (otherParticipants.length > 0) {
+              const qb = this.messageRepository.createQueryBuilder('msg');
+              unreadCount = await qb
+                .where('msg.conversationId = :convId', { convId: conv.id })
+                .andWhere('(msg.to = :dni OR msg.to = :fullName)', { dni, fullName })
+                .andWhere('msg.from IN (:...others)', { others: otherParticipants })
+                .andWhere('msg.isDeleted = :isDeleted', { isDeleted: false })
+                .andWhere('msg.threadId IS NULL')
+                .andWhere('msg.isGroup = :isGroup', { isGroup: false })
+                .andWhere('NOT (JSON_CONTAINS(COALESCE(msg.readBy, "[]"), :dniJson) OR JSON_CONTAINS(COALESCE(msg.readBy, "[]"), :nameJson))', {
+                  dniJson: JSON.stringify(dniNormalized),
+                  nameJson: JSON.stringify(fullNameNormalized),
+                })
+                .getCount();
             }
-            // Verificar si el usuario actual está en readBy (case-insensitive)
-            const isReadByUser = msg.readBy.some(
-              (reader) => reader?.toLowerCase().trim() === usernameNormalized,
-            );
-            return !isReadByUser;
-          }).length;
+          } catch (e) {
+            console.error(`Error counting unread for conv ${conv.id}:`, e);
+          }
         }
 
-        // 🔥 Obtener información del otro participante (role, numeroAgente y PICTURE)
-        const otherParticipants = participants.filter((p) => p !== username);
+        // 🔥 Obtener información del otro participante (imagen, nombre completo, etc.)
+        const others = participants.filter((p) => {
+          const pNorm = this.normalizeUsername(p);
+          return pNorm !== dniNormalized && pNorm !== fullNameNormalized;
+        });
+
         let otherParticipantRole = null;
         let otherParticipantNumeroAgente = null;
         let otherParticipantPicture = null;
+        let otherParticipantFullName = null;
 
-        if (otherParticipants.length > 0) {
-          // Buscar el otro participante en la tabla chat_users
-          const otherParticipantName = otherParticipants[0];
+        if (others.length > 0) {
+          const otherId = others[0];
           const otherUser = await this.userRepository.findOne({
-            where: { username: otherParticipantName },
+            where: { username: otherId },
+            select: ['id', 'username', 'picture', 'nombre', 'apellido', 'role', 'numeroAgente'],
           });
 
           if (otherUser) {
             otherParticipantRole = otherUser.role;
             otherParticipantNumeroAgente = otherUser.numeroAgente;
             otherParticipantPicture = otherUser.picture;
+            if (otherUser.nombre && otherUser.apellido) {
+              otherParticipantFullName = `${otherUser.nombre} ${otherUser.apellido}`;
+            }
           }
         }
 
         return {
           ...conv,
+          name: otherParticipantFullName || conv.name,
           unreadCount,
-          role: otherParticipantRole, // 🔥 Incluir role del otro participante
-          numeroAgente: otherParticipantNumeroAgente, // 🔥 Incluir numeroAgente del otro participante
-          picture: otherParticipantPicture, // 🔥 Incluir picture del otro participante
+          lastMessage,
+          role: otherParticipantRole,
+          numeroAgente: otherParticipantNumeroAgente,
+          picture: otherParticipantPicture,
         };
       }),
     );
 
-    // Ordenar por último mensaje (más reciente primero)
+    // Ordenar por último mensaje o creación (más reciente primero)
     enrichedConversations.sort((a, b) => {
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      const aTime = a.lastMessage?.sentAt || a.createdAt;
+      const bTime = b.lastMessage?.sentAt || b.createdAt;
+      return new Date(bTime).getTime() - new Date(aTime).getTime();
     });
 
     return enrichedConversations;
