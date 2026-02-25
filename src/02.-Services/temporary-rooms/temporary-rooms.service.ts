@@ -389,30 +389,26 @@ export class TemporaryRoomsService {
   ): Promise<TemporaryRoom> {
     const room = await this.findByRoomCode(joinDto.roomCode);
 
-    const { dni, fullName } = await this.getUserIdentifiers(username);
+    // 🔥 MEJORADO: Obtener todos los alias para verificación de membresía robusta
+    const aliases = await this.messagesService.resolveUserAliases(username);
+    const aliasSet = new Set(aliases.map(a => a.toLowerCase().trim()));
 
     if (!room.members) room.members = [];
     if (!room.connectedMembers) room.connectedMembers = [];
     if (!room.pendingMembers) room.pendingMembers = [];
 
-    // 🔥 MODIFICADO: Verificar usando tanto DNI como Nombre Completo
-    const wasAlreadyMember = room.members.includes(dni) || room.members.includes(fullName);
-    const isPending = room.pendingMembers.includes(dni) || room.pendingMembers.includes(fullName);
+    // Verificar usando todos los alias posibles (DNI, Nombre Actual, Nombres Viejos)
+    const wasAlreadyMember = room.members.some(m => aliasSet.has((m || '').toString().toLowerCase().trim()));
+    const isPending = room.pendingMembers.some(m => aliasSet.has((m || '').toString().toLowerCase().trim()));
 
     // Si ya está pendiente, notificar al usuario
     if (isPending) {
       throw new BadRequestException('Tu solicitud para unirte a esta sala está pendiente de aprobación.');
     }
 
-    // Si NO es miembro y NO está pendiente, agregarlo a pendientes (NO a members)
-    // EXCEPCIÓN: Si el usuario es el CREADOR, entra directo
-    // EXCEPCIÓN: Si la sala es pública o no requiere aprobación (podríamos agregar un flag isPublic)
-    // POR AHORA: Aplicamos lógica de aprobación para evitar "ghost users"
-
-    // Verificar si es el creador (si tenemos userId en algún lado, pero aquí solo llega username)
-    // Asumiremos que si no es miembro, va a pendiente.
+    // Si NO es miembro y NO está pendiente, agregarlo a pendientes
     if (!wasAlreadyMember) {
-      // Verificar capacidad (considerando miembros + pendientes?)
+      // Verificar capacidad
       if (room.members.length >= room.maxCapacity) {
         throw new BadRequestException(`La sala ha alcanzado su capacidad máxima (${room.maxCapacity} usuarios)`);
       }
@@ -421,7 +417,7 @@ export class TemporaryRoomsService {
       room.pendingMembers.push(username);
       await this.temporaryRoomRepository.save(room);
 
-      // Notificar a Admins (si hubiera lógica en gateway)
+      // Notificar a Admins
       if (this.socketGateway && this.socketGateway.notifyAdminJoinRequest) {
         this.socketGateway.notifyAdminJoinRequest(room.roomCode, username);
       }
@@ -431,8 +427,8 @@ export class TemporaryRoomsService {
 
     // --- FLUJO NORMAL PARA MIEMBROS YA APROBADOS ---
 
-    // Verificar si el usuario ya estaba conectado
-    const wasAlreadyConnected = room.connectedMembers.includes(username);
+    // Verificar si el usuario ya estaba conectado (por cualquier alias)
+    const wasAlreadyConnected = room.connectedMembers.some(m => aliasSet.has((m || '').toString().toLowerCase().trim()));
 
     if (wasAlreadyConnected) {
       return room;
@@ -471,14 +467,16 @@ export class TemporaryRoomsService {
       throw new NotFoundException(`No se encontró solicitud pendiente para ${username}`);
     }
 
-    const { dni, fullName } = await this.getUserIdentifiers(username);
+    // 🔥 MEJORADO: Usar alias para mover de pending a members
+    const aliases = await this.messagesService.resolveUserAliases(username);
+    const aliasSet = new Set(aliases.map(a => a.toLowerCase().trim()));
 
-    // Mover de pending a members (limpiar ambos identificadores posibles)
-    room.pendingMembers = room.pendingMembers.filter(u => u !== dni && u !== fullName);
+    // Mover de pending a members (limpiar todos los alias posibles)
+    room.pendingMembers = room.pendingMembers.filter(m => !aliasSet.has((m || '').toString().toLowerCase().trim()));
 
     if (!room.members) room.members = [];
-    if (!room.members.includes(dni) && !room.members.includes(fullName)) {
-      room.members.push(dni);
+    if (!room.members.some(m => aliasSet.has((m || '').toString().toLowerCase().trim()))) {
+      room.members.push(username);
     }
 
     // Opcional: Agregar también a assignedMembers si se requiere "fijarlo"
@@ -506,20 +504,21 @@ export class TemporaryRoomsService {
 
     const room = await this.findByRoomCode(roomCode);
 
-    const { dni, fullName } = await this.getUserIdentifiers(username);
+    const aliases = await this.messagesService.resolveUserAliases(username);
+    const aliasSet = new Set(aliases.map(a => a.toLowerCase().trim()));
 
     // Inicializar arrays si no existen
     if (!room.members) room.members = [];
     if (!room.connectedMembers) room.connectedMembers = [];
     if (!room.pendingMembers) room.pendingMembers = [];
 
-    // Verificar si ya es miembro (por DNI o Nombre)
-    if (room.members.includes(dni) || room.members.includes(fullName)) {
-      console.log(`✅ Usuario ${username} ya es miembro, solo agregando a connectedMembers`);
+    // Verificar si ya es miembro (por cualquier alias)
+    if (room.members.some(m => aliasSet.has((m || '').toString().toLowerCase().trim()))) {
+      console.log(`✅ Usuario ${username} ya es miembro, solo agregando a connectedMembers si falta`);
 
-      // Solo agregar a connectedMembers si no está
-      if (!room.connectedMembers.includes(dni) && !room.connectedMembers.includes(fullName)) {
-        room.connectedMembers.push(dni);
+      // Solo agregar a connectedMembers si no está por ningún alias
+      if (!room.connectedMembers.some(m => aliasSet.has((m || '').toString().toLowerCase().trim()))) {
+        room.connectedMembers.push(username);
         await this.temporaryRoomRepository.save(room);
       }
 
@@ -574,11 +573,20 @@ export class TemporaryRoomsService {
       return;
     }
 
-    const { dni, fullName } = await this.getUserIdentifiers(username);
+    // 🔥 MEJORADO: Obtener todos los alias para validación de acceso robusta
+    const aliases = await this.messagesService.resolveUserAliases(username);
+    const aliasSet = new Set(aliases.map(a => a.toLowerCase().trim()));
 
-    // 1. Verificar si está en pendientes (usando ambos identificadores)
-    if (room.pendingMembers && (room.pendingMembers.includes(dni) || room.pendingMembers.includes(fullName))) {
-      throw new ForbiddenException(`Tu solicitud para unirte a "${room.name}" está pendiente de aprobación.`);
+    // 1. Verificar si está en pendientes (usando todos los alias)
+    if (room.pendingMembers) {
+      const isPending = room.pendingMembers.some(member => {
+        const m = (member || '').toString().toLowerCase().trim();
+        return aliasSet.has(m);
+      });
+
+      if (isPending) {
+        throw new ForbiddenException(`Tu solicitud para unirte a "${room.name}" está pendiente de aprobación.`);
+      }
     }
   }
 
@@ -600,18 +608,23 @@ export class TemporaryRoomsService {
       );
     }
 
-    const { dni, fullName } = await this.getUserIdentifiers(username);
+    // 🔥 MEJORADO: Obtener todos los alias para una desconexión limpia
+    const aliases = await this.messagesService.resolveUserAliases(username);
+    const aliasSet = new Set(aliases.map(a => a.toLowerCase().trim()));
 
     if (!room.connectedMembers) {
       room.connectedMembers = [];
     }
 
-    // Remover el usuario solo de connectedMembers (limpiar ambos identificadores posibles)
+    // Remover el usuario solo de connectedMembers (limpiar todos los alias posibles)
     const initialLength = room.connectedMembers.length;
-    room.connectedMembers = room.connectedMembers.filter(u => u !== dni && u !== fullName);
+    room.connectedMembers = room.connectedMembers.filter(member => {
+      const m = (member || '').toString().toLowerCase().trim();
+      return !aliasSet.has(m);
+    });
 
     if (room.connectedMembers.length < initialLength) {
-      console.log(`✅ Usuario ${username} (o su nombre) removido de connectedMembers. Quedan: ${room.connectedMembers.length}`);
+      console.log(`✅ Usuario ${username} (y sus alias) removido de connectedMembers. Quedan: ${room.connectedMembers.length}`);
     }
 
     // ❌ ELIMINADO: Ya NO removemos de 'members'
@@ -647,56 +660,99 @@ export class TemporaryRoomsService {
       throw new NotFoundException('Sala no encontrada');
     }
 
-    const { dni, fullName } = await this.getUserIdentifiers(username);
+    // 🔥 MEJORADO: Obtener TODOS los alias del usuario (Nombres históricos, DNI, Email)
+    const aliases = await this.messagesService.resolveUserAliases(username);
+    const aliasSet = new Set(aliases.map(a => a.toLowerCase().trim()));
+
+    console.log(`🗑️ Eliminación inteligente de ${username} en sala ${roomCode}. Aliases a limpiar:`, aliases);
 
     // Remover el usuario de connectedMembers
     if (room.connectedMembers) {
-      room.connectedMembers = room.connectedMembers.filter(
-        (u) => u !== dni && u !== fullName,
-      );
-      // 👈 MODIFICADO: currentMembers debe ser el total de usuarios AÑADIDOS (members), no solo conectados
-      room.currentMembers = room.members.length;
+      const initialCount = room.connectedMembers.length;
+      room.connectedMembers = room.connectedMembers.filter(member => {
+        const m = (member || '').toString().toLowerCase().trim();
+        return !aliasSet.has(m);
+      });
+      if (room.connectedMembers.length < initialCount) {
+        console.log(`✅ Se limpiaron ${initialCount - room.connectedMembers.length} registros de connectedMembers`);
+      }
     }
 
-    // Remover el usuario de members (historial)
+    // Remover el usuario de members (Membresía persistente)
     if (room.members) {
-      room.members = room.members.filter((u) => u !== dni && u !== fullName);
+      const initialCount = room.members.length;
+      room.members = room.members.filter(member => {
+        const m = (member || '').toString().toLowerCase().trim();
+        return !aliasSet.has(m);
+      });
+      if (room.members.length < initialCount) {
+        console.log(`✅ Se limpiaron ${initialCount - room.members.length} registros de members`);
+      }
+      // Actualizar conteo basado en miembros reales
+      room.currentMembers = room.members.length;
     }
 
     // Remover el usuario de assignedMembers si está asignado
     if (room.assignedMembers) {
-      room.assignedMembers = room.assignedMembers.filter((u) => u !== dni && u !== fullName);
+      const initialCount = room.assignedMembers.length;
+      room.assignedMembers = room.assignedMembers.filter(member => {
+        const m = (member || '').toString().toLowerCase().trim();
+        return !aliasSet.has(m);
+      });
+      if (room.assignedMembers.length < initialCount) {
+        console.log(`✅ Se limpiaron ${initialCount - room.assignedMembers.length} registros de assignedMembers`);
+      }
+    }
+
+    // Remover de pendingMembers por si acaso
+    if (room.pendingMembers) {
+      room.pendingMembers = room.pendingMembers.filter(member => {
+        const m = (member || '').toString().toLowerCase().trim();
+        return !aliasSet.has(m);
+      });
     }
 
     await this.temporaryRoomRepository.save(room);
 
     // 🔥 NUEVO: Remover de favoritos automáticamente al ser expulsado
-    try {
-      await this.roomFavoritesService.removeFavorite(username, roomCode);
-    } catch (error) {
-      console.error(`❌ Error al remover favorito de usuario expulsado (${username}):`, error);
+    // Intentar remover para todos los alias posibles
+    for (const alias of aliases) {
+      try {
+        await this.roomFavoritesService.removeFavorite(alias, roomCode);
+      } catch (error) {
+        // Ignorar errores individuales de favoritos
+      }
     }
 
     // Limpiar la sala actual del usuario en la base de datos
-    try {
-      const user = await this.userRepository.findOne({ where: { username } });
-      if (user && user.currentRoomCode === roomCode) {
-        user.currentRoomCode = null;
-        await this.userRepository.save(user);
+    // Intentar con el username original y con cualquier DNI encontrado en los alias
+    const dnis = aliases.filter(a => !isNaN(Number(a)) && a.length >= 8);
+    const usersToClear = Array.from(new Set([username, ...dnis]));
+
+    for (const uToClear of usersToClear) {
+      try {
+        const user = await this.userRepository.findOne({ where: { username: uToClear } });
+        if (user && user.currentRoomCode === roomCode) {
+          user.currentRoomCode = null;
+          await this.userRepository.save(user);
+          console.log(`✅ Sala actual del usuario ${uToClear} limpiada en BD`);
+        }
+      } catch (error) {
+        console.error(`❌ Error al limpiar sala actual para ${uToClear}:`, error);
       }
-    } catch (error) {
-      console.error('❌ Error al limpiar sala actual del usuario:', error);
     }
 
-    // Notificar a través del socket gateway con roomName y removedBy
+    // Notificar a través del socket gateway
     if (this.socketGateway) {
       this.socketGateway.handleUserRemovedFromRoom(roomCode, username, room.name, removedBy);
     }
 
     return {
-      message: `Usuario ${username} eliminado de la sala ${room.name}`,
+      success: true,
+      message: `Usuario ${username} y sus alias eliminados de la sala ${room.name}`,
       roomCode: room.roomCode,
       username: username,
+      aliasesRemoved: aliases.length,
       removedBy: removedBy || 'Administrador',
     };
   }
