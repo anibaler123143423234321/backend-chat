@@ -64,12 +64,21 @@ export class MessagesController {
   @ApiResponse({ status: 400, description: 'Datos inválidos' })
   async create(@Body() createMessageDto: CreateMessageDto) {
     console.log(`[MessagesController] CREATING MESSAGE FULL PAYLOAD:`, JSON.stringify(createMessageDto, null, 2));
-    // Obtener senderRole y senderNumeroAgente de la BD si no vienen en el DTO
+    // 🔥 FIX: Obtener senderRole y senderNumeroAgente de la BD si no vienen en el DTO
+    // Robustez: Manejar si 'from' es un DNI o un Nombre Completo
     if (createMessageDto.from && (!createMessageDto.senderRole || !createMessageDto.senderNumeroAgente)) {
       try {
-        const dbUser = await this.userRepository.findOne({
-          where: { username: createMessageDto.from },
+        const fromValue = createMessageDto.from.trim();
+        let dbUser = await this.userRepository.findOne({
+          where: { username: fromValue },
         });
+
+        // Si no se encuentra por username, intentar por Nombre Completo
+        if (!dbUser) {
+          dbUser = await this.userRepository.createQueryBuilder('user')
+            .where("CONCAT(user.nombre, ' ', user.apellido) = :fullName", { fullName: fromValue })
+            .getOne();
+        }
 
         if (dbUser) {
           if (!createMessageDto.senderRole) {
@@ -78,9 +87,12 @@ export class MessagesController {
           if (!createMessageDto.senderNumeroAgente) {
             createMessageDto.senderNumeroAgente = dbUser.numeroAgente;
           }
-          // console.log(
-          //   `Controller - Info del remitente de BD: role=${createMessageDto.senderRole}, numeroAgente=${createMessageDto.senderNumeroAgente}`,
-          // );
+
+          // 🔥 IMPORTANTE: Si 'from' era un nombre, lo normalizamos a username (DNI) para consistencia en BD
+          if (createMessageDto.from !== dbUser.username) {
+            console.log(`♻️ Normalizando remitente: "${createMessageDto.from}" -> "${dbUser.username}"`);
+            createMessageDto.from = dbUser.username;
+          }
         }
       } catch (error) {
         console.error(`Controller - Error al buscar usuario en BD:`, error);

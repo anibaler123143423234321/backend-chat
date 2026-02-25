@@ -1643,7 +1643,7 @@ export class SocketGateway
     }
 
     @SubscribeMessage('typing')
-    handleTyping(
+    async handleTyping(
         @ConnectedSocket() client: Socket,
         @MessageBody()
         data: { from: string; to: string; isTyping: boolean; roomCode?: string },
@@ -1665,6 +1665,13 @@ export class SocketGateway
         // Actualizar momento del último envío
         this.typingThrottle.set(throttleKey, now);
 
+        // 🔥 FIX: Obtener el NOMBRE COMPLETO para mostrar en lugar del DNI
+        let fromName = data.from;
+        const senderData = await this.getSenderData(data.from);
+        if (senderData?.fullName) {
+            fromName = senderData.fullName;
+        }
+
         // ----------------------------------------
         // Lógica optimizada para Cluster (Redis Adapter)
         // ----------------------------------------
@@ -1672,7 +1679,7 @@ export class SocketGateway
         if (data.roomCode) {
             // Broadcast a la sala de grupo (gestionada por Redis)
             this.server.to(data.roomCode).emit('roomTyping', {
-                from: data.from,
+                from: fromName,
                 roomCode: data.roomCode,
                 isTyping: data.isTyping,
             });
@@ -1682,11 +1689,11 @@ export class SocketGateway
             // Enviar a variantes normalizadas también para asegurar entrega
             const targetRooms = [data.to, data.to?.toLowerCase?.()].filter(Boolean);
 
-            console.log(`⌨️ Typing broadcast a salas: ${JSON.stringify(targetRooms)}, from: ${data.from}, isTyping: ${data.isTyping}`);
+            console.log(`⌨️ Typing broadcast a salas: ${JSON.stringify(targetRooms)}, from: ${fromName}, isTyping: ${data.isTyping}`);
 
             for (const room of targetRooms) {
                 this.server.to(room).emit('userTyping', {
-                    from: data.from,
+                    from: fromName,
                     to: data.to,  //  FIX: Incluir 'to' para que el frontend valide correctamente
                     isTyping: data.isTyping,
                 });
@@ -1737,56 +1744,14 @@ export class SocketGateway
         } = data;
 
         //  Obtener información del remitente (role y numeroAgente)
-        const senderUser = this.users.get(from);
-        let senderRole = senderUser?.userData?.role || null;
-        let senderNumeroAgente = senderUser?.userData?.numeroAgente || null;
-
-        // Log DEBUG removido para optimización
-
-        // 🚀 OPTIMIZADO: Usar userCache primero (O(1)) antes de consultar BD
-        if (!senderRole || !senderNumeroAgente) {
-            // 1. Verificar en userCache (más rápido que BD)
-            const cachedUserInfo = this.userCache.get(from);
-            if (cachedUserInfo && (Date.now() - cachedUserInfo.cachedAt < this.CACHE_TTL)) {
-                senderRole = senderRole || cachedUserInfo.role;
-                senderNumeroAgente = senderNumeroAgente || cachedUserInfo.numeroAgente;
-            }
-            // 2. Si aún falta info, verificar en users Map (ya conectados)
-            else if (senderUser?.userData?.role || senderUser?.userData?.numeroAgente) {
-                senderRole = senderRole || senderUser.userData.role;
-                senderNumeroAgente = senderNumeroAgente || senderUser.userData.numeroAgente;
-            }
-            // 3. Solo consultar BD como último recurso
-            else if (!senderRole || !senderNumeroAgente) {
-                try {
-                    const dbUser = await this.userRepository.findOne({
-                        where: { username: from },
-                        select: ['id', 'username', 'role', 'numeroAgente', 'nombre', 'apellido'], // Solo campos necesarios
-                    });
-
-                    if (dbUser) {
-                        senderRole = dbUser.role || senderRole;
-                        senderNumeroAgente = dbUser.numeroAgente || senderNumeroAgente;
-
-                        // Cachear para futuras consultas
-                        this.userCache.set(from, {
-                            id: dbUser.id,
-                            username: dbUser.username,
-                            nombre: dbUser.nombre,
-                            apellido: dbUser.apellido,
-                            role: dbUser.role,
-                            numeroAgente: dbUser.numeroAgente,
-                            cachedAt: Date.now(),
-                        });
-                    }
-                } catch (error) {
-                    console.error(`❌ Error al buscar usuario en BD:`, error);
-                }
-            }
-        }
+        // 🔥 FIX: Búsqueda robusta que maneja DNI o Nombre Completo en 'from'
+        const senderData = await this.getSenderData(from);
+        const resolvedFrom = senderData?.username || from; // Si resolvemos a DNI, lo usamos para consistencia
+        const senderRole = senderData?.role || null;
+        const senderNumeroAgente = senderData?.numeroAgente || null;
 
         //  CRÍTICO: Determinar el roomCode ANTES de guardar en BD
-        const user = this.users.get(from);
+        const user = this.users.get(resolvedFrom); // Usar DNI resuelto para lookup local
         const finalRoomCode = messageRoomCode || user?.currentRoom;
 
         // 🚀 OPTIMIZACIÓN: GUARDADO NO BLOQUEANTE
@@ -1800,6 +1765,7 @@ export class SocketGateway
         // Mensaje "optimista" para emisión inmediata
         const optimisticMessage = {
             ...data,
+            from: resolvedFrom, // 🔥 Normalizar a DNI si se resolvió
             id: tempId,
             sentAt: data.sentAt || peruDate,
             time: data.time || calculatedTime,
@@ -1815,12 +1781,12 @@ export class SocketGateway
         // Solo si no tiene ID real (no guardado por frontend)
         if (!data.id) {
             // Guardar en background sin await
-            this.saveMessageInBackground(data, finalRoomCode, senderRole, senderNumeroAgente, tempId, from);
+            this.saveMessageInBackground(data, finalRoomCode, senderRole, senderNumeroAgente, tempId, resolvedFrom);
         }
 
         // 🚀 OPTIMIZADO: Broadcast INMEDIATO (sin esperar BD)
         // Capturar variables necesarias para el closure
-        const msgContext = { savedMessage: optimisticMessage, isGroup, to, from, message, time: calculatedTime, mediaType, mediaData, fileName, fileSize, replyToMessageId, replyToSender, replyToText, senderRole, senderNumeroAgente, finalRoomCode, data };
+        const msgContext = { savedMessage: optimisticMessage, isGroup, to, from: resolvedFrom, message, time: calculatedTime, mediaType, mediaData, fileName, fileSize, replyToMessageId, replyToSender, replyToText, senderRole, senderNumeroAgente, finalRoomCode, data };
 
         setImmediate(async () => {
             try {
@@ -3874,18 +3840,15 @@ export class SocketGateway
             // 🚀 PASO 1: Guardar mensaje en BD si no tiene ID (no fue guardado por frontend)
             if (!data.id && threadId) {
                 try {
-                    // Obtener info del remitente
-                    const senderUser = this.users.get(from);
-                    let senderRole = senderUser?.userData?.role || null;
-                    let senderNumeroAgente = senderUser?.userData?.numeroAgente || null;
+                    // 🔥 FIX: Búsqueda robusta que maneja DNI o Nombre Completo en 'from'
+                    const senderData = await this.getSenderData(from);
+                    const resolvedFrom = senderData?.username || from;
+                    const senderRole = senderData?.role || null;
+                    const senderNumeroAgente = senderData?.numeroAgente || null;
 
-                    // Buscar en caché si no tenemos la info
-                    if (!senderRole || !senderNumeroAgente) {
-                        const cachedUserInfo = this.userCache.get(from);
-                        if (cachedUserInfo && (Date.now() - cachedUserInfo.cachedAt < this.CACHE_TTL)) {
-                            senderRole = senderRole || cachedUserInfo.role;
-                            senderNumeroAgente = senderNumeroAgente || cachedUserInfo.numeroAgente;
-                        }
+                    // Si resolvemos a un DNI diferente al que vino, lo actualizamos en data para el guardado
+                    if (resolvedFrom !== from) {
+                        data.from = resolvedFrom;
                     }
 
                     // Guardar mensaje de hilo en BD
@@ -4802,4 +4765,93 @@ export class SocketGateway
         }
     }
 
+    // 🔥 NUEVO: Método robusto para obtener datos del remitente por DNI o Nombre Completo
+    private async getSenderData(identifier: string): Promise<{
+        username: string,
+        role: string,
+        numeroAgente: string,
+        fullName: string,
+        socketId?: string
+    } | null> {
+        if (!identifier) return null;
+        const normalizedInput = identifier.trim();
+
+        // 1. Intentar lookup rápido en users Map (username exacto/DNI)
+        const localUser = this.users.get(normalizedInput);
+        if (localUser?.userData) {
+            return {
+                username: normalizedInput,
+                role: localUser.userData.role,
+                numeroAgente: localUser.userData.numeroAgente,
+                fullName: `${localUser.userData.nombre || ''} ${localUser.userData.apellido || ''}`.trim(),
+                socketId: localUser.socket.id
+            };
+        }
+
+        // 2. Intentar lookup en userCache (memoria local o Redis)
+        const cached = this.userCache.get(normalizedInput);
+        if (cached && (Date.now() - cached.cachedAt < this.CACHE_TTL)) {
+            return {
+                username: cached.username,
+                role: cached.role,
+                numeroAgente: cached.numeroAgente,
+                fullName: `${cached.nombre || ''} ${cached.apellido || ''}`.trim()
+            };
+        }
+
+        // 3. Buscar por Nombre Completo en el índice case-insensitive si existe (opcional)
+
+        // 4. Búsqueda robusta en Base de Datos (Último recurso)
+        try {
+            let dbUser = await this.userRepository.findOne({
+                where: { username: normalizedInput },
+                select: ['id', 'username', 'role', 'numeroAgente', 'nombre', 'apellido']
+            });
+
+            if (!dbUser) {
+                // Buscar por Nombre Completo
+                dbUser = await this.userRepository.createQueryBuilder('user')
+                    .where("CONCAT(user.nombre, ' ', user.apellido) = :fullName", { fullName: normalizedInput })
+                    .getOne();
+            }
+
+            if (dbUser) {
+                const userData = {
+                    username: dbUser.username,
+                    role: dbUser.role,
+                    numeroAgente: dbUser.numeroAgente,
+                    fullName: `${dbUser.nombre || ''} ${dbUser.apellido || ''}`.trim()
+                };
+
+                // Cachear para futuras consultas
+                this.userCache.set(dbUser.username, {
+                    id: dbUser.id,
+                    username: dbUser.username,
+                    nombre: dbUser.nombre,
+                    apellido: dbUser.apellido,
+                    role: dbUser.role,
+                    numeroAgente: dbUser.numeroAgente,
+                    cachedAt: Date.now()
+                });
+
+                if (normalizedInput !== dbUser.username) {
+                    this.userCache.set(normalizedInput, {
+                        id: dbUser.id,
+                        username: dbUser.username,
+                        nombre: dbUser.nombre,
+                        apellido: dbUser.apellido,
+                        role: dbUser.role,
+                        numeroAgente: dbUser.numeroAgente,
+                        cachedAt: Date.now()
+                    });
+                }
+
+                return userData;
+            }
+        } catch (error) {
+            console.error(`❌ Error en getSenderData para ${normalizedInput}:`, error);
+        }
+
+        return null;
+    }
 }

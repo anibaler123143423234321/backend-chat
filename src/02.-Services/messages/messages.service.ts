@@ -593,8 +593,10 @@ export class MessagesService {
       // Esto es más eficiente que truncar en JavaScript porque la BD nunca envía el texto completo
       const lastReplies = await this.messageRepository
         .createQueryBuilder('message')
+        .leftJoin(User, 'user', 'user.username = message.from')
         .select('message.threadId', 'threadId')
         .addSelect('message.from', 'from')
+        .addSelect("COALESCE(CONCAT(user.nombre, ' ', user.apellido), message.from)", 'fromName')
         .addSelect('CASE WHEN LENGTH(message.message) > 100 THEN CONCAT(SUBSTRING(message.message, 1, 100), "...") ELSE message.message END', 'message')
         .where('message.threadId IN (:...messageIds)', { messageIds })
         .andWhere('message.isDeleted = false')
@@ -606,7 +608,7 @@ export class MessagesService {
       // map local declarado arriba
       lastReplies.forEach((reply) => {
         if (!seenThreadIds.has(reply.threadId)) {
-          lastReplyMap[reply.threadId] = reply.from;
+          lastReplyMap[reply.threadId] = reply.fromName || reply.from;
           lastReplyTextMap[reply.threadId] = reply.message || '';
           seenThreadIds.add(reply.threadId);
         }
@@ -950,8 +952,10 @@ export class MessagesService {
       // 🚀 OPTIMIZADO: Truncar texto directamente en SQL
       const lastReplies = await this.messageRepository
         .createQueryBuilder('message')
+        .leftJoin(User, 'user', 'user.username = message.from')
         .select('message.threadId', 'threadId')
         .addSelect('message.from', 'from')
+        .addSelect("COALESCE(CONCAT(user.nombre, ' ', user.apellido), message.from)", 'fromName')
         .addSelect('CASE WHEN LENGTH(message.message) > 100 THEN CONCAT(SUBSTRING(message.message, 1, 100), "...") ELSE message.message END', 'message')
         .where('message.threadId IN (:...messageIds)', { messageIds })
         .andWhere('message.isDeleted = false')
@@ -963,7 +967,7 @@ export class MessagesService {
       const lastReplyTextMap: Record<number, string> = {};
       lastReplies.forEach((reply) => {
         if (!seenThreadIds.has(reply.threadId)) {
-          lastReplyMap[reply.threadId] = reply.from;
+          lastReplyMap[reply.threadId] = reply.fromName || reply.from;
           lastReplyTextMap[reply.threadId] = reply.message || '';
           seenThreadIds.add(reply.threadId);
         }
@@ -2607,8 +2611,10 @@ export class MessagesService {
       // 2. Last Replies
       const lastReplies = await this.messageRepository
         .createQueryBuilder('message')
+        .leftJoin(User, 'user', 'user.username = message.from')
         .select('message.threadId', 'threadId')
         .addSelect('message.from', 'from')
+        .addSelect("COALESCE(CONCAT(user.nombre, ' ', user.apellido), message.from)", 'fromName')
         .addSelect(
           'CASE WHEN LENGTH(message.message) > 100 THEN CONCAT(SUBSTRING(message.message, 1, 100), "...") ELSE message.message END',
           'message',
@@ -2622,7 +2628,7 @@ export class MessagesService {
       const seenThreadIds = new Set<number>();
       lastReplies.forEach((reply) => {
         if (!seenThreadIds.has(reply.threadId)) {
-          lastReplyMap[reply.threadId] = reply.from;
+          lastReplyMap[reply.threadId] = reply.fromName || reply.from;
           lastReplyTextMap[reply.threadId] = reply.message || '';
           seenThreadIds.add(reply.threadId);
         }
@@ -2675,9 +2681,14 @@ export class MessagesService {
           .orWhere("CONCAT(COALESCE(user.nombre, ''), ' ', COALESCE(user.apellido, ''), ' ') IN (:...names)", { names: missingUsernames })
           .getMany();
 
+        const fullNameMap: Record<string, string> = {};
         users.forEach(u => {
+          const fullName = `${u.nombre || ''} ${u.apellido || ''}`.trim();
+          if (fullName) {
+            fullNameMap[u.username] = fullName;
+          }
+
           if (u.picture) {
-            const fullName = `${u.nombre || ''} ${u.apellido || ''}`.trim();
             const fullNameWithSpace = `${fullName} `;
 
             // Map back to requested keys
@@ -2695,23 +2706,30 @@ export class MessagesService {
             }
           }
         });
+        (this as any)._currentBatchFullNameMap = fullNameMap;
       } catch (err) {
         console.error('Error fetching user pictures in enrichMessages:', err);
       }
     }
 
     // 4. Map messages & Return
+    const batchFullNameMap = (this as any)._currentBatchFullNameMap || {};
+
     return messages.map((msg) => {
       // Asegurar que msg es un objeto plano si es una entidad
       const msgObj = typeof msg.toJSON === 'function' ? msg.toJSON() : msg;
 
+      // Intentar resolver el nombre completo del remitente
+      const resolvedFromName = batchFullNameMap[msg.from] || msg.from;
+
       const enrichedMsg = {
         ...msgObj,
+        from: resolvedFromName, // 🔥 Ahora el 'from' trae el nombre completo si está disponible
         threadCount: threadCountMap[msg.id] || 0,
         lastReplyFrom: lastReplyMap[msg.id] || null,
         lastReplyText: lastReplyTextMap[msg.id] || null,
         attachments: attachmentsMap[msg.id] || msg.attachments || [],
-        picture: userMap[msg.from] || null,
+        picture: userMap[msg.from] || userMap[resolvedFromName] || null,
       };
 
       return this.sanitizeMessage(enrichedMsg);
