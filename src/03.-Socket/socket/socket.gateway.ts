@@ -575,8 +575,10 @@ export class SocketGateway
             const relevantUsers = new Set<string>();
 
             // A. Añadir participantes de conversaciones asignadas
+            console.log(`🔍 [WHITELIST-DEBUG] assignedConversations count: ${assignedConversations?.length || 0}`);
             if (assignedConversations && assignedConversations.length > 0) {
-                assignedConversations.forEach(conv => {
+                assignedConversations.forEach((conv, idx) => {
+                    console.log(`🔍 [WHITELIST-DEBUG] conv[${idx}]: id=${conv.id}, participants=${JSON.stringify(conv.participants)}, keys=${Object.keys(conv).join(',')}`);
                     if (conv.participants && Array.isArray(conv.participants)) {
                         conv.participants.forEach(p => relevantUsers.add(p.toLowerCase().trim()));
                     }
@@ -626,13 +628,13 @@ export class SocketGateway
 
             // Filtrar y enviar
             let sentCount = 0;
+            // 🔍 DEBUG: Mostrar whitelist para diagnóstico
+            console.log(`🔍 [ONLINE-DEBUG] Whitelist de usuarios relevantes (${relevantUsers.size}):`, [...relevantUsers].slice(0, 20));
             for (const user of onlineUsers) {
                 const targetUsername = user.username?.toLowerCase().trim();
-                // 🔥 FIX: También construir display name para comparar contra whitelist
-                // La whitelist tiene display names de participantes (ej: "karen garcia")
-                // pero targetUsername es el username crudo de Redis (ej: "kgarcia")
-                const targetDisplayName = user.nombre && user.apellido
-                    ? `${user.nombre} ${user.apellido}`.toLowerCase().trim()
+                // 🔥 FIX: Construir display name robusto (permitir nombre o apellido solos)
+                const targetDisplayName = (user.nombre || user.apellido)
+                    ? `${user.nombre || ''} ${user.apellido || ''}`.toLowerCase().trim()
                     : null;
 
                 //  FILTRO: Solo enviar si es relevante o si es el mismo usuario (para confirmación)
@@ -641,15 +643,17 @@ export class SocketGateway
                     targetUsername === username.toLowerCase().trim();
 
                 if (isRelevant) {
+                    const emitDisplayName = (user.nombre || user.apellido)
+                        ? `${user.nombre || ''} ${user.apellido || ''}`.trim()
+                        : user.username;
+                    console.log(`📤 [ONLINE-DEBUG] Enviando estado: ${emitDisplayName} (${user.username}) isOnline=true`);
                     socket.emit('userStatusChanged', {
-                        username: targetDisplayName
-                            ? `${user.nombre} ${user.apellido}`
-                            : user.username,
+                        username: emitDisplayName,
                         originalUsername: user.username,
                         isOnline: true,
                         nombre: user.nombre,
                         apellido: user.apellido,
-                        picture: user.picture, // 📸 FIX: Enviar foto
+                        picture: user.picture,
                     });
                     sentCount++;
                 }
@@ -684,10 +688,9 @@ export class SocketGateway
                 this.adminUsers.delete(username);
                 this.usernameIndex.delete(username.toLowerCase().trim());
 
-                const displayName =
-                    userData?.nombre && userData?.apellido
-                        ? `${userData.nombre} ${userData.apellido}`
-                        : username;
+                const displayName = (userData?.nombre || userData?.apellido)
+                    ? `${userData.nombre || ''} ${userData.apellido || ''}`.trim()
+                    : username;
 
                 // 🚀 DEBOUNCE: No marcar offline inmediatamente, esperar 10 segundos
                 // Si el usuario se reconecta antes, cancelamos el timeout y no notificamos offline
@@ -996,10 +999,9 @@ export class SocketGateway
         //  🚀 OPTIMIZADO: Restaurar salas del usuario desde BD
         // ANTES: solo buscaba por username. AHORA: busca por username Y displayName (Full Name)
         try {
-            const displayName =
-                userData?.nombre && userData?.apellido
-                    ? `${userData.nombre} ${userData.apellido}`
-                    : username;
+            const displayName = (userData?.nombre || userData?.apellido)
+                ? `${userData.nombre || ''} ${userData.apellido || ''}`.trim()
+                : username;
 
             // Usar método específico para buscar salas del usuario por ambos términos
             // console.log(`🔍 Buscando salas para ${username} y ${displayName}...`);
@@ -1069,10 +1071,9 @@ export class SocketGateway
         //  🚀 OPTIMIZACIÓN: Enviar notificación ligera de conexión
         // En lugar de consultar conversaciones y hacer broadcastUserList completo,
         // solo notificar que el usuario se conectó
-        const displayName =
-            userData?.nombre && userData?.apellido
-                ? `${userData.nombre} ${userData.apellido}`
-                : username;
+        const displayName = (userData?.nombre || userData?.apellido)
+            ? `${userData.nombre || ''} ${userData.apellido || ''}`.trim()
+            : username;
 
         // Broadcast ligero: solo notificar cambio de estado online
         // 🔥 FIX: Usar userCacheData para asegurar que picture y otros datos actualizados se envíen
@@ -1092,11 +1093,26 @@ export class SocketGateway
         // Esto permite que handleRegister termine rápido y no bloquee otros registros
         setImmediate(async () => {
             try {
-                const userAssignedConversationsResult =
-                    await this.temporaryConversationsService.findAll(displayName);
-                const userAssignedConversations: any[] = Array.isArray(userAssignedConversationsResult)
-                    ? userAssignedConversationsResult
-                    : (userAssignedConversationsResult?.data || []);
+                // 🔥 FIX: Buscar por AMBOS identificadores (DNI y Nombre Completo)
+                // porque los participantes pueden estar guardados como DNI o como Nombre
+                const resultByDNI = await this.temporaryConversationsService.findAll(username);
+                const convsByDNI: any[] = Array.isArray(resultByDNI) ? resultByDNI : (resultByDNI?.data || []);
+
+                let userAssignedConversations = convsByDNI;
+
+                // También buscar por displayName si es diferente al DNI
+                if (displayName !== username) {
+                    const resultByName = await this.temporaryConversationsService.findAll(displayName);
+                    const convsByName: any[] = Array.isArray(resultByName) ? resultByName : (resultByName?.data || []);
+                    // Merge y deduplicar por ID
+                    const existingIds = new Set(convsByDNI.map(c => c.id));
+                    for (const conv of convsByName) {
+                        if (!existingIds.has(conv.id)) {
+                            userAssignedConversations.push(conv);
+                        }
+                    }
+                }
+                console.log(`🔍 [ASSIGNED-FIX] Encontradas ${userAssignedConversations.length} conversaciones (byDNI: ${convsByDNI.length}, total dedup: ${userAssignedConversations.length})`);
 
                 //  CLUSTER FIX: Unir socket a las salas de conversaciones asignadas
                 // Esto permite recibir eventos 'typing' si el frontend usa el ID de conversación
@@ -1150,8 +1166,8 @@ export class SocketGateway
                 connectedUsersMap.set(username, userInfo);
                 // 🔥 FIX: También indexar por display name (nombre + apellido)
                 // Los participantes de conversaciones se guardan como display name
-                if (ud?.nombre && ud?.apellido) {
-                    const displayName = `${ud.nombre} ${ud.apellido}`;
+                if (ud?.nombre || ud?.apellido) {
+                    const displayName = `${ud.nombre || ''} ${ud.apellido || ''}`.trim();
                     connectedUsersMap.set(displayName, userInfo);
                 }
                 return userInfo;

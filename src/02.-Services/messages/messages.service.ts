@@ -83,30 +83,48 @@ export class MessagesService {
   }
 
   async markThreadAsRead(threadId: number, username: string) {
-    // 🚀 OPTIMIZADO para MySQL: Normalizar username antes de guardar
-    const normalizedUsername = this.normalizeForReadBy(username);
+    if (!threadId || !username) return { success: false, updatedCount: 0 };
 
-    // Obtener mensajes del hilo que no sean míos y no haya leído
-    const messages = await this.messageRepository
+    const readAt = new Date();
+    // 🔥 FIX: Resolver nombre completo desde DNI
+    const fullName = await this.resolveFullNameForReadBy(username);
+    const normalizedFullName = this.normalizeForReadBy(fullName);
+    const usernameLower = username?.toLowerCase().trim();
+    const fullNameLower = fullName?.toLowerCase().trim();
+
+    // Obtener mensajes del hilos que necesitan actualización
+    // 🔥 FIX: Excluir mensajes del propio usuario (DNI o Nombre)
+    // 🔥 FIX: Verificar que no esté ya en readBy (DNI o Nombre)
+    const messagesToUpdate = await this.messageRepository
       .createQueryBuilder('message')
       .where('message.threadId = :threadId', { threadId })
-      .andWhere('message.from != :username', { username })
+      .andWhere('LOWER(TRIM(message.from)) != :usernameLower AND LOWER(TRIM(message.from)) != :fullNameLower', { usernameLower, fullNameLower })
       .andWhere(
-        "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(message.readBy, :usernameJson))",
-        { usernameJson: JSON.stringify(normalizedUsername) }
+        "(message.readBy IS NULL OR (NOT JSON_CONTAINS(message.readBy, :usernameJson) AND NOT JSON_CONTAINS(message.readBy, :fullNameJson)))",
+        {
+          usernameJson: JSON.stringify(this.normalizeForReadBy(username)),
+          fullNameJson: JSON.stringify(normalizedFullName)
+        }
       )
       .getMany();
 
-    // Actualizar cada mensaje agregando el usuario normalizado a readBy
-    for (const message of messages) {
+    if (messagesToUpdate.length === 0) return { success: true, updatedCount: 0 };
+
+    // Actualizar cada mensaje agregando el usuario normalizado (Nombre) a readBy
+    for (const message of messagesToUpdate) {
       if (!message.readBy) {
         message.readBy = [];
       }
-      message.readBy.push(normalizedUsername);
+      message.readBy.push(normalizedFullName);
+      message.isRead = true;
+      message.readAt = readAt;
       await this.messageRepository.save(message);
+
+      // Notificar real-time
+      this.socketGateway.notifyMessageRead(message, username);
     }
 
-    return { success: true, updatedCount: messages.length };
+    return { success: true, updatedCount: messagesToUpdate.length };
   }
 
   // 🔥 NUEVO: Obtener conteo absoluto de respuestas en un hilo
