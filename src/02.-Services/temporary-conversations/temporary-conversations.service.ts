@@ -126,22 +126,74 @@ export class TemporaryConversationsService {
     }
 
     // 🔥 BÚSQUEDA: Filtrar por cada palabra clave ingresada (permite buscar "Usuario1 Usuario2")
-    const combinedSearch = `${search || ''} ${search2 || ''}`.trim();
-    if (combinedSearch) {
-      const searchTerms = this.normalizeUsername(combinedSearch).split(/\s+/).filter((word) => word.length > 0);
+    // 🔥 MEJORADO: Resolver cada búsqueda a TODOS los identificadores posibles (DNI + nombre completo)
+    const search1 = (search || '').trim();
+    const search2Val = (search2 || '').trim();
+
+    // Resolver identificadores para cada término de búsqueda
+    const resolveSearchIdentifiers = async (term: string): Promise<string[]> => {
+      if (!term) return [];
+      const termNormalized = this.normalizeUsername(term);
+      const identifiers = [termNormalized];
+
+      try {
+        // Buscar por username (DNI)
+        let user = await this.userRepository.findOne({ where: { username: term } });
+
+        // Si no se encontró, buscar por nombre con LIKE
+        if (!user) {
+          user = await this.userRepository
+            .createQueryBuilder('user')
+            .where("CONCAT(user.nombre, ' ', user.apellido) LIKE :pattern", { pattern: `%${term}%` })
+            .getOne();
+        }
+
+        // Si no se encontró, buscar por nombre o apellido individual
+        if (!user) {
+          user = await this.userRepository
+            .createQueryBuilder('user')
+            .where("user.nombre LIKE :pattern OR user.apellido LIKE :pattern", { pattern: `%${term}%` })
+            .getOne();
+        }
+
+        if (user) {
+          identifiers.push(this.normalizeUsername(user.username));
+          if (user.nombre && user.apellido) {
+            identifiers.push(this.normalizeUsername(`${user.nombre} ${user.apellido}`));
+          }
+          if (user.nombre) identifiers.push(this.normalizeUsername(user.nombre));
+          if (user.apellido) identifiers.push(this.normalizeUsername(user.apellido));
+        }
+      } catch (e) {
+        // Silently continue with just the original term
+      }
+
+      // Return unique identifiers
+      return [...new Set(identifiers)];
+    };
+
+    if (search1 || search2Val) {
+      const [ids1, ids2] = await Promise.all([
+        resolveSearchIdentifiers(search1),
+        resolveSearchIdentifiers(search2Val),
+      ]);
 
       conversationsToEnrich = conversationsToEnrich.filter((conv) => {
         const convNameNormalized = this.normalizeUsername(conv.name || '');
         const participantsNormalized = (conv.participants || []).map((p) =>
           this.normalizeUsername(p),
         );
+        const allSearchable = [convNameNormalized, ...participantsNormalized];
 
-        // Para que la conversación pase el filtro, DEBE coincidir con TODOS los términos (búsqueda AND)
-        return searchTerms.every((term) => {
-          const nameMatch = convNameNormalized.includes(term);
-          const participantMatch = participantsNormalized.some((p) => p.includes(term));
-          return nameMatch || participantMatch;
-        });
+        // Cada grupo de búsqueda (Participante 1, Participante 2) debe matchear
+        const match1 = ids1.length === 0 || ids1.some(id =>
+          allSearchable.some(s => s.includes(id))
+        );
+        const match2 = ids2.length === 0 || ids2.some(id =>
+          allSearchable.some(s => s.includes(id))
+        );
+
+        return match1 && match2;
       });
     }
 
@@ -265,21 +317,45 @@ export class TemporaryConversationsService {
         // Obtener información de los participantes
         let participantRole = null;
         let participantNumeroAgente = null;
+        let participantNames = [...participants];
 
         if (participants.length > 0) {
-          const participantName = participants[0];
-          const participantUser = await this.userRepository.findOne({
-            where: { username: participantName },
-          });
+          try {
+            const participantsUsers = await this.userRepository.find({
+              where: participants.map(p => ({ username: p }))
+            });
 
-          if (participantUser) {
-            participantRole = participantUser.role;
-            participantNumeroAgente = participantUser.numeroAgente;
+            // Map usernames to their actual full names
+            participantNames = participants.map(p => {
+              const u = participantsUsers.find(user =>
+                user.username && typeof user.username === 'string' && typeof p === 'string' &&
+                user.username.toUpperCase() === p.toUpperCase()
+              );
+              if (u) {
+                if (u.nombre && u.apellido) return `${u.nombre} ${u.apellido}`;
+                return u.nombre || u.apellido || p;
+              }
+              return p; // fallback to whatever was stored
+            });
+
+            // Keep the role/numeroAgente logic for the first participant (compatibility)
+            const firstParticipantUser = participantsUsers.find(user =>
+              user.username && typeof user.username === 'string' && typeof participants[0] === 'string' &&
+              user.username.toUpperCase() === participants[0].toUpperCase()
+            );
+
+            if (firstParticipantUser) {
+              participantRole = firstParticipantUser.role;
+              participantNumeroAgente = firstParticipantUser.numeroAgente;
+            }
+          } catch (e) {
+            console.error('Error fetching participants users:', e);
           }
         }
 
         return {
           ...conv,
+          participantNames, // 🔥 NUEVO: Array con los nombres completos
           _lastMessageSentAt: lastMessage?.sentAt,
           unreadCount,
           role: participantRole,
@@ -790,20 +866,9 @@ export class TemporaryConversationsService {
       throw new NotFoundException('Conversación temporal no encontrada');
     }
 
-    // Si ya está inactiva, no hacer nada (ya fue eliminada)
-    if (!conversation.isActive) {
-      return;
-    }
-
-    // Si se proporciona userId, validar permisos
-    if (userId && conversation.createdBy !== userId) {
-      throw new BadRequestException(
-        'No tienes permisos para eliminar esta conversación',
-      );
-    }
-
-    conversation.isActive = false;
-    await this.temporaryConversationRepository.save(conversation);
+    // 🔥 HARD DELETE: Eliminar permanentemente de la base de datos
+    // La funcionalidad de "desactivar" (soft delete) ya existe en deactivateConversation()
+    await this.temporaryConversationRepository.remove(conversation);
   }
 
   async deactivateConversation(
