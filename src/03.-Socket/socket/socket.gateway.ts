@@ -23,6 +23,19 @@ import { ConversationFavoritesService } from 'src/02.-Services/conversation-favo
 import { TemporaryRoom } from 'src/02.-Services/temporary-rooms/entities/temporary-room.entity';
 import { getPeruDate, formatPeruTime } from '../../utils/date.utils';
 
+interface UserCacheData {
+    id: number;
+    username: string;
+    nombre: string;
+    apellido: string;
+    role: string;
+    numeroAgente: string;
+    picture?: string;
+    sede?: string;
+    sede_id?: number;
+    cachedAt: number;
+}
+
 @WebSocketGateway({
     cors: {
         origin: '*',
@@ -71,20 +84,8 @@ export class SocketGateway
         }>
     >(); // roomID -> Set<participant info>
 
-    // ?? NUEVO: Cach� de datos de usuario para evitar consultas repetidas
-    private userCache = new Map<
-        string,
-        {
-            id: number;
-            username: string;
-            nombre: string;
-            apellido: string;
-            role: string;
-            numeroAgente: string;
-            picture?: string; // 🔥 FIX: Agregar picture a la definición del tipo
-            cachedAt: number; // timestamp
-        }
-    >();
+    // ?? NUEVO: Cach de datos de usuario para evitar consultas repetidas
+    private userCache = new Map<string, UserCacheData>();
     private CACHE_TTL = 5 * 60 * 1000; // 5 minutos
 
     //  NUEVO: Map de admins para broadcasting eficiente
@@ -823,8 +824,7 @@ export class SocketGateway
 
         // 🚀 OPTIMIZADO: Guardar o actualizar usuario en la base de datos con numeroAgente y role
         // Solo si hay cambios significativos (evitar escrituras innecesarias)
-        // 🔥 FIX: Declarar userCacheData fuera del bloque try para usarlo al final
-        let userCacheData = null;
+        let userCacheData: any = null;
 
         try {
             // 🚀 REDIS CACHE: Verificar primero en Redis (para cluster) antes de ir a MySQL
@@ -848,7 +848,9 @@ export class SocketGateway
             const needsDbUpdate = !cachedUser ||
                 cachedUser.role !== userData?.role ||
                 cachedUser.numeroAgente !== userData?.numeroAgente ||
-                cachedUser.picture !== userData?.picture;
+                cachedUser.picture !== userData?.picture ||
+                cachedUser.sede !== userData?.sede ||
+                cachedUser.sede_id !== userData?.sede_id;
 
             if (needsDbUpdate) {
                 let dbUser = await this.userRepository.findOne({ where: { username } });
@@ -880,6 +882,14 @@ export class SocketGateway
                         dbUser.picture = userData.picture;
                         hasChanges = true;
                     }
+                    if (userData?.sede && dbUser.sede !== userData.sede) {
+                        dbUser.sede = userData.sede;
+                        hasChanges = true;
+                    }
+                    if (userData?.sede_id && dbUser.sede_id !== userData.sede_id) {
+                        dbUser.sede_id = userData.sede_id;
+                        hasChanges = true;
+                    }
 
                     if (hasChanges) {
                         await this.userRepository.save(dbUser);
@@ -894,6 +904,8 @@ export class SocketGateway
                         role: userData?.role,
                         numeroAgente: userData?.numeroAgente,
                         picture: userData?.picture,
+                        sede: userData?.sede,
+                        sede_id: userData?.sede_id,
                     });
                     await this.userRepository.save(dbUser);
                 }
@@ -906,7 +918,9 @@ export class SocketGateway
                     apellido: dbUser.apellido,
                     role: dbUser.role,
                     numeroAgente: dbUser.numeroAgente,
-                    picture: userData?.picture || null, // 🔥 FIX: Guardar picture en caché (desde userData)
+                    picture: userData?.picture || null,
+                    sede: dbUser.sede,
+                    sede_id: dbUser.sede_id,
                     cachedAt: Date.now(),
                 };
                 this.userCache.set(username, userCacheData);
