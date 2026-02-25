@@ -238,7 +238,12 @@ export class TemporaryRoomsService {
     totalPages: number;
     hasMore: boolean;
   }> {
-    const { dni, fullName } = await this.getUserIdentifiers(username);
+    // 🔥 MEJORADO: Obtener todos los alias para rectificación de membresía robusta
+    const aliases = await this.messagesService.resolveUserAliases(username);
+    const aliasSet = new Set(aliases.map(a => a.toLowerCase().trim()));
+
+    // Identificar un DNI para el filtro de favoritos (optimización)
+    const dni = aliases.find(a => !isNaN(Number(a)) && a.length >= 8) || username;
 
     // 1. Construir QueryBuilder base
     const queryBuilder = this.temporaryRoomRepository
@@ -304,18 +309,15 @@ export class TemporaryRoomsService {
     const { entities, raw } = await queryBuilder.getRawAndEntities();
 
     const allRooms = entities.map((room, index) => {
-      // Filtrar por membresía (DNI o Nombre Completo)
+      // Filtrar por membresía usando todos los alias posibles
       const members = room.members || [];
       const connected = room.connectedMembers || [];
       const assigned = room.assignedMembers || [];
 
       const isMember =
-        members.includes(dni) ||
-        members.includes(fullName) ||
-        connected.includes(dni) ||
-        connected.includes(fullName) ||
-        assigned.includes(dni) ||
-        assigned.includes(fullName);
+        members.some(m => aliasSet.has((m || '').toString().toLowerCase().trim())) ||
+        connected.some(m => aliasSet.has((m || '').toString().toLowerCase().trim())) ||
+        assigned.some(m => aliasSet.has((m || '').toString().toLowerCase().trim()));
 
       if (!isMember) return null;
 
@@ -879,20 +881,27 @@ export class TemporaryRoomsService {
     // FILTRADO POR ROL (Movido a lgica en memoria para evitar problemas de compatibilidad SQL)
     // if (['ADMIN', 'JEFEPISO'].includes(role)) { ... }
 
+    // 🔥 MEJORADO: Obtener todos los alias para rectificación de membresía robusta
+    let aliasSet = new Set<string>();
+    if (username) {
+      const aliases = await this.messagesService.resolveUserAliases(username);
+      aliasSet = new Set(aliases.map(a => a.toLowerCase().trim()));
+    } else if (displayName) {
+      aliasSet.add(displayName.toLowerCase().trim());
+    }
+
     // Obtener todas las salas
     const { entities, raw } = await queryBuilder.getRawAndEntities();
 
     // Mapear resultados
     const allRooms = entities.map((room, index) => {
-      // 🔥 FILTRADO POR ROL EN MEMORIA (Revisar DNI y Nombre Completo)
+      // 🔥 FILTRADO POR ROL EN MEMORIA (Usando Alias Set Robusto)
       if (['ADMIN', 'JEFEPISO'].includes(role)) {
-        const userFullName = displayName || '';
-        const userDni = username || '';
         const members = room.members || [];
+        const isMember = members.some(m => aliasSet.has((m || '').toString().toLowerCase().trim()));
 
-        // El arreglo members ahora contiene DNIs. Verificamos tanto DNI como nombre por seguridad.
-        if (!members.includes(userDni) && (userFullName === '' || !members.includes(userFullName))) {
-          return null; // Filtrar si no es miembro
+        if (!isMember) {
+          return null; // Filtrar si no es miembro por ningún alias
         }
       }
 
@@ -1060,23 +1069,19 @@ export class TemporaryRoomsService {
         return { inRoom: false, room: null };
       }
 
-      // Construir el displayName (nombre completo) igual que en el frontend
-      const displayName =
-        user.nombre && user.apellido
-          ? `${user.nombre} ${user.apellido} `
-          : user.username;
+      // 🔥 MEJORADO: Obtener todos los alias para detección robusta
+      const aliases = await this.messagesService.resolveUserAliases(user.username);
+      const aliasSet = new Set(aliases.map(a => a.toLowerCase().trim()));
 
       // Buscar todas las salas activas
       const allRooms = await this.temporaryRoomRepository.find({
         where: { isActive: true },
       });
 
-      // Filtrar salas donde el usuario es miembro (buscar por displayName)
+      // Filtrar salas donde el usuario es miembro (usando alias)
       const userRooms = allRooms.filter((room) => {
         const members = room.members || [];
-        const isMember = members.includes(displayName);
-        if (isMember) {
-        }
+        const isMember = members.some(m => aliasSet.has((m || '').toString().toLowerCase().trim()));
         return isMember;
       });
 
@@ -1112,17 +1117,19 @@ export class TemporaryRoomsService {
 
   async getCurrentUserRoomByUsername(username: string): Promise<any> {
     try {
+      // 🔥 MEJORADO: Obtener todos los alias para detección robusta
+      const aliases = await this.messagesService.resolveUserAliases(username);
+      const aliasSet = new Set(aliases.map(a => a.toLowerCase().trim()));
+
       // Buscar todas las salas activas
       const allRooms = await this.temporaryRoomRepository.find({
         where: { isActive: true },
       });
 
-      // Filtrar salas donde el usuario es miembro
+      // Filtrar salas donde el usuario es miembro (usando alias)
       const userRooms = allRooms.filter((room) => {
         const members = room.members || [];
-        const isMember = members.includes(username);
-        if (isMember) {
-        }
+        const isMember = members.some(m => aliasSet.has((m || '').toString().toLowerCase().trim()));
         return isMember;
       });
 
@@ -1151,8 +1158,6 @@ export class TemporaryRoomsService {
   }
 
   async getRoomUsers(roomCode: string): Promise<any> {
-    // console.log('?? Obteniendo usuarios de la sala:', roomCode);
-
     const room = await this.temporaryRoomRepository.findOne({
       where: { roomCode, isActive: true },
     });
@@ -1161,105 +1166,81 @@ export class TemporaryRoomsService {
       throw new NotFoundException('Sala no encontrada o inactiva');
     }
 
-    // ?? MODIFICADO: Usar TODOS los usuarios a�adidos a la sala (members)
-    const allUsernames = room.members || [];
-    let userList = [];
+    // 1. Obtener todos los identificadores brutos de la sala
+    const rawIdentifiers = Array.from(new Set(room.members || []));
 
-    if (allUsernames.length > 0) {
-      try {
-        // 1. Obtener datos completos de la base de datos (Primero por Username/DNI)
-        const dbUsersOriginal = await this.userRepository.find({
-          where: { username: In(allUsernames) },
-        });
+    // 2. Resolver cada identificador a un usuario real de la BD
+    // Usamos un Map para deduplicar por ID de usuario real
+    const uniqueUsersMap = new Map<number, any>();
+    const unresolvableIdentifiers = [];
 
-        // 2. 🔥 Mapear usuarios encontrados para facilitar búsqueda
-        const resolvedUsersMap = new Map<string, any>();
-        dbUsersOriginal.forEach(u => resolvedUsersMap.set(u.username, u));
+    // 🔥 OPTIMIZACIÓN: Primero intentar resolver todos los que son DNI (numéricos) en lote
+    const dnis = rawIdentifiers.filter(id => !isNaN(Number(id)));
+    if (dnis.length > 0) {
+      const dbUsers = await this.userRepository.find({
+        where: { username: In(dnis) }
+      });
+      dbUsers.forEach(user => uniqueUsersMap.set(user.id, user));
+    }
 
-        // 3. 🔥 FALLBACK: Resolver usuarios que están por "Nombre Completo" en la lista
-        const missingUsernames = allUsernames.filter(u => !resolvedUsersMap.has(u));
+    // 3. Para los que faltan (o son nombres), resolver uno a uno usando la lógica de alias
+    const remaining = rawIdentifiers.filter(id => {
+      // Si es un DNI que ya resolvimos, saltar
+      if (!isNaN(Number(id))) {
+        const alreadyResolved = Array.from(uniqueUsersMap.values()).some(u => u.username === id);
+        if (alreadyResolved) return false;
+      }
+      return true;
+    });
 
-        if (missingUsernames.length > 0) {
-          console.log(`🔍 Intentando resolver ${missingUsernames.length} usuarios por Nombre Completo...`);
-          for (const potentialName of missingUsernames) {
-            // Solo intentar si parece un nombre (tiene espacios y no es puramente numérico)
-            if (potentialName.includes(' ') && isNaN(Number(potentialName.replace(/\s/g, '')))) {
-              try {
-                // Buscar coincidencia exacta de nombre + apellido (insensible a mayúsculas y espacios extra)
-                const searchNameNormalized = potentialName.trim().toLowerCase();
+    for (const identifier of remaining) {
+      // Usar getUserIdentifiers para encontrar el usuario real (DNI + Nombre)
+      const { dni } = await this.getUserIdentifiers(identifier);
+      const user = await this.userRepository.findOne({ where: { username: dni } });
 
-                const dbUserByName = await this.userRepository
-                  .createQueryBuilder('user')
-                  .where("LOWER(TRIM(CONCAT(IFNULL(user.nombre, ''), ' ', IFNULL(user.apellido, '')))) = :name", { name: searchNameNormalized })
-                  .getOne();
-
-                if (dbUserByName) {
-                  resolvedUsersMap.set(potentialName, dbUserByName);
-                } else {
-                  // Intento secundario: Búsqueda aproximada si la exacta falla
-                  const approximateMatch = await this.userRepository
-                    .createQueryBuilder('user')
-                    .where("LOWER(CONCAT(user.nombre, ' ', user.apellido)) LIKE :name", { name: `%${searchNameNormalized}%` })
-                    .getOne();
-
-                  if (approximateMatch) {
-                    resolvedUsersMap.set(potentialName, approximateMatch);
-                  }
-                }
-              } catch (err) {
-                console.error(`❌ Error buscando usuario por nombre [${potentialName}]:`, err.message);
-              }
-            }
-          }
-        }
-
-        // 4. 🔥 CLUSTER FIX: Mapear usuarios usando verificación async de estado online
-        // Usar Promise.all para verificar estado online en Redis (cluster)
-        userList = await Promise.all(
-          allUsernames.map(async (username, index) => {
-            // Buscar datos en nuestro mapa de usuarios resueltos (por DNI o por Nombre)
-            const dbUser = resolvedUsersMap.get(username);
-
-            // 🔥 Verificar estado online en tiempo real (ahora incluye Redis para cluster)
-            const isOnline = this.socketGateway
-              ? await this.socketGateway.isUserOnlineAsync(username)
-              : false;
-
-            if (dbUser) {
-              return {
-                id: dbUser.id,
-                displayName: dbUser.nombre && dbUser.apellido
-                  ? `${dbUser.nombre} ${dbUser.apellido} `
-                  : dbUser.username,
-                isOnline: isOnline,
-                role: dbUser.role,
-                numeroAgente: dbUser.numeroAgente,
-                picture: dbUser.picture || null,
-                email: dbUser.email,
-              };
-            } else {
-              // Fallback para usuarios que no están en la BD (ej. usuarios temporales antiguos)
-              return {
-                id: index + 1, // ID temporal
-                displayName: username === 'Usuario' ? `Usuario ${index + 1} ` : username,
-                isOnline: isOnline,
-                role: 'GUEST',
-                numeroAgente: null
-              };
-            }
-          })
-        );
-      } catch (error) {
-        console.error('? Error al enriquecer usuarios de sala:', error);
-        // Fallback en caso de error de BD
-        userList = allUsernames.map((username, index) => ({
-          id: index + 1,
-          username: username,
-          displayName: username === 'Usuario' ? `Usuario ${index + 1} ` : username,
-          isOnline: true, // Asumir online por defecto en error
-        }));
+      if (user) {
+        uniqueUsersMap.set(user.id, user);
+      } else {
+        unresolvableIdentifiers.push(identifier);
       }
     }
+
+    // 4. Construir la lista final de usuarios enriquecida
+    const userList = await Promise.all(
+      Array.from(uniqueUsersMap.values()).map(async (user) => {
+        // Verificar online usando el DNI (username)
+        const isOnline = this.socketGateway
+          ? await this.socketGateway.isUserOnlineAsync(user.username)
+          : false;
+
+        return {
+          id: user.id,
+          username: user.username,
+          displayName: user.nombre && user.apellido
+            ? `${user.nombre} ${user.apellido} `
+            : user.username,
+          isOnline: isOnline,
+          role: user.role,
+          numeroAgente: user.numeroAgente,
+          picture: user.picture || null,
+          email: user.email,
+        };
+      })
+    );
+
+    // 5. Agregar fallbacks para los que no se pudieron resolver
+    unresolvableIdentifiers.forEach((id, idx) => {
+      userList.push({
+        id: `temp-${idx}`,
+        username: id,
+        displayName: id,
+        isOnline: false,
+        role: 'GUEST',
+        numeroAgente: null,
+        picture: null,
+        email: null
+      });
+    });
 
     // console.log('? Usuarios en la sala (enriquecidos):', userList.length);
 
