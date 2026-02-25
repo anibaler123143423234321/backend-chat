@@ -6,11 +6,13 @@ import { ConversationFavoritesController } from 'src/02.-Services/conversation-f
 import { Message } from 'src/02.-Services/messages/entities/message.entity';
 import { User } from 'src/02.-Services/users/entities/user.entity';
 import { MessagesModule } from 'src/02.-Services/messages/messages.module';
+import { SocketModule } from 'src/03.-Socket/socket/socket.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([ConversationFavorite, Message, User]),
     forwardRef(() => MessagesModule),
+    forwardRef(() => SocketModule),
   ],
   controllers: [ConversationFavoritesController],
   providers: [ConversationFavoritesService],

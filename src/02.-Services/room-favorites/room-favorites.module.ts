@@ -7,12 +7,14 @@ import { ConversationFavoritesModule } from 'src/02.-Services/conversation-favor
 import { MessagesModule } from 'src/02.-Services/messages/messages.module';
 import { RoomFavoritesService } from 'src/02.-Services/room-favorites/room-favorites.service';
 import { RoomFavoritesController } from 'src/02.-Services/room-favorites/room-favorites.controller';
+import { SocketModule } from 'src/03.-Socket/socket/socket.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([RoomFavorite, Message, TemporaryRoom]),
     ConversationFavoritesModule,
     forwardRef(() => MessagesModule),
+    forwardRef(() => SocketModule),
   ],
   controllers: [RoomFavoritesController],
   providers: [RoomFavoritesService],

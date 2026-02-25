@@ -1,11 +1,15 @@
 import { Controller, Post, Delete, Get, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { ConversationFavoritesService } from 'src/02.-Services/conversation-favorites/conversation-favorites.service';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiQuery, ApiBody } from '@nestjs/swagger';
+import { SocketGateway } from 'src/03.-Socket/socket/socket.gateway';
 
 @ApiTags('Favoritos (Chats)')
 @Controller('conversation-favorites')
 export class ConversationFavoritesController {
-  constructor(private readonly conversationFavoritesService: ConversationFavoritesService) { }
+  constructor(
+    private readonly conversationFavoritesService: ConversationFavoritesService,
+    private readonly socketGateway: SocketGateway,
+  ) { }
 
   // Alternar favorito (agregar o quitar)
   @ApiBearerAuth()
@@ -16,10 +20,19 @@ export class ConversationFavoritesController {
   async toggleFavorite(
     @Body() body: { username: string; conversationId: number },
   ) {
-    return await this.conversationFavoritesService.toggleFavorite(
+    const result = await this.conversationFavoritesService.toggleFavorite(
       body.username,
       body.conversationId,
     );
+
+    // 🔥 Notificar sincronización
+    this.socketGateway.notifyFavoriteChanged(body.username, {
+      type: 'conv',
+      conversationId: body.conversationId,
+      isFavorite: result.isFavorite
+    });
+
+    return result;
   }
 
   // Agregar a favoritos
@@ -28,10 +41,19 @@ export class ConversationFavoritesController {
   async addFavorite(
     @Body() body: { username: string; conversationId: number },
   ) {
-    return await this.conversationFavoritesService.addFavorite(
+    const result = await this.conversationFavoritesService.addFavorite(
       body.username,
       body.conversationId,
     );
+
+    // 🔥 Notificar sincronización
+    this.socketGateway.notifyFavoriteChanged(body.username, {
+      type: 'conv',
+      conversationId: body.conversationId,
+      isFavorite: true
+    });
+
+    return result;
   }
 
   // Quitar de favoritos
@@ -41,6 +63,14 @@ export class ConversationFavoritesController {
     @Body() body: { username: string; conversationId: number },
   ) {
     await this.conversationFavoritesService.removeFavorite(body.username, body.conversationId);
+
+    // 🔥 Notificar sincronización
+    this.socketGateway.notifyFavoriteChanged(body.username, {
+      type: 'conv',
+      conversationId: body.conversationId,
+      isFavorite: false
+    });
+
     return { message: 'Favorito eliminado' };
   }
 

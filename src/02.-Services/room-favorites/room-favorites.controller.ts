@@ -1,11 +1,15 @@
 import { Controller, Post, Delete, Get, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { RoomFavoritesService } from 'src/02.-Services/room-favorites/room-favorites.service';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiBody, ApiQuery } from '@nestjs/swagger';
+import { SocketGateway } from 'src/03.-Socket/socket/socket.gateway';
 
 @ApiTags('Favoritos (Salas)')
 @Controller('room-favorites')
 export class RoomFavoritesController {
-  constructor(private readonly roomFavoritesService: RoomFavoritesService) { }
+  constructor(
+    private readonly roomFavoritesService: RoomFavoritesService,
+    private readonly socketGateway: SocketGateway,
+  ) { }
 
   // Alternar favorito (agregar o quitar)
   @ApiBearerAuth()
@@ -16,11 +20,20 @@ export class RoomFavoritesController {
   async toggleFavorite(
     @Body() body: { username: string; roomCode: string; roomId: number },
   ) {
-    return await this.roomFavoritesService.toggleFavorite(
+    const result = await this.roomFavoritesService.toggleFavorite(
       body.username,
       body.roomCode,
       body.roomId,
     );
+
+    // 🔥 Notificar sincronización
+    this.socketGateway.notifyFavoriteChanged(body.username, {
+      type: 'room',
+      roomCode: body.roomCode,
+      isFavorite: result.isFavorite
+    });
+
+    return result;
   }
 
   // Agregar a favoritos
@@ -32,11 +45,20 @@ export class RoomFavoritesController {
   async addFavorite(
     @Body() body: { username: string; roomCode: string; roomId: number },
   ) {
-    return await this.roomFavoritesService.addFavorite(
+    const result = await this.roomFavoritesService.addFavorite(
       body.username,
       body.roomCode,
       body.roomId,
     );
+
+    // 🔥 Notificar sincronización
+    this.socketGateway.notifyFavoriteChanged(body.username, {
+      type: 'room',
+      roomCode: body.roomCode,
+      isFavorite: true
+    });
+
+    return result;
   }
 
   // Quitar de favoritos
@@ -46,6 +68,14 @@ export class RoomFavoritesController {
     @Body() body: { username: string; roomCode: string },
   ) {
     await this.roomFavoritesService.removeFavorite(body.username, body.roomCode);
+
+    // 🔥 Notificar sincronización
+    this.socketGateway.notifyFavoriteChanged(body.username, {
+      type: 'room',
+      roomCode: body.roomCode,
+      isFavorite: false
+    });
+
     return { message: 'Favorito eliminado' };
   }
 

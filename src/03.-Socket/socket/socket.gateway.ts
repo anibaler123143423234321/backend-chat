@@ -2339,28 +2339,20 @@ export class SocketGateway
             if (data.fileSize !== undefined) editEvent.fileSize = data.fileSize;
 
             if (data.isGroup && data.roomCode) {
-                // 🚀 CLUSTER FIX: Usar Redis Broadcast para grupos
-                // Iterar miembros y usar server.to() para cada uno
-                const roomUsersSet = this.roomUsers.get(data.roomCode);
-                if (roomUsersSet) {
-                    roomUsersSet.forEach((user) => {
-                        // Usar server.to() para que pase por Redis Adapter
-                        this.server.to(user).emit('messageEdited', editEvent);
-                    });
-                    // console.log(
-                    //     `🚀 Broadcast de edición enviado a ${roomUsersSet.size} usuarios en sala ${data.roomCode} vía Redis`,
-                    // );
-                }
+                // 🚀 CLUSTER FIX: Emitir directamente a la sala (gestionado por Redis Adapter)
+                // Se envía a todos los que estén en la sala sin importar la instancia.
+                this.server.to(data.roomCode).emit('messageEdited', editEvent);
+                // console.log(
+                //     `🚀 [CLUSTER] Broadcast de edición enviado a sala ${data.roomCode}`,
+                // );
             } else {
-                // 🚀 CLUSTER FIX: Usar Redis Broadcast para chats individuales
-                // Enviar al destinatario usando server.to()
+                // 🚀 CLUSTER FIX: Usar emisión a salas de alias (DNI/Nombre)
+                // Enviar al destinatario y al remitente
                 this.server.to(data.to).emit('messageEdited', editEvent);
-
-                // También enviar al remitente para sincronizar
                 this.server.to(data.username).emit('messageEdited', editEvent);
 
                 // console.log(
-                //     `🚀 Notificación de edición enviada a ${data.to} y ${data.username} vía Redis`,
+                //     `🚀 [CLUSTER] Notificación de edición enviada a ${data.to} y ${data.username} vía Redis`,
                 // );
             }
         } catch (error) {
@@ -4758,6 +4750,16 @@ export class SocketGateway
         });
 
         console.log(`✅ [CLUSTER] Notificación de rechazo enviada a ${username} para sala ${roomCode}`);
+    }
+
+    // ✅ [CLUSTER] Notificación de cambio de estado de favorito
+    public notifyFavoriteChanged(username: string, data: any) {
+        const target = username.toLowerCase().trim();
+        this.server.to(target).emit('favoriteStatusChanged', {
+            ...data,
+            timestamp: new Date().toISOString()
+        });
+        console.log(`✅ [CLUSTER] Notificación favoriteStatusChanged enviada a ${username}`);
     }
 
     // 🔥 NUEVO: Método robusto para obtener datos del remitente por DNI o Nombre Completo
