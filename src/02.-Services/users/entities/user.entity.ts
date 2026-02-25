@@ -42,6 +42,17 @@ export class User {
   @Column({ nullable: true, type: 'text' })
   picture: string;
 
+
+
+
+  @ApiProperty({ required: false })
+  @Column({ nullable: true })
+  sede: string;
+
+  @ApiProperty({ required: false })
+  @Column({ nullable: true })
+  sede_id: number;
+
   @ApiProperty()
   @CreateDateColumn()
   createdAt: Date;
