@@ -1744,9 +1744,9 @@ export class SocketGateway
         } = data;
 
         //  Obtener información del remitente (role y numeroAgente)
-        // 🔥 FIX: Búsqueda robusta que maneja DNI o Nombre Completo en 'from'
         const senderData = await this.getSenderData(from);
         const resolvedFrom = senderData?.username || from; // Si resolvemos a DNI, lo usamos para consistencia
+        const senderFullName = senderData?.fullName || from;
         const senderRole = senderData?.role || null;
         const senderNumeroAgente = senderData?.numeroAgente || null;
 
@@ -1765,7 +1765,7 @@ export class SocketGateway
         // Mensaje "optimista" para emisión inmediata
         const optimisticMessage = {
             ...data,
-            from: resolvedFrom, // 🔥 Normalizar a DNI si se resolvió
+            from: senderFullName, // 🔥 Usar Nombre Completo para consistencia real-time (para el frontend)
             id: tempId,
             sentAt: data.sentAt || peruDate,
             time: data.time || calculatedTime,
@@ -1780,7 +1780,7 @@ export class SocketGateway
         // 🚀 GUARDADO EN BD EN PARALELO (no bloquea la emisión)
         // Solo si no tiene ID real (no guardado por frontend)
         if (!data.id) {
-            // Guardar en background sin await
+            // Guardar en background sin await - USAR DNI resuelto para la base de datos
             this.saveMessageInBackground(data, finalRoomCode, senderRole, senderNumeroAgente, tempId, resolvedFrom);
         }
 
@@ -1939,7 +1939,7 @@ export class SocketGateway
                                 // 🚀 CLUSTER FIX: Broadcast optimizado si tenemos roomCode
                                 this.server.to(groupRoomCode).emit('message', {
                                     id: msgContext.savedMessage?.id,
-                                    from: from || 'Usuario Desconocido',
+                                    from: senderFullName || 'Usuario Desconocido',
                                     senderRole,
                                     senderNumeroAgente,
                                     group: to,
@@ -1977,7 +1977,7 @@ export class SocketGateway
                                     // Usar broadcast dirigido a la sala del usuario (client.join(username))
                                     this.server.to(member).emit('message', {
                                         id: msgContext.savedMessage?.id,
-                                        from: from || 'Usuario Desconocido',
+                                        from: senderFullName || 'Usuario Desconocido',
                                         senderRole,
                                         senderNumeroAgente,
                                         group: to,
@@ -2032,7 +2032,7 @@ export class SocketGateway
                     // Preparar el objeto del mensaje para enviar
                     const messageToSend = {
                         id: msgContext.savedMessage?.id, // Incluir ID del mensaje guardado en BD
-                        from: from || 'Usuario Desconocido',
+                        from: senderFullName || 'Usuario Desconocido',
                         senderRole, // Incluir role del remitente
                         senderNumeroAgente, // Incluir numeroAgente del remitente
                         to: recipientUsername,
@@ -2079,7 +2079,7 @@ export class SocketGateway
                     //  Emitir evento de monitoreo a todos los ADMIN/JEFEPISO
                     this.broadcastMonitoringMessage({
                         id: msgContext.savedMessage?.id,
-                        from: from || 'Usuario Desconocido',
+                        from: senderFullName || 'Usuario Desconocido',
                         to: recipientUsername,
                         message,
                         isGroup: false,
@@ -3835,17 +3835,18 @@ export class SocketGateway
                 hasId: !!data.id,
             });
 
+            // 🔥 RESOLVER DATOS DEL REMITENTE SIEMPRE (para real-time display)
+            const senderData = await this.getSenderData(from);
+            const resolvedFrom = senderData?.username || from;
+            const senderFullName = senderData?.fullName || from;
+            const senderRole = senderData?.role || null;
+            const senderNumeroAgente = senderData?.numeroAgente || null;
+
             let savedMessage = data;
 
             // 🚀 PASO 1: Guardar mensaje en BD si no tiene ID (no fue guardado por frontend)
             if (!data.id && threadId) {
                 try {
-                    // 🔥 FIX: Búsqueda robusta que maneja DNI o Nombre Completo en 'from'
-                    const senderData = await this.getSenderData(from);
-                    const resolvedFrom = senderData?.username || from;
-                    const senderRole = senderData?.role || null;
-                    const senderNumeroAgente = senderData?.numeroAgente || null;
-
                     // Si resolvemos a un DNI diferente al que vino, lo actualizamos en data para el guardado
                     if (resolvedFrom !== from) {
                         data.from = resolvedFrom;
@@ -3880,6 +3881,7 @@ export class SocketGateway
             // 🚀 PASO 3: Preparar payload con datos actualizados
             const messagePayload = {
                 ...data,
+                from: senderFullName, // 🔥 Usar Nombre Completo para consistencia real-time
                 id: savedMessage?.id || data.id,
                 sentAt: savedMessage?.sentAt || data.sentAt,
                 time: savedMessage?.time || data.time,
@@ -3913,9 +3915,9 @@ export class SocketGateway
 
             const updatePayload = {
                 messageId: threadId,
-                lastReplyFrom: from,
+                lastReplyFrom: senderFullName, // 🔥 Usar Nombre Completo
                 lastReplyText: data.message?.substring(0, 100), // Preview del mensaje
-                from,
+                from: senderFullName, // 🔥 Usar Nombre Completo
                 to,
                 isGroup,
                 roomCode,
@@ -3944,7 +3946,7 @@ export class SocketGateway
                     conversationId: savedMessage.conversationId,
                     lastMessage: messageText,
                     lastMessageTime: savedMessage.sentAt || new Date().toISOString(),
-                    lastMessageFrom: from,
+                    lastMessageFrom: senderFullName, // 🔥 Usar Nombre Completo
                     lastMessageMediaType: data.mediaType
                 };
 
