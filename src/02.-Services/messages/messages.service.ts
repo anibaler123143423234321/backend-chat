@@ -6,7 +6,7 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, IsNull, In, MoreThan, Like } from 'typeorm';
+import { Repository, IsNull, In, MoreThan, Like, Brackets } from 'typeorm';
 import { Message } from 'src/02.-Services/messages/entities/message.entity';
 import { MessageAttachment } from 'src/02.-Services/messages/entities/message-attachment.entity'; // 🔥 NUEVO: Importar entidad
 import { CreateMessageDto } from 'src/02.-Services/messages/dto/create-message.dto';
@@ -49,6 +49,11 @@ export class MessagesService {
   private pictureCache = new Map<string, { url: string; expiresAt: number }>();
   private readonly PICTURE_CACHE_TTL = 1000 * 60 * 60 * 24 * 30; // 30 días
 
+  // 🔥 NUEVO: Cache para resolución de alias y datos de usuario para optimizar rendimiento
+  private aliasCache = new Map<string, { aliases: string[]; expiresAt: number }>();
+  private userCache = new Map<string, { data: any; expiresAt: number }>();
+  private readonly CACHE_TTL = 1000 * 60 * 15; // 15 minutos
+
   /**
    * 🔥 NUEVO: Resolver todos los posibles identificadores de un usuario
    * para asegurar que se carguen mensajes antiguos (Nombre, Email, DNI)
@@ -56,6 +61,12 @@ export class MessagesService {
    */
   async resolveUserAliases(identifier: string): Promise<string[]> {
     if (!identifier) return [];
+
+    const now = Date.now();
+    const cached = this.aliasCache.get(identifier);
+    if (cached && cached.expiresAt > now) {
+      return cached.aliases;
+    }
 
     const aliases = new Set<string>();
     aliases.add(identifier);
@@ -116,10 +127,17 @@ export class MessagesService {
         }
       }
     } catch (error) {
-      console.error(`❌ Error resolviendo alias para [${identifier}]:`, error);
+      console.error(`❌ Error resolviendo alias para ${identifier}:`, error);
     }
 
-    return Array.from(aliases).filter(a => !!a);
+    const finalAliases = Array.from(aliases).filter(a => !!a);
+    // Guardar en cache
+    this.aliasCache.set(identifier, {
+      aliases: finalAliases,
+      expiresAt: Date.now() + this.CACHE_TTL,
+    });
+
+    return finalAliases;
   }
 
   async markThreadAsRead(threadId: number, username: string) {
@@ -449,66 +467,8 @@ export class MessagesService {
       skip: offset,
     });
 
-    // 🔥 OPTIMIZACIÓN: Obtener threadCounts en un solo query en lugar de N queries
-    const messageIds = messages.map((m) => m.id);
-    const threadCountMap: Record<number, number> = {};
-    const lastReplyMap: Record<number, string> = {};
-
-    if (messageIds.length > 0) {
-      // Query 1: Obtener conteo de threads para todos los mensajes
-      const threadCounts = await this.messageRepository
-        .createQueryBuilder('message')
-        .select('message.threadId', 'threadId')
-        .addSelect('COUNT(*)', 'count')
-        .where('message.threadId IN (:...messageIds)', { messageIds })
-        .andWhere('message.isDeleted = false')
-        .groupBy('message.threadId')
-        .getRawMany();
-
-      threadCounts.forEach((row) => {
-        threadCountMap[row.threadId] = parseInt(row.count, 10);
-      });
-
-      // 🚀 OPTIMIZADO: Truncar texto directamente en SQL
-      const lastReplies = await this.messageRepository
-        .createQueryBuilder('message')
-        .select('message.threadId', 'threadId')
-        .addSelect('message.from', 'from')
-        .addSelect('CASE WHEN LENGTH(message.message) > 100 THEN CONCAT(SUBSTRING(message.message, 1, 100), "...") ELSE message.message END', 'message')
-        .addSelect('message.sentAt', 'sentAt')
-        .where('message.threadId IN (:...messageIds)', { messageIds })
-        .andWhere('message.isDeleted = false')
-        .orderBy('message.sentAt', 'DESC')
-        .getRawMany();
-
-      // Agrupar por threadId (solo el primero de cada grupo es el más reciente)
-      const seenThreadIds = new Set<number>();
-      const lastReplyTextMap: Record<number, string> = {};
-      lastReplies.forEach((reply) => {
-        if (!seenThreadIds.has(reply.threadId)) {
-          lastReplyMap[reply.threadId] = reply.from;
-          lastReplyTextMap[reply.threadId] = reply.message || '';
-          seenThreadIds.add(reply.threadId);
-        }
-      });
-
-      // Asignar valores a cada mensaje
-      for (const message of messages) {
-        message.threadCount = threadCountMap[message.id] || 0;
-        message.lastReplyFrom = lastReplyMap[message.id] || null;
-        (message as any).lastReplyText = lastReplyTextMap[message.id] || null; // Ya viene truncado desde SQL
-        (message as any).displayDate = formatDisplayDate(message.sentAt);
-      }
-    }
-
-    // Si no hay mensajes con hilos, igual asignar displayDate
-    for (const message of messages) {
-      if (!(message as any).displayDate) {
-        (message as any).displayDate = formatDisplayDate(message.sentAt);
-      }
-    }
-
-    return messages;
+    // 🔥 REFACTORIZADO: Usar lógica de enriquecimiento centralizada (con cache y optimizaciones)
+    return this.enrichMessages(messages, username);
   }
 
   async findByRoomOrderedById(
@@ -581,172 +541,19 @@ export class MessagesService {
       .skip(offset)
       .getManyAndCount();
 
-    // 🚀 OPTIMIZACIÓN: Obtener threadCounts en un solo query
-    const messageIds = messages.map((m) => m.id);
-    const threadCountMap: Record<number, number> = {};
-    const lastReplyMap: Record<number, string> = {};
-    const lastReplyTextMap: Record<number, string> = {}; // 🔥 FIX: Definido aquí para scope local seguro
-
-    if (messageIds.length > 0) {
-      // Obtener conteo de threads para todos los mensajes en una sola consulta
-      const threadCounts = await this.messageRepository
-        .createQueryBuilder('message')
-        .select('message.threadId', 'threadId')
-        .addSelect('COUNT(*)', 'count')
-        .where('message.threadId IN (:...messageIds)', { messageIds })
-        .andWhere('message.isDeleted = false')
-        .groupBy('message.threadId')
-        .getRawMany();
-
-      threadCounts.forEach((tc) => {
-        threadCountMap[tc.threadId] = parseInt(tc.count);
-      });
-
-      // 🔥 NUEVO: Obtener conteo de mensajes de hilo NO LEÍDOS por el usuario
-      const unreadThreadCountMap: Record<number, number> = {};
-      if (username) {
-        const unreadThreadCounts = await this.messageRepository
-          .createQueryBuilder('message')
-          .select('message.threadId', 'threadId')
-          .addSelect('COUNT(*)', 'count')
-          .where('message.threadId IN (:...messageIds)', { messageIds })
-          .andWhere('message.isDeleted = false')
-          // Mensajes que NO son míos
-          .andWhere('message.from != :username', { username })
-          // Y que NO he leído - 🚀 OPTIMIZADO: Sin LOWER()
-          .andWhere(
-            "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(message.readBy, :usernameJson))",
-            { usernameJson: JSON.stringify(this.normalizeForReadBy(username)) }
-          )
-          .groupBy('message.threadId')
-          .getRawMany();
-
-        unreadThreadCounts.forEach((row) => {
-          unreadThreadCountMap[row.threadId] = parseInt(row.count, 10);
-        });
-      }
-
-      // 🔥 Guardar mapa para uso en el map final
-      (this as any)._unreadThreadCountMapRoom = unreadThreadCountMap;
-
-      // 🚀 OPTIMIZADO: Truncar texto directamente en SQL para evitar transferir datos innecesarios
-      // Esto es más eficiente que truncar en JavaScript porque la BD nunca envía el texto completo
-      const lastReplies = await this.messageRepository
-        .createQueryBuilder('message')
-        .leftJoin(User, 'user', 'user.username = message.from')
-        .select('message.threadId', 'threadId')
-        .addSelect('message.from', 'from')
-        .addSelect("COALESCE(CONCAT(user.nombre, ' ', user.apellido), message.from)", 'fromName')
-        .addSelect('CASE WHEN LENGTH(message.message) > 100 THEN CONCAT(SUBSTRING(message.message, 1, 100), "...") ELSE message.message END', 'message')
-        .where('message.threadId IN (:...messageIds)', { messageIds })
-        .andWhere('message.isDeleted = false')
-        .orderBy('message.sentAt', 'DESC')
-        .getRawMany();
-
-      // Agrupar por threadId y tomar el primero (más reciente)
-      const seenThreadIds = new Set<number>();
-      // map local declarado arriba
-      lastReplies.forEach((reply) => {
-        if (!seenThreadIds.has(reply.threadId)) {
-          lastReplyMap[reply.threadId] = reply.fromName || reply.from;
-          lastReplyTextMap[reply.threadId] = reply.message || '';
-          seenThreadIds.add(reply.threadId);
-        }
-      });
-    }
+    // � REFACTORIZADO: Usar lógica de enriquecimiento centralizada (con cache y optimizaciones)
+    const enriched = await this.enrichMessages(messages, username);
 
     // 🔥 Invertir el orden para que se muestren cronológicamente (más antiguos primero)
-    const reversedMessages = messages.reverse();
+    const reversedMessages = enriched.reverse();
 
     // 🔥 Calcular información de paginación
     const page = Math.floor(offset / limit) + 1;
     const totalPages = Math.ceil(total / limit);
     const hasMore = offset + messages.length < total;
 
-    // 🔥 NUEVO: Obtener fotos de perfil de los remitentes (CON CACHÉ)
-    const uniqueSenders = [...new Set(messages.map(m => m.from))];
-    const userMap: Record<string, string> = {};
-    const missingUsernames: string[] = [];
-    const now = Date.now();
-
-    // 1. Verificar Caché
-    uniqueSenders.forEach(username => {
-      const cached = this.pictureCache.get(username);
-      if (cached && cached.expiresAt > now) {
-        userMap[username] = cached.url;
-      } else {
-        missingUsernames.push(username);
-      }
-    });
-
-    // 2. Buscar faltantes en BD y actualizar caché
-    if (missingUsernames.length > 0) {
-      try {
-        // 🔥 FIX CLUSTER: Buscar por username O por Nombre Completo (concatenado)
-        // Esto es necesario porque message.from suele ser el Nombre Completo, no el username
-        const users = await this.userRepository
-          .createQueryBuilder('user')
-          .select(['user.username', 'user.nombre', 'user.apellido', 'user.picture'])
-          .where('user.username IN (:...names)', { names: missingUsernames })
-          .orWhere("CONCAT(COALESCE(user.nombre, ''), ' ', COALESCE(user.apellido, '')) IN (:...names)", { names: missingUsernames })
-          .orWhere("CONCAT(COALESCE(user.nombre, ''), ' ', COALESCE(user.apellido, ''), ' ') IN (:...names)", { names: missingUsernames }) // Con espacio opcional
-          .getMany();
-
-        users.forEach(u => {
-          if (u.picture) {
-            const fullName = `${u.nombre || ''} ${u.apellido || ''}`.trim();
-            const fullNameWithSpace = `${fullName} `;
-
-            // Intentar matchear con las claves que faltan
-            if (missingUsernames.includes(u.username)) {
-              userMap[u.username] = u.picture;
-              this.pictureCache.set(u.username, { url: u.picture, expiresAt: now + this.PICTURE_CACHE_TTL });
-            }
-            if (missingUsernames.includes(fullName)) {
-              userMap[fullName] = u.picture;
-              this.pictureCache.set(fullName, { url: u.picture, expiresAt: now + this.PICTURE_CACHE_TTL });
-            }
-            if (missingUsernames.includes(fullNameWithSpace)) {
-              userMap[fullNameWithSpace] = u.picture;
-              this.pictureCache.set(fullNameWithSpace, { url: u.picture, expiresAt: now + this.PICTURE_CACHE_TTL });
-            }
-          }
-        });
-      } catch (err) {
-        console.error('Error fetching user pictures:', err);
-      }
-    }
-
-    // 🚀 OPTIMIZADO: Payload reducido - readBy convertido a readByCount
-    // Campos eliminados: numberInList, displayDate (se calculan en frontend)
-    const data = reversedMessages.map((msg) => {
-      // 🔥 FIX: Si los attachments no tienen fileSize, usar el del mensaje principal
-      if (msg.attachments && msg.attachments.length > 0 && msg.fileSize) {
-        msg.attachments = msg.attachments.map(att => ({
-          ...att,
-          fileSize: att.fileSize || msg.fileSize
-        }));
-      }
-      // Extraer readBy y convertir a conteo
-      const { readBy, ...msgWithoutReadBy } = msg as any;
-      const readByCount = Array.isArray(readBy) ? readBy.length : 0;
-
-      const enriched = {
-        ...msgWithoutReadBy,
-        readByCount, // Solo el conteo, no la lista completa
-        threadCount: threadCountMap[msg.id] || 0,
-        unreadThreadCount: ((this as any)._unreadThreadCountMapRoom || {})[msg.id] || 0, // 🔥 Mapear conteo no leído
-        lastReplyFrom: lastReplyMap[msg.id] || null,
-        lastReplyText: lastReplyTextMap[msg.id] || null, // Ya viene truncado desde SQL
-        time: formatPeruTime(new Date(msg.sentAt)), // 🔥 RECALCULAR SIEMPRE para asegurar formato AM/PM
-        picture: userMap[msg.from] || null, // 🔥 Picture agregado
-      };
-
-      return this.sanitizeMessage(enriched); // 🔥 LIMPIEZA TOTAL
-    });
-
     return {
-      data,
+      data: reversedMessages,
       total,
       hasMore,
       page,
@@ -941,109 +748,15 @@ export class MessagesService {
       .skip(offset)
       .getMany();
 
-    // � OPTIMIZACIÓN: Obtener threadCounts en un solo query
-    const messageIds = messages.map((m) => m.id);
-    const threadCountMap: Record<number, number> = {};
-    const lastReplyMap: Record<number, string> = {};
-
-    if (messageIds.length > 0) {
-      // Obtener conteo de threads para todos los mensajes
-      const threadCounts = await this.messageRepository
-        .createQueryBuilder('message')
-        .select('message.threadId', 'threadId')
-        .addSelect('COUNT(*)', 'count')
-        .where('message.threadId IN (:...messageIds)', { messageIds })
-        .andWhere('message.isDeleted = false')
-        .groupBy('message.threadId')
-        .getRawMany();
-
-      threadCounts.forEach((tc) => {
-        threadCountMap[tc.threadId] = parseInt(tc.count);
-      });
-
-      // 🔥 NUEVO: Obtener conteo de mensajes de hilo NO LEÍDOS por el usuario (from)
-      // Asumimos que 'from' es el usuario que consulta
-      const unreadThreadCountMap: Record<number, number> = {};
-      if (from) {
-        const unreadThreadCounts = await this.messageRepository
-          .createQueryBuilder('message')
-          .select('message.threadId', 'threadId')
-          .addSelect('COUNT(*)', 'count')
-          .where('message.threadId IN (:...messageIds)', { messageIds })
-          .andWhere('message.isDeleted = false')
-          // Mensajes que NO son míos
-          .andWhere('message.from != :username', { username: from })
-          // Y que NO he leído - 🚀 OPTIMIZADO: Sin LOWER()
-          .andWhere(
-            "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(message.readBy, :usernameJson))",
-            { usernameJson: JSON.stringify(this.normalizeForReadBy(from)) }
-          )
-          .groupBy('message.threadId')
-          .getRawMany();
-
-        unreadThreadCounts.forEach((row) => {
-          unreadThreadCountMap[row.threadId] = parseInt(row.count, 10);
-        });
-      }
-
-      // 🔥 Guardar mapa para uso en el map final
-      (this as any)._unreadThreadCountMapUser = unreadThreadCountMap;
-
-      // 🚀 OPTIMIZADO: Truncar texto directamente en SQL
-      const lastReplies = await this.messageRepository
-        .createQueryBuilder('message')
-        .leftJoin(User, 'user', 'user.username = message.from')
-        .select('message.threadId', 'threadId')
-        .addSelect('message.from', 'from')
-        .addSelect("COALESCE(CONCAT(user.nombre, ' ', user.apellido), message.from)", 'fromName')
-        .addSelect('CASE WHEN LENGTH(message.message) > 100 THEN CONCAT(SUBSTRING(message.message, 1, 100), "...") ELSE message.message END', 'message')
-        .where('message.threadId IN (:...messageIds)', { messageIds })
-        .andWhere('message.isDeleted = false')
-        .orderBy('message.sentAt', 'DESC')
-        .getRawMany();
-
-      // Agrupar por threadId y tomar el primero (más reciente)
-      const seenThreadIds = new Set<number>();
-      const lastReplyTextMap: Record<number, string> = {};
-      lastReplies.forEach((reply) => {
-        if (!seenThreadIds.has(reply.threadId)) {
-          lastReplyMap[reply.threadId] = reply.fromName || reply.from;
-          lastReplyTextMap[reply.threadId] = reply.message || '';
-          seenThreadIds.add(reply.threadId);
-        }
-      });
-
-      // 🔥 Guardar mapa de texto para uso posterior
-      (this as any)._lastReplyTextMapUser = lastReplyTextMap;
-    }
-
-    // 🔥 Obtener el mapa de texto (puede estar vacío)
-    const lastReplyTextMap: Record<number, string> = (this as any)._lastReplyTextMapUser || {};
+    // 🔥 REFACTORIZADO: Usar lógica de enriquecimiento centralizada (con cache y optimizaciones)
+    const enriched = await this.enrichMessages(messages, from);
 
     // 🔥 Invertir el orden para que se muestren cronológicamente (más antiguos primero)
-    const reversedMessages = messages.reverse();
-
-    // Agregar numeración secuencial y threadCount
-    return reversedMessages.map((msg, index) => {
-      // 🔥 FIX: Si los attachments no tienen fileSize, usar el del mensaje principal
-      if (msg.attachments && msg.attachments.length > 0 && msg.fileSize) {
-        msg.attachments = msg.attachments.map(att => ({
-          ...att,
-          fileSize: att.fileSize || msg.fileSize
-        }));
-      }
-      const enriched = {
-        ...msg,
-        numberInList: index + 1 + offset,
-        threadCount: threadCountMap[msg.id] || 0,
-        unreadThreadCount: ((this as any)._unreadThreadCountMapUser || {})[msg.id] || 0, // 🔥 Mapear conteo no leído
-        lastReplyFrom: lastReplyMap[msg.id] || null,
-        lastReplyText: lastReplyTextMap[msg.id] || null, // Ya viene truncado desde SQL
-        displayDate: formatDisplayDate(msg.sentAt),
-        time: formatPeruTime(new Date(msg.sentAt)), // 🔥 RECALCULAR SIEMPRE para asegurar formato AM/PM
-      };
-      return this.sanitizeMessage(enriched);
-    });
+    // y agregar numeración secuencial
+    return enriched.reverse().map((msg, index) => ({
+      ...msg,
+      numberInList: index + 1 + offset,
+    }));
   }
 
   async findRecentMessages(limit: number = 20): Promise<Message[]> {
@@ -1063,6 +776,9 @@ export class MessagesService {
     limit: number = 20,
     offset: number = 0,
   ): Promise<{ data: any[]; total: number; hasMore: boolean; page: number; totalPages: number }> {
+    // 🔥 RESOLVER ALIAS: Obtener todos los identificadores posibles para buscar menciones
+    const aliases = await this.resolveUserAliases(username);
+
     const query = this.messageRepository
       .createQueryBuilder('message')
       .leftJoinAndSelect('message.attachments', 'attachments')
@@ -1084,10 +800,18 @@ export class MessagesService {
         'attachments.type',
         'attachments.fileName',
         'attachments.fileSize',
-      ])
-      // Buscar mensajes que contengan @username (case insensitive)
-      .where('LOWER(message.message) LIKE LOWER(:mentionPattern)', { mentionPattern: `%@${username}%` })
-      .andWhere('message.isDeleted = :isDeleted', { isDeleted: false });
+      ]);
+
+    // 🔥 BÚSQUEDA DINÁMICA: Buscar @nombre para cada alias encontrado
+    // Usamos LOWER para asegurar que sea case-insensitive
+    query.andWhere('message.isDeleted = :isDeleted', { isDeleted: false });
+
+    query.andWhere(new Brackets(qb => {
+      aliases.forEach((alias, index) => {
+        const paramName = `mentionPattern${index}`;
+        qb.orWhere(`LOWER(message.message) LIKE LOWER(:${paramName})`, { [paramName]: `%@${alias}%` });
+      });
+    }));
 
     // Si se especifica una sala, filtrar por ella (contextual)
     // Si no, busca en todas (global)
@@ -1509,27 +1233,33 @@ export class MessagesService {
     to: string,
     deletedBy: string,
   ): Promise<{ deletedCount: number }> {
-    // DEBUG: Descomentar para depurar problemas de eliminación
-    // console.log(`🗑️ clearAllMessagesInConversation llamada con:`);
-    // console.log(`   from: "${from}"`);
-    // console.log(`   to: "${to}"`);
-    // console.log(`   deletedBy: "${deletedBy}"`);
+    // 🔥 RESOLVER ALIAS: Obtener todos los IDs posibles para ambos usuarios
+    // Esto asegura que si eliminamos mensajes de "Karen" (DNI), también se borren
+    // los que envió/recibió cuando antes se llamaba "Karen Flores" (Nombre).
+    const fromAliases = await this.resolveUserAliases(from);
+    const toAliases = await this.resolveUserAliases(to);
 
-    // Eliminar mensajes en ambas direcciones (from -> to y to -> from)
+    // Eliminar mensajes en ambas direcciones usando todos los alias posibles
     const result1 = await this.messageRepository.update(
-      { from, to, isDeleted: false },
+      {
+        from: In(fromAliases),
+        to: In(toAliases),
+        isDeleted: false
+      },
       { isDeleted: true, deletedAt: new Date(), deletedBy },
     );
-    // console.log(`   Resultado dirección 1 (from->to): ${result1.affected} afectados`);
 
     const result2 = await this.messageRepository.update(
-      { from: to, to: from, isDeleted: false },
+      {
+        from: In(toAliases),
+        to: In(fromAliases),
+        isDeleted: false
+      },
       { isDeleted: true, deletedAt: new Date(), deletedBy },
     );
-    // console.log(`   Resultado dirección 2 (to->from): ${result2.affected} afectados`);
 
     const totalDeleted = (result1.affected || 0) + (result2.affected || 0);
-    // console.log(`   Total eliminados: ${totalDeleted}`);
+    console.log(`🗑️ [VACIAR CHAT] ${totalDeleted} mensajes eliminados entre ${from} y ${to}`);
 
     return { deletedCount: totalDeleted };
   }
@@ -2625,16 +2355,18 @@ export class MessagesService {
   }
 
   // 🔥 HELPER: Enriquecer mensajes con información de hilos (respuestas) Y FOTOS
-  private async enrichMessages(messages: any[]): Promise<any[]> {
+  private async enrichMessages(messages: any[], currentUsername?: string): Promise<any[]> {
     if (!messages || messages.length === 0) return [];
 
     const messageIds = messages.map((m) => m.id);
     const threadCountMap: Record<number, number> = {};
+    const unreadThreadCountMap: Record<number, number> = {};
     const lastReplyMap: Record<number, string> = {};
     const lastReplyTextMap: Record<number, string> = {};
 
-    // 1. Thread Counts
+    // 1. Thread Counts y Unread Thread Counts
     if (messageIds.length > 0) {
+      // Conteo total
       const threadCounts = await this.messageRepository
         .createQueryBuilder('message')
         .select('message.threadId', 'threadId')
@@ -2647,6 +2379,27 @@ export class MessagesService {
       threadCounts.forEach((tc) => {
         threadCountMap[tc.threadId] = parseInt(tc.count);
       });
+
+      // Conteo no leídos (si se proporciona currentUsername)
+      if (currentUsername) {
+        const unreadThreadCounts = await this.messageRepository
+          .createQueryBuilder('message')
+          .select('message.threadId', 'threadId')
+          .addSelect('COUNT(*)', 'count')
+          .where('message.threadId IN (:...messageIds)', { messageIds })
+          .andWhere('message.isDeleted = false')
+          .andWhere('message.from != :username', { username: currentUsername })
+          .andWhere(
+            "(message.readBy IS NULL OR JSON_LENGTH(message.readBy) = 0 OR NOT JSON_CONTAINS(message.readBy, :usernameJson))",
+            { usernameJson: JSON.stringify(this.normalizeForReadBy(currentUsername)) }
+          )
+          .groupBy('message.threadId')
+          .getRawMany();
+
+        unreadThreadCounts.forEach((row) => {
+          unreadThreadCountMap[row.threadId] = parseInt(row.count, 10);
+        });
+      }
 
       // 2. Last Replies
       const lastReplies = await this.messageRepository
@@ -2664,7 +2417,7 @@ export class MessagesService {
         .orderBy('message.id', 'DESC')
         .getRawMany();
 
-      // Group by threadId and take first (most recent)
+      // Agrupar por threadId y tomar el primero (más reciente)
       const seenThreadIds = new Set<number>();
       lastReplies.forEach((reply) => {
         if (!seenThreadIds.has(reply.threadId)) {
@@ -2675,18 +2428,15 @@ export class MessagesService {
       });
     }
 
-    // 🔥 3. Obtener Adjuntos (Attachments) de forma masiva
+    // 🔥 3. Adjuntos de forma masiva
     const attachmentsMap: Record<number, any[]> = {};
     if (messageIds.length > 0) {
       try {
         const allAttachments = await this.attachmentRepository.find({
           where: { messageId: In(messageIds) }
         });
-
         allAttachments.forEach(att => {
-          if (!attachmentsMap[att.messageId]) {
-            attachmentsMap[att.messageId] = [];
-          }
+          if (!attachmentsMap[att.messageId]) attachmentsMap[att.messageId] = [];
           attachmentsMap[att.messageId].push(att);
         });
       } catch (err) {
@@ -2694,23 +2444,21 @@ export class MessagesService {
       }
     }
 
-    // 🔥 4. Obtener fotos de perfil (cache + DB robusta)
+    // 🔥 4. Datos de usuario (Cache + DB)
     const uniqueSenders = [...new Set(messages.map(m => m.from))];
-    const userMap: Record<string, string> = {};
+    const userDetailsMap: Record<string, { fullName: string; picture: string }> = {};
     const missingUsernames: string[] = [];
     const now = Date.now();
 
-    // Cache check
     uniqueSenders.forEach(username => {
-      const cached = this.pictureCache.get(username);
+      const cached = this.userCache.get(username);
       if (cached && cached.expiresAt > now) {
-        userMap[username] = cached.url;
+        userDetailsMap[username] = cached.data;
       } else {
         missingUsernames.push(username);
       }
     });
 
-    // DB Fetch
     if (missingUsernames.length > 0) {
       try {
         const users = await this.userRepository
@@ -2718,58 +2466,39 @@ export class MessagesService {
           .select(['user.username', 'user.nombre', 'user.apellido', 'user.picture'])
           .where('user.username IN (:...names)', { names: missingUsernames })
           .orWhere("CONCAT(COALESCE(user.nombre, ''), ' ', COALESCE(user.apellido, '')) IN (:...names)", { names: missingUsernames })
-          .orWhere("CONCAT(COALESCE(user.nombre, ''), ' ', COALESCE(user.apellido, ''), ' ') IN (:...names)", { names: missingUsernames })
           .getMany();
 
-        const fullNameMap: Record<string, string> = {};
         users.forEach(u => {
           const fullName = `${u.nombre || ''} ${u.apellido || ''}`.trim();
-          if (fullName) {
-            fullNameMap[u.username] = fullName;
-          }
+          const data = { fullName: fullName || u.username, picture: u.picture || null };
 
-          if (u.picture) {
-            const fullNameWithSpace = `${fullName} `;
+          userDetailsMap[u.username] = data;
+          if (fullName) userDetailsMap[fullName] = data;
 
-            // Map back to requested keys
-            if (missingUsernames.includes(u.username)) {
-              userMap[u.username] = u.picture;
-              this.pictureCache.set(u.username, { url: u.picture, expiresAt: now + this.PICTURE_CACHE_TTL });
-            }
-            if (missingUsernames.includes(fullName)) {
-              userMap[fullName] = u.picture;
-              this.pictureCache.set(fullName, { url: u.picture, expiresAt: now + this.PICTURE_CACHE_TTL });
-            }
-            if (missingUsernames.includes(fullNameWithSpace)) {
-              userMap[fullNameWithSpace] = u.picture;
-              this.pictureCache.set(fullNameWithSpace, { url: u.picture, expiresAt: now + this.PICTURE_CACHE_TTL });
-            }
-          }
+          // Guardar en cache para ambos identificadores
+          this.userCache.set(u.username, { data, expiresAt: now + this.CACHE_TTL });
+          if (fullName) this.userCache.set(fullName, { data, expiresAt: now + this.CACHE_TTL });
         });
-        (this as any)._currentBatchFullNameMap = fullNameMap;
       } catch (err) {
-        console.error('Error fetching user pictures in enrichMessages:', err);
+        console.error('Error fetching user data in enrichMessages:', err);
       }
     }
 
-    // 4. Map messages & Return
-    const batchFullNameMap = (this as any)._currentBatchFullNameMap || {};
-
     return messages.map((msg) => {
-      // Asegurar que msg es un objeto plano si es una entidad
       const msgObj = typeof msg.toJSON === 'function' ? msg.toJSON() : msg;
-
-      // Intentar resolver el nombre completo del remitente
-      const resolvedFromName = batchFullNameMap[msg.from] || msg.from;
+      const userDetails = userDetailsMap[msg.from] || { fullName: msg.from, picture: null };
 
       const enrichedMsg = {
         ...msgObj,
-        from: resolvedFromName, // 🔥 Ahora el 'from' trae el nombre completo si está disponible
+        from: userDetails.fullName, // 🔥 Resolvemos el nombre completo
+        picture: userDetails.picture,
         threadCount: threadCountMap[msg.id] || 0,
+        unreadThreadCount: unreadThreadCountMap[msg.id] || 0,
         lastReplyFrom: lastReplyMap[msg.id] || null,
         lastReplyText: lastReplyTextMap[msg.id] || null,
         attachments: attachmentsMap[msg.id] || msg.attachments || [],
-        picture: userMap[msg.from] || userMap[resolvedFromName] || null,
+        displayDate: formatDisplayDate(msg.sentAt),
+        time: formatPeruTime(new Date(msg.sentAt)),
       };
 
       return this.sanitizeMessage(enrichedMsg);
