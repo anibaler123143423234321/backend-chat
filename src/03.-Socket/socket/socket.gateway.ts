@@ -828,23 +828,30 @@ export class SocketGateway
 
         this.users.set(username, { socket: client, userData });
 
-        //  CLUSTER FIX: Unir socket a sala personal para recibir DMs desde otros nodos
-        await client.join(username); // Para mensajes dirigidos a "username"
-        await client.join(username.toLowerCase()); //  FIX: Para mensajes dirigidos a "username" normalizado
-        await client.join(`user:${username}`); // Prefijo estándar por si acaso (opcional)
-        await client.join(client.id); //  NUEVO: Unir a sala con su propio socket ID para recibir forceDisconnect
+        // 🔥 CLUSTER FIX: Unir socket a salas para TODOS sus alias posibles
+        // Esto garantiza que cualquier notificación enviada a un DNI, Nombre o Email
+        // llegue a este socket sin importar qué identificador use el emisor.
+        const aliases = await this.messagesService.resolveUserAliases(username);
 
-        //  FIX: También unir con displayName (nombre + apellido) para chats asignados
-        // Los mensajes DM se envían al displayName completo, no solo al username
+        // Agregar también el nombre actual que viene en userData por si acaso no está en la BD aún
         if (userData?.nombre && userData?.apellido) {
-            const displayName = `${userData.nombre} ${userData.apellido}`;
-            await client.join(displayName);
-            await client.join(displayName.toLowerCase());
-            await client.join(displayName.toUpperCase()); // Por si acaso frontend envía en mayúsculas
-            console.log(`🚪 Usuario ${username} unido a salas: [${username}], [${displayName}], [${displayName.toLowerCase()}], [${displayName.toUpperCase()}]`);
-        } else {
-            console.log(`⚠️ Usuario ${username} SIN nombre/apellido - salas: [${username}], [${username.toLowerCase()}]`);
+            aliases.push(`${userData.nombre} ${userData.apellido}`);
         }
+
+        const uniqueAliases = Array.from(new Set(aliases.map(a => a?.toLowerCase().trim()).filter(a => !!a)));
+
+        for (const alias of uniqueAliases) {
+            await client.join(alias);
+            await client.join(alias.toUpperCase());
+            // console.log(`🚪 Socket ${client.id} [${username}] unido a sala alias: [${alias}]`);
+        }
+
+        // Salas estándar adicionales
+        await client.join(username);
+        await client.join(`user:${username}`);
+        await client.join(client.id);
+
+        console.log(`✅ Registro robusto para ${username}: Unido a ${uniqueAliases.length} salas de alias.`);
 
         // ?? OPTIMIZACIN: Actualizar ndice normalizado para bsquedas rpidas
         this.usernameIndex.set(username.toLowerCase().trim(), username);
@@ -4140,32 +4147,24 @@ export class SocketGateway
     }
 
     /**
-     * Notificar a un usuario espec�fico que fue agregado a una sala
+     * Notificar a un usuario específico que fue agregado a una sala
+     * 🔥 CLUSTER FIX: Emitir a la sala del 'username' o alias.
      */
     notifyUserAddedToRoom(username: string, roomCode: string, roomName: string) {
-        // console.log(
-        //     `? Notificando a ${username} que fue agregado a la sala ${roomCode}`,
-        // );
+        // console.log(`📢 Notificando adición a sala a ${username}`);
 
-        const userConnection = this.users.get(username);
-        if (userConnection && userConnection.socket.connected) {
-            // console.log(
-            //     `? Usuario ${username} est� conectado, enviando notificaci�n`,
-            // );
-            // 🔥 CLUSTER FIX: Usar server.emit() para Redis
-            this.server.emit('addedToRoom', {
-                username: username, // Filtrar en frontend
-                roomCode,
-                roomName,
-                message: `Has sido agregado a la sala: ${roomName}`,
-            });
-            console.log(`✅ [CLUSTER] addedToRoom emitido vía Redis para ${username}`);
-        } else {
-            // console.log(
-            //     `? Usuario ${username} NO est� conectado o no existe en el mapa de usuarios`,
-            // );
-            // console.log(`?? Usuarios conectados:`, Array.from(this.users.keys()));
-        }
+        // 🔥 NO verificar localmente this.users.get(username)
+        // Emitir a la sala del usuario (que puede ser DNI, Nombre o Email)
+        // Como el usuario se unió a todas sus salas de alias al registrarse,
+        // esto llegará a su socket sin importar en qué instancia esté.
+        this.server.to(username.toLowerCase().trim()).emit('addedToRoom', {
+            username: username, // Para filtrado en frontend
+            roomCode,
+            roomName,
+            message: `Has sido agregado a la sala: ${roomName}`,
+        });
+
+        console.log(`✅ [CLUSTER] addedToRoom emitido vía Redis/Rooms para ${username}`);
     }
 
     /**
@@ -4174,7 +4173,7 @@ export class SocketGateway
     async handleUserRemovedFromRoom(roomCode: string, username: string, roomName?: string, removedBy?: string) {
         // console.log(`👋 Usuario ${username} eliminado de la sala ${roomCode}`);
 
-        // Remover el usuario del mapa de usuarios de la sala
+        // 1. Remover del mapa local (si existe en esta instancia)
         const roomUserSet = this.roomUsers.get(roomCode);
         if (roomUserSet) {
             roomUserSet.delete(username);
@@ -4183,24 +4182,23 @@ export class SocketGateway
             }
         }
 
-        // Notificar al usuario eliminado
-        const userConnection = this.users.get(username);
-        if (userConnection && userConnection.socket.connected) {
-            // 🔥 CLUSTER FIX: Usar server.emit() para Redis
-            this.server.to(username).emit('removedFromRoom', {
-                username: username, // Filtrar en frontend
-                roomCode,
-                roomName: roomName || roomCode,
-                removedBy: removedBy || 'Administrador',
-                message: `Has sido eliminado de la sala "${roomName || roomCode}"${removedBy ? ` por ${removedBy}` : ''}`,
-            });
-            console.log(`✅ [CLUSTER] removedFromRoom emitido vía Redis para ${username} (sala: ${roomName}, por: ${removedBy})`);
+        // 2. Notificar al usuario (vía Sala Redis/Cluster)
+        // 🔥 CLUSTER FIX: No depender de userConnection local
+        this.server.to(username.toLowerCase().trim()).emit('removedFromRoom', {
+            username: username,
+            roomCode,
+            roomName: roomName || roomCode,
+            removedBy: removedBy || 'Administrador',
+            message: `Has sido eliminado de la sala "${roomName || roomCode}"${removedBy ? ` por ${removedBy}` : ''}`,
+        });
 
-            // Limpiar la sala actual del usuario
-            if (userConnection.userData) {
-                userConnection.userData.currentRoom = undefined;
-            }
+        // 3. Limpiar sala actual si está conectado localmente
+        const userConnection = this.users.get(username);
+        if (userConnection?.userData) {
+            userConnection.userData.currentRoom = undefined;
         }
+
+        console.log(`✅ [CLUSTER] removedFromRoom emitido vía Redis/Rooms para ${username}`);
 
         // Notificar a todos los usuarios de la sala sobre la actualización
         await this.broadcastRoomUsers(roomCode);
@@ -4736,35 +4734,30 @@ export class SocketGateway
 
     // 🔥 NUEVO: Notificar al usuario que su solicitud fue aprobada
     public notifyUserApproved(roomCode: string, username: string) {
+        const target = username.toLowerCase().trim();
+
         // Enviar evento al room personal del usuario (creado en handleRegister)
-        this.server.to(username).emit('userApproved', {
+        this.server.to(target).emit('userApproved', {
             roomCode,
             username,
             message: 'Tu solicitud ha sido aprobada. Ahora puedes unirte a la sala.',
             timestamp: new Date().toISOString()
         });
 
-        // Intento adicional con lowercase por si acaso
-        this.server.to(username.toLowerCase()).emit('userApproved', {
-            roomCode,
-            username,
-            status: 'APPROVED'
-        });
-
-        console.log(`✅ Notificación de aprobación enviada a ${username} para sala ${roomCode}`);
+        console.log(`✅ [CLUSTER] Notificación de aprobación enviada a ${username} para sala ${roomCode}`);
     }
 
     // 3. Notificar a usuario que fue rechazado
     public notifyUserRejected(roomCode: string, username: string) {
-        const user = this.getUserCaseInsensitive(username);
+        const target = username.toLowerCase().trim();
 
-        if (user && user.socket && user.socket.connected) {
-            user.socket.emit('joinRequestRejected', {
-                roomCode,
-                message: 'Tu solicitud para unirte ha sido rechazada por un administrador.',
-                timestamp: new Date().toISOString()
-            });
-        }
+        this.server.to(target).emit('joinRequestRejected', {
+            roomCode,
+            message: 'Tu solicitud para unirte ha sido rechazada por un administrador.',
+            timestamp: new Date().toISOString()
+        });
+
+        console.log(`✅ [CLUSTER] Notificación de rechazo enviada a ${username} para sala ${roomCode}`);
     }
 
     // 🔥 NUEVO: Método robusto para obtener datos del remitente por DNI o Nombre Completo

@@ -896,12 +896,14 @@ export class TemporaryRoomsService {
     // Mapear resultados
     const allRooms = entities.map((room, index) => {
       // 🔥 FILTRADO POR ROL EN MEMORIA (Usando Alias Set Robusto)
+      // ADMIN y JEFEPISO solo ven salas donde son miembros (rectificado por alias)
+      // SUPERADMIN sigue viendo absolutamente todas las salas
       if (['ADMIN', 'JEFEPISO'].includes(role)) {
         const members = room.members || [];
         const isMember = members.some(m => aliasSet.has((m || '').toString().toLowerCase().trim()));
 
         if (!isMember) {
-          return null; // Filtrar si no es miembro por ningún alias
+          return null; // Filtrar si no es miembro por ningún alias (incluyendo DNI/Nombre)
         }
       }
 
