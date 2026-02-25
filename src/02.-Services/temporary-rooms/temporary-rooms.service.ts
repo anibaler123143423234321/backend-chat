@@ -249,6 +249,25 @@ export class TemporaryRoomsService {
         'room.createdAt',
         'room.updatedAt',
       ])
+      .leftJoin(
+        (subQuery) => {
+          return subQuery
+            .select('m.roomCode', 'roomCode')
+            .addSelect('MAX(m.id)', 'lastMessageId')
+            .from('messages', 'm')
+            .where('m.isDeleted = :isDeleted', { isDeleted: false })
+            .andWhere('m.threadId IS NULL')
+            .groupBy('m.roomCode');
+        },
+        'lastMsg',
+        'room.roomCode = lastMsg.roomCode',
+      )
+      .leftJoin(
+        'messages',
+        'message',
+        'message.id = lastMsg.lastMessageId',
+      )
+      .addSelect('message.sentAt', 'lastMessageSentAt')
       .where('room.isActive = :isActive', { isActive: true })
       // 🔥 MODIFICADO: Buscar tanto por DNI como por Nombre Completo
       .andWhere(
@@ -284,31 +303,33 @@ export class TemporaryRoomsService {
       );
     }
 
-    // 5. Ordenar por fecha de creación
-    queryBuilder.orderBy('room.createdAt', 'DESC');
+    // 5. NO usar skip/take de TypeORM (pierde alias en subquery).
+    //    Traemos TODAS las salas del usuario, ordenamos en JS, y paginamos manualmente.
+    const { entities, raw } = await queryBuilder.getRawAndEntities();
 
-    // 6. Obtener total y aplicar paginación
+    const allRooms = entities.map((room, index) => {
+      const { members, connectedMembers, assignedMembers, pendingMembers, ...roomData } = room;
+      const rowData = raw[index];
+      const lastMessageSentAt = rowData.lastMessageSentAt;
+
+      return {
+        ...roomData,
+        lastActivity: lastMessageSentAt || room.updatedAt || room.createdAt,
+        _sortTime: lastMessageSentAt ? new Date(lastMessageSentAt).getTime() : 0,
+      };
+    });
+
+    // 6. Ordenar en memoria por último mensaje (más reciente primero)
+    allRooms.sort((a, b) => b._sortTime - a._sortTime);
+
+    const total = allRooms.length;
     const pageNum = Number(page);
     const limitNum = Number(limit);
     const skipNum = (pageNum - 1) * limitNum;
 
-    // Obtener el conteo total
-    const total = await queryBuilder.getCount();
-
-    // Aplicar paginación al queryBuilder
-    queryBuilder.skip(skipNum).take(limitNum);
-
-    const entities = await queryBuilder.getMany();
-
-    const paginatedRooms = entities.map((room) => {
-      // Excluir arrays pesados para el listado (aunque ya el select los excluye)
-      const { members, connectedMembers, assignedMembers, pendingMembers, ...roomData } = room;
-
-      return {
-        ...roomData,
-        lastActivity: room.updatedAt || room.createdAt,
-      };
-    });
+    const paginatedRooms = allRooms
+      .slice(skipNum, skipNum + limitNum)
+      .map(({ _sortTime, ...rest }) => rest);
 
     const totalPages = Math.ceil(total / limitNum);
     const hasMore = pageNum < totalPages;
@@ -775,8 +796,8 @@ export class TemporaryRoomsService {
       )
       .select([
         'room',
-        'message.sentAt', // Solo seleccionamos sentAt para el ordenamiento
       ])
+      .addSelect('message.sentAt', 'lastMessageSentAt')
       .where('room.isActive = :isActive', { isActive: true });
 
     // Aplicar búsqueda si existe (busca en nombre y código) - Nota: ya no buscamos en mensaje para optimizar
@@ -808,23 +829,23 @@ export class TemporaryRoomsService {
       }
 
       const rowData = raw[index];
-      // Obtenemos la fecha del último mensaje para ordenar
-      const lastMessageSentAt = rowData.message_sentAt;
+      // Obtenemos la fecha exacta del último mensaje
+      const lastMessageSentAt = rowData.lastMessageSentAt;
 
       // 🔥 OPTIMIZACIÓN: NO devolver arrays pesados de members/connectedMembers
       // Solo devolver contadores para reducir payload ~83%
       return {
         id: room.id,
         name: room.name,
-        description: room.description, // 🔥 RESTAURADO: description para el frontend es el picture
+        description: room.description,
         roomCode: room.roomCode,
         currentMembers: room.currentMembers,
-        maxCapacity: room.maxCapacity, // 🔥 AGREGADO: maxCapacity para el frontend
+        maxCapacity: room.maxCapacity,
         isActive: room.isActive,
-        // isMuted: room.settings?.mutedUsers?.includes(displayName) || false, // 🔥 Estado de silencio
-        _sortTime: lastMessageSentAt ? new Date(lastMessageSentAt).getTime() : 0 // CAMPO TEMPORAL PARA ORDENAR
+        lastActivity: lastMessageSentAt || room.updatedAt || room.createdAt,
+        _sortTime: lastMessageSentAt ? new Date(lastMessageSentAt).getTime() : 0,
       };
-    }).filter(room => room !== null); // Eliminar nulos del filtrado
+    }).filter(room => room !== null);
 
     // Separar favoritas y no favoritas
     const favorites = allRooms.filter((room) =>
@@ -834,22 +855,15 @@ export class TemporaryRoomsService {
       (room) => !favoriteRoomCodes.includes(room.roomCode),
     );
 
-    // Función de ordenamiento RESTAURADA
-    const sortByLastMessage = (rooms) => {
-      return rooms.sort((a, b) => {
-        return b._sortTime - a._sortTime;
-      });
-    };
+    // 🔥 Ordenar en memoria por último mensaje (más reciente primero)
+    const sortedNonFavorites = [...nonFavorites].sort((a, b) => b._sortTime - a._sortTime);
 
-    // 🔥 MODIFICADO: Solo ordenar los NO-favoritos (favoritos van a su propia API)
-    const sortedNonFavorites = sortByLastMessage(nonFavorites);
-
-    // 🔥 MODIFICADO: Solo paginar los NO-favoritos
+    // 🔥 Solo paginar los NO-favoritos
     const pageNum = Number(page);
     const limitNum = Number(limit);
     const skip = (pageNum - 1) * limitNum;
 
-    // Paginamos y eliminamos el campo temporal _sortTime
+    // Paginamos y eliminamos campo temporal
     const paginatedRooms = sortedNonFavorites
       .slice(skip, skip + limitNum)
       .map(({ _sortTime, ...rest }) => rest);
