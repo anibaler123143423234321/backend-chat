@@ -827,10 +827,16 @@ export class MessagesService {
       .skip(offset)
       .getManyAndCount();
 
+    // 🔥 Resolver fullName para todos los senders en paralelo
+    const resolvedNames = await Promise.all(
+      messages.map(msg => this.resolveFullNameForReadBy(msg.from))
+    );
+
     // Formatear respuesta
-    const data = messages.map((msg) => {
+    const data = messages.map((msg, idx) => {
       const enriched = {
         ...msg,
+        fullName: resolvedNames[idx] || msg.from, // 🔥 NUEVO: nombre completo del remitente
         displayDate: formatDisplayDate(msg.sentAt),
         time: formatPeruTime(new Date(msg.sentAt)),
       };
@@ -1792,10 +1798,16 @@ export class MessagesService {
       skip: offset, // 🔥 Paginación DB
     });
 
-    const data = threads.map((msg) => ({
+    // 🔥 Resolver fullName para todos los senders en paralelo
+    const resolvedNames = await Promise.all(
+      threads.map(msg => this.resolveFullNameForReadBy(msg.from))
+    );
+
+    const data = threads.map((msg, idx) => ({
       id: msg.id,
       message: msg.message,
       from: msg.from,
+      fullName: resolvedNames[idx] || msg.from, // 🔥 NUEVO: nombre completo del remitente
       senderRole: msg.senderRole,
       senderNumeroAgente: msg.senderNumeroAgente,
       threadCount: msg.threadCount,
@@ -1847,10 +1859,16 @@ export class MessagesService {
       .skip(offset)
       .getManyAndCount();
 
-    const data = threads.map((msg) => ({
+    // 🔥 Resolver fullName para todos los senders en paralelo
+    const resolvedNames = await Promise.all(
+      threads.map(msg => this.resolveFullNameForReadBy(msg.from))
+    );
+
+    const data = threads.map((msg, idx) => ({
       id: msg.id,
       message: msg.message,
       from: msg.from,
+      fullName: resolvedNames[idx] || msg.from, // 🔥 NUEVO: nombre completo
       senderRole: msg.senderRole,
       senderNumeroAgente: msg.senderNumeroAgente,
       threadCount: msg.threadCount,
