@@ -19,52 +19,39 @@ export class ConversationFavoritesService {
     private messagesService: MessagesService,
   ) { }
 
-  // Agregar conversación a favoritos
   async addFavorite(username: string, conversationId: number): Promise<ConversationFavorite> {
-    // Verificar si ya existe
     const existing = await this.conversationFavoriteRepository.findOne({
       where: { username, conversationId },
     });
-
     if (existing) {
-      // Si ya existe, actualizar isPinned a true
       existing.isPinned = true;
       return await this.conversationFavoriteRepository.save(existing);
     }
-
-    // Crear nuevo favorito
     const favorite = this.conversationFavoriteRepository.create({
       username,
       conversationId,
       isPinned: true,
     });
-
     return await this.conversationFavoriteRepository.save(favorite);
   }
 
-  // Quitar conversación de favoritos
   async removeFavorite(username: string, conversationId: number): Promise<void> {
     await this.conversationFavoriteRepository.delete({ username, conversationId });
   }
 
-  // Alternar estado de favorito
   async toggleFavorite(username: string, conversationId: number): Promise<{ isFavorite: boolean }> {
     const existing = await this.conversationFavoriteRepository.findOne({
       where: { username, conversationId },
     });
-
     if (existing) {
-      // Si existe, eliminarlo
       await this.conversationFavoriteRepository.delete({ username, conversationId });
       return { isFavorite: false };
     } else {
-      // Si no existe, crearlo
       await this.addFavorite(username, conversationId);
       return { isFavorite: true };
     }
   }
 
-  // Obtener todas las conversaciones favoritas de un usuario
   async getUserFavorites(username: string): Promise<ConversationFavorite[]> {
     return await this.conversationFavoriteRepository.find({
       where: { username },
@@ -72,7 +59,6 @@ export class ConversationFavoritesService {
     });
   }
 
-  // Verificar si una conversación es favorita para un usuario
   async isFavorite(username: string, conversationId: number): Promise<boolean> {
     const favorite = await this.conversationFavoriteRepository.findOne({
       where: { username, conversationId },
@@ -80,13 +66,11 @@ export class ConversationFavoritesService {
     return !!favorite;
   }
 
-  // Obtener IDs de conversaciones favoritas de un usuario (para filtrado rápido)
   async getUserFavoriteConversationIds(username: string): Promise<number[]> {
     const favorites = await this.getUserFavorites(username);
     return favorites.map(f => f.conversationId);
   }
 
-  // 🔥 NUEVO: Obtener favoritos con datos completos de la conversación (JOIN/Enriquecimiento)
   async getUserFavoritesWithConversationData(username: string): Promise<any[]> {
     const favorites = await this.conversationFavoriteRepository.find({
       where: { username },
@@ -95,12 +79,15 @@ export class ConversationFavoritesService {
     });
 
     const usernameNormalized = this.normalizeUsername(username);
+    const currentUser = await this.userRepository.findOne({
+      where: { username: usernameNormalized },
+      select: ['nombre', 'apellido'],
+    });
+    const currentUserFullName = currentUser ? `${currentUser.nombre} ${currentUser.apellido}`.trim() : null;
 
-    // Enriquecer y filtrar
     const enrichedFavorites = await Promise.all(
       favorites
         .filter(fav => {
-          // 🔥 FILTRO CRÍTICO: La conversación debe existir, estar activa y el usuario debe ser miembro
           if (!fav.conversation || !fav.conversation.isActive) return false;
           const participants = fav.conversation.participants || [];
           return participants.some(p => this.normalizeUsername(p) === usernameNormalized);
@@ -111,16 +98,44 @@ export class ConversationFavoritesService {
 
           let lastMessageInternal = null;
           let unreadCount = 0;
+          let lastActivity = conv.updatedAt || conv.createdAt;
+          const otherParticipants = participants.filter(p => this.normalizeUsername(p) !== usernameNormalized);
+
+          let otherParticipantPicture = null;
+          let otherParticipantName = conv.name;
+          let otherParticipantDisplayName = otherParticipants[0] || '';
+
+          const otherUser = otherParticipantDisplayName ? await this.userRepository.findOne({
+            where: { username: otherParticipantDisplayName },
+            select: ['picture', 'nombre', 'apellido', 'username'],
+          }) : null;
+
+          if (otherUser) {
+            otherParticipantPicture = otherUser.picture;
+            if (participants.length === 2) {
+              otherParticipantName = otherUser.nombre && otherUser.apellido
+                ? `${otherUser.nombre} ${otherUser.apellido}`.trim()
+                : otherUser.nombre || otherParticipantName;
+            }
+          }
 
           if (participants.length >= 2) {
-            // Obtener el último mensaje usando conversationId
+            const searchTermsMe = [usernameNormalized];
+            if (currentUserFullName) searchTermsMe.push(currentUserFullName);
+
+            const searchTermsOther = [otherParticipantDisplayName];
+            if (otherParticipantName) searchTermsOther.push(otherParticipantName);
+
             const messages = await this.messageRepository.find({
-              where: {
-                conversationId: conv.id,
-                isDeleted: false,
-                threadId: IsNull(),
-                isGroup: false,
-              },
+              where: [
+                { conversationId: conv.id, isDeleted: false, threadId: IsNull(), isGroup: false },
+                ...searchTermsMe.flatMap(me => searchTermsOther.map(other => ({
+                  from: me, to: other, isDeleted: false, threadId: IsNull(), isGroup: false
+                }))),
+                ...searchTermsOther.flatMap(other => searchTermsMe.map(me => ({
+                  from: other, to: me, isDeleted: false, threadId: IsNull(), isGroup: false
+                }))),
+              ],
               order: { sentAt: 'DESC' },
               take: 1,
             });
@@ -133,42 +148,23 @@ export class ConversationFavoritesService {
                 sentAt: messages[0].sentAt,
                 mediaType: messages[0].mediaType,
               };
+              lastActivity = messages[0].sentAt;
             }
 
-            // 🔥 FIX: Usar lógica centralizada de conteo de no leídos (soporta alias DNI/Nombre)
             unreadCount = await this.messagesService.getUnreadCountForUserInConversation(conv.id, username);
-          }
-
-          // Obtener información del otro participante para la imagen y el nombre
-          let otherParticipantPicture = null;
-          let otherParticipantName = conv.name;
-
-          const otherParticipants = participants.filter(p => this.normalizeUsername(p) !== usernameNormalized);
-          if (otherParticipants.length > 0) {
-            const otherUser = await this.userRepository.findOne({
-              where: { username: otherParticipants[0] },
-              select: ['picture', 'nombre', 'apellido'],
-            });
-            if (otherUser) {
-              otherParticipantPicture = otherUser.picture;
-              // Si es una conversación personal (1-on-1), usar el nombre del otro usuario
-              if (participants.length === 2) {
-                otherParticipantName = otherUser.nombre && otherUser.apellido
-                  ? `${otherUser.nombre} ${otherUser.apellido}`.trim()
-                  : otherUser.nombre || otherParticipantName;
-              }
-            }
           }
 
           return {
             id: conv.id,
             name: otherParticipantName,
-            participants: conv.participants,
-            isActive: conv.isActive,
-            isFavorite: true,
-            unreadCount,
-            lastMessageInternal,
             picture: otherParticipantPicture,
+            lastMessageInternal,
+            lastActivity: lastActivity,
+            unreadCount: unreadCount,
+            participants: participants,
+            isActive: conv.isActive,
+            createdAt: conv.createdAt,
+            updatedAt: conv.updatedAt,
           };
         })
     );
@@ -184,4 +180,3 @@ export class ConversationFavoritesService {
       .replace(/[\u0300-\u036f]/g, '') || '';
   }
 }
-

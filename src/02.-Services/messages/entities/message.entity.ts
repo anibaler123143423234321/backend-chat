@@ -128,7 +128,7 @@ export class Message {
 
   // Campos para reacciones a mensajes
   @Column({ type: 'json', nullable: true })
-  reactions: { emoji: string; username: string; timestamp: Date }[]; // Array de reacciones
+  reactions: { emoji: string; username: string; fullName?: string; timestamp: Date }[]; // Array de reacciones
 
   // 🔥 NUEVO: Campos para videollamadas
   @Column({ type: 'varchar', length: 50, nullable: true })

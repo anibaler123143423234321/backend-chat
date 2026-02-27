@@ -1150,9 +1150,17 @@ export class MessagesService {
       const now = new Date();
       const peruTime = new Date(now.getTime() - 5 * 60 * 60 * 1000);
 
+      // 🔥 Buscar el nombre completo del usuario para guardarlo en la reacción
+      const user = await this.userRepository.findOne({
+        where: { username },
+        select: ['nombre', 'apellido']
+      });
+      const fullName = user ? `${user.nombre || ''} ${user.apellido || ''}`.trim() : username;
+
       message.reactions.push({
         emoji,
         username,
+        fullName, // 🔥 NUEVO: Guardar nombre completo para mostrar en frontend
         timestamp: peruTime,
       });
     }

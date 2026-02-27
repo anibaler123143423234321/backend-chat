@@ -2248,17 +2248,34 @@ export class SocketGateway
                 recipientForDB = actualRecipient;
             }
 
-            // console.log(
-            //     `?? Guardando mensaje - isAssignedConversation: ${isAssignedConversation}, actualRecipient: ${actualRecipient}, to: ${to}, recipientForDB: ${recipientForDB}`,
-            // );
+            // 🔒 SERVER-SIDE fromId RESOLUTION: No confiar en el fromId del cliente
+            // Resolver el fromId correcto buscando el usuario en la BD por su username (from)
+            let resolvedFromId = fromId; // Fallback al valor del cliente
+            try {
+                const senderUser = await this.userRepository.findOne({
+                    where: { username: from },
+                    select: ['id']
+                });
+                if (senderUser) {
+                    if (resolvedFromId !== senderUser.id) {
+                        console.warn(`⚠️ fromId MISMATCH detectado: cliente envió fromId=${fromId}, pero el usuario '${from}' tiene id=${senderUser.id}. Usando id correcto.`);
+                    }
+                    resolvedFromId = senderUser.id;
+                } else {
+                    console.warn(`⚠️ No se encontró usuario con username='${from}' en BD. Usando fromId del cliente: ${fromId}`);
+                }
+            } catch (lookupError) {
+                console.error(`❌ Error al resolver fromId para '${from}':`, lookupError);
+                // Mantener el fromId del cliente como fallback
+            }
 
-            //  CR�TICO: Calcular sentAt y time desde el servidor (no confiar en el cliente)
+            // CRÍTICO: Calcular sentAt y time desde el servidor (no confiar en el cliente)
             const peruDate = getPeruDate();
             const calculatedTime = formatPeruTime(peruDate);
 
             const messageData = {
                 from,
-                fromId,
+                fromId: resolvedFromId, // 🔒 Usar el ID resuelto del servidor, no el del cliente
                 senderRole, //  Incluir role del remitente
                 senderNumeroAgente, // Incluir numeroAgente del remitente
                 to: isGroup ? null : recipientForDB,

@@ -141,6 +141,7 @@ export class RoomFavoritesService {
             type: 'room', // 🔥 Discriminador
             isFavorite: true,
             unreadCount: unreadCount,
+            lastActivity: lastMessage ? lastMessage.sentAt : (fav.room.updatedAt || fav.room.createdAt), // 🔥 NUEVO: Ordenamiento
             lastMessageInternal: lastMessage ? {
               id: lastMessage.id,
               sentAt: lastMessage.sentAt,
@@ -165,27 +166,29 @@ export class RoomFavoritesService {
       roomCode: conv.id.toString(), // Para conv usamos el ID como roomCode en el frontend
       type: 'conv', // 🔥 Discriminador
       isFavorite: true,
+      lastActivity: conv.lastActivity || updatedAt || createdAt, // 🔥 Asegurar que pase y tenga fallback
       lastMessageInternal, // 🔥 Para ordenar pero no para el return
     }));
 
     // 3. Combinar ambos
     const allFavorites = [...enrichedRoomFavorites, ...normalizedConvFavorites];
 
-    // Ordenar por fecha del último mensaje (más reciente primero)
+    // Ordenar por fecha de última actividad (más reciente primero)
     allFavorites.sort((a, b) => {
-      const dateA = new Date(a.lastMessageInternal?.sentAt || 0).getTime();
-      const dateB = new Date(b.lastMessageInternal?.sentAt || 0).getTime();
+      const dateA = new Date(a.lastActivity || 0).getTime();
+      const dateB = new Date(b.lastActivity || 0).getTime();
       return dateB - dateA;
     });
 
-    // 🔥 NUEVO: Devolver metadata del mensaje (lastMessage) para que el frontend pueda ordenar inicialmente
+    // 🔥 NUEVO: Devolver metadata del mensaje (lastMessage) y actividad para que el frontend pueda ordenar inicialmente
     return allFavorites.map(({ lastMessageInternal, ...rest }) => ({
       ...rest,
       lastMessage: lastMessageInternal ? {
-        text: lastMessageInternal.text,
+        text: lastMessageInternal.text || lastMessageInternal.message,
         from: lastMessageInternal.from,
         sentAt: lastMessageInternal.sentAt
-      } : null
+      } : null,
+      lastActivity: rest.lastActivity // Asegurar que pase al frontend
     }));
   }
 }
