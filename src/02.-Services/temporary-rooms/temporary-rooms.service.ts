@@ -1218,8 +1218,8 @@ export class TemporaryRoomsService {
         return {
           id: user.id,
           username: user.username,
-          displayName: user.nombre && user.apellido
-            ? `${user.nombre} ${user.apellido} `
+          displayName: (user.nombre || user.apellido)
+            ? `${user.nombre || ''} ${user.apellido || ''}`.trim()
             : user.username,
           isOnline: isOnline,
           role: user.role,

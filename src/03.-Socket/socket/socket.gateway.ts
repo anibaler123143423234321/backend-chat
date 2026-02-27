@@ -91,8 +91,9 @@ export class SocketGateway
     //  NUEVO: Map de admins para broadcasting eficiente
     private adminUsers = new Map<string, { socket: Socket; userData: any }>();
 
-    //  OPTIMIZACI�N: Regex precompilado para menciones (evitar recompilar en cada mensaje)
-    private readonly mentionRegex = /@([a-zA-Z������������][a-zA-Z������������\s]+?)(?=\s{2,}|$|[.,!?;:]|\n)/g;
+    //  OPTIMIZACIN: Regex precompilado para menciones (evitar recompilar en cada mensaje)
+    // Permite caracteres latinos y espacios (para nombres completos)
+    private readonly mentionRegex = /@([a-zA-ZáéíóúÁÉÍÓÚñÑ0-9]+(?:\s+[a-zA-ZáéíóúÁÉÍÓÚñÑ0-9]+){0,3})(?=\s|$|[.,!?;:]|\n)/g;
 
     //  OPTIMIZACIÓN: Caché de salas para evitar consultas repetidas a BD
     private roomCache = new Map<string, { room: any; cachedAt: number }>();
@@ -1798,15 +1799,8 @@ export class SocketGateway
         setImmediate(async () => {
             try {
                 if (msgContext.isGroup) {
+                    console.log(`📡 [DEBUG] Procesando mensaje de GRUPO - De: ${from}, Para: ${to}, roomCode: ${finalRoomCode}`);
                     // console.log(`?? Procesando mensaje de GRUPO`);
-
-                    // console.log(`?? Usuario remitente:`, {
-                    //     username: from,
-                    //     messageRoomCode, // Ya est� disponible del destructuring
-                    //     currentRoom: user?.currentRoom,
-                    //     finalRoomCode,
-                    //     hasUser: !!user,
-                    // });
 
                     if (finalRoomCode) {
                         // Es una sala temporal
@@ -1821,11 +1815,21 @@ export class SocketGateway
                         const room = await this.getCachedRoom(finalRoomCode);
                         if (room && room.connectedMembers && room.connectedMembers.length > 0) {
                             // 🚀 CLUSTER FIX: Usar TODOS los miembros de la BD, NO filtrar por conexión local
-                            // Redis Adapter se encargará de dirigir los mensajes al nodo correcto
+
+                            // 🔥 MEJORADO: Incluir tanto miembros conectados como miembros históricos (aprobados)
+                            // para asegurar que todos reciban el mensaje/notificación
+                            const allMembers = Array.from(new Set([
+                                ...(room.members || []),
+                                ...(room.connectedMembers || []),
+                                ...(room.assignedMembers || [])
+                            ]));
+
                             roomUsers = new Set([
                                 ...(roomUsers ? Array.from(roomUsers) : []),
-                                ...room.connectedMembers, // 🔥 NO filtrar por this.users.has()
+                                ...allMembers, // 🔥 NO filtrar por this.users.has()
                             ]);
+
+                            console.log(`👥 [handleMessage] Sala ${finalRoomCode}: ${allMembers.length} miembros totales para broadcast`);
                             // console.log(`🔔 CLUSTER FIX: roomUsers actualizado desde BD: ${roomUsers.size} miembros`);
                         }
 
@@ -1872,24 +1876,49 @@ export class SocketGateway
                             };
 
                             // 🚀 CLUSTER FIX: Broadcast global a la sala vía Redis
-                            // Delegamos a los clientes la lógica de menciones (o simplificamos)
+                            // Mantenemos esto para que los que están en la sala vean el mensaje al instante
                             this.server.to(finalRoomCode).emit('message', {
                                 ...baseGroupMessage,
-                                hasMention: false, // Simplificación para cluster
-                                mentions: mentions // Enviamos lista para que el cliente decida (si se implementa)
+                                hasMention: false,
+                                mentions: mentions
                             });
 
-                            // Log de éxito (asumido por Redis broadcast)
-                            // console.log(`🚀 DEBUG: Mensaje de grupo enviado a sala ${finalRoomCode} (Redis Broadcast)`);
-
-                            // 🚀 CLUSTER FIX: Actualizar último mensaje para todos los usuarios (excepto el remitente)
-                            // Usar Redis broadcast en lugar de verificar conexión local
+                            // 🚀 CLUSTER FIX: Notificaciones individuales y Menciones
                             roomUsers.forEach((member) => {
                                 if (member !== from) {
-                                    // 🚀 CLUSTER FIX: Verificar currentRoom en memoria local si está disponible,
-                                    // pero SIEMPRE emitir el evento vía Redis para alcanzar otros nodos
                                     const memberUser = this.users.get(member);
                                     const isViewingThisRoom = memberUser?.currentRoom === finalRoomCode;
+
+                                    //  NUEVO: Calcular mención específica para este miembro
+                                    const isMentioned = mentions.some(
+                                        (mention) => {
+                                            const normalizedMention = mention.toUpperCase().trim();
+
+                                            // 1. Match Directo por DNI/Username
+                                            if (member.toUpperCase().includes(normalizedMention) || normalizedMention.includes(member.toUpperCase())) {
+                                                return true;
+                                            }
+
+                                            // 2. Match por Nombre Profesional
+                                            if (memberUser?.userData) {
+                                                const { nombre, apellido } = memberUser.userData;
+                                                const fullName = `${nombre || ''} ${apellido || ''}`.toUpperCase().trim();
+                                                if (fullName.includes(normalizedMention) || normalizedMention.includes(fullName)) {
+                                                    return true;
+                                                }
+                                            }
+                                            return false;
+                                        }
+                                    );
+
+                                    // Si NO está viendo la sala, o si hay una mención (para asegurar alerta), enviar mensaje individual
+                                    if (!isViewingThisRoom || isMentioned) {
+                                        this.server.to(member).emit('message', {
+                                            ...baseGroupMessage,
+                                            hasMention: isMentioned,
+                                            mentions: mentions
+                                        });
+                                    }
 
                                     const lastMessageData = {
                                         text: message,
@@ -1900,11 +1929,7 @@ export class SocketGateway
                                         fileName,
                                     };
 
-                                    // 🚀 CLUSTER FIX: Siempre emitir vía Redis (server.to) para alcanzar usuarios en otros nodos
-                                    // Si el usuario está en este nodo Y está viendo la sala, no incrementar contador
-                                    // Si no sabemos dónde está (otro nodo), asumir que NO está viendo la sala e incrementar
                                     const shouldIncrement = !isViewingThisRoom;
-
                                     this.emitUnreadCountUpdateForUser(
                                         finalRoomCode,
                                         member,
@@ -1976,9 +2001,27 @@ export class SocketGateway
                                 // Fallback: Iterar miembros usando comunicación directa (Redis friendly)
                                 groupMembers.forEach((member) => {
                                     const isMentioned = mentions.some(
-                                        (mention) =>
-                                            member.toUpperCase().includes(mention.toUpperCase()) ||
-                                            mention.toUpperCase().includes(member.toUpperCase()),
+                                        (mention) => {
+                                            const normalizedMention = mention.toUpperCase().trim();
+                                            const memberLower = member.toLowerCase().trim();
+
+                                            // 1. Match Directo por DNI/Username
+                                            if (member.toUpperCase().includes(normalizedMention) || normalizedMention.includes(member.toUpperCase())) {
+                                                return true;
+                                            }
+
+                                            // 2. Match por Nombre Profesional (desde memoria local)
+                                            const memberUser = this.users.get(member);
+                                            if (memberUser?.userData) {
+                                                const { nombre, apellido } = memberUser.userData;
+                                                const fullName = `${nombre || ''} ${apellido || ''}`.toUpperCase().trim();
+                                                if (fullName.includes(normalizedMention) || normalizedMention.includes(fullName)) {
+                                                    return true;
+                                                }
+                                            }
+
+                                            return false;
+                                        }
                                     );
 
                                     // Usar broadcast dirigido a la sala del usuario (client.join(username))
