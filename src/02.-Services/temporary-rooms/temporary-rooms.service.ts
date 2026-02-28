@@ -1218,6 +1218,8 @@ export class TemporaryRoomsService {
         return {
           id: user.id,
           username: user.username,
+          nombre: user.nombre || null,
+          apellido: user.apellido || null,
           displayName: (user.nombre || user.apellido)
             ? `${user.nombre || ''} ${user.apellido || ''}`.trim()
             : user.username,
@@ -1235,6 +1237,8 @@ export class TemporaryRoomsService {
       userList.push({
         id: `temp-${idx}`,
         username: id,
+        nombre: null,
+        apellido: null,
         displayName: id,
         isOnline: false,
         role: 'GUEST',
