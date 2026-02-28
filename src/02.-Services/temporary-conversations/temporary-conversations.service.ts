@@ -46,7 +46,7 @@ export class TemporaryConversationsService {
           if (idx === 0) {
             builder = builder.where("CONCAT(user.nombre, ' ', user.apellido) LIKE :term" + idx, { ["term" + idx]: `%${word}%` });
           } else {
-            builder = builder.andWhere("CONCAT(user.nombre, ' ', word) LIKE :term" + idx, { ["term" + idx]: `%${word}%` });
+            builder = builder.andWhere("CONCAT(user.nombre, ' ', user.apellido) LIKE :term" + idx, { ["term" + idx]: `%${word}%` });
           }
         });
         user = await builder.getOne();

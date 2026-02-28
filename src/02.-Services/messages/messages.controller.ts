@@ -88,10 +88,17 @@ export class MessagesController {
             createMessageDto.senderNumeroAgente = dbUser.numeroAgente;
           }
 
-          // 🔥 IMPORTANTE: Si 'from' era un nombre, lo normalizamos a username (DNI) para consistencia en BD
+          //  IMPORTANTE: Si 'from' era un nombre, lo normalizamos a username (DNI) para consistencia en BD
           if (createMessageDto.from !== dbUser.username) {
             console.log(`♻️ Normalizando remitente: "${createMessageDto.from}" -> "${dbUser.username}"`);
             createMessageDto.from = dbUser.username;
+          }
+
+          //  CRÍTICO: Siempre usar el ID real de la base de datos para fromId. 
+          // Esto evita que datos oxidados en el localStorage del frontend corrompan los nuevos registros.
+          if (createMessageDto.fromId !== dbUser.id) {
+            console.log(`🛡️ Corrigiendo fromId del cliente: ${createMessageDto.fromId} -> ${dbUser.id}`);
+            createMessageDto.fromId = dbUser.id;
           }
         }
       } catch (error) {
@@ -188,7 +195,7 @@ export class MessagesController {
     );
   }
 
-  // 🔥 NUEVO: Obtener mensajes alrededor de un messageId específico (para jump-to-message)
+  //  NUEVO: Obtener mensajes alrededor de un messageId específico (para jump-to-message)
   @Get('room/:roomCode/around/:messageId')
   @ApiOperation({ summary: 'Obtener mensajes alrededor de un ID específico (para saltar a mensaje)' })
   @ApiParam({ name: 'roomCode', description: 'Código de la sala' })
@@ -257,7 +264,7 @@ export class MessagesController {
     );
   }
 
-  // 🔥 NUEVO: Obtener mensajes de sala ANTES de un ID específico (para paginación hacia atrás)
+  //  NUEVO: Obtener mensajes de sala ANTES de un ID específico (para paginación hacia atrás)
   @Get('room/:roomCode/before/:messageId')
   @ApiOperation({ summary: 'Obtener mensajes de sala anteriores a un ID' })
   @ApiParam({ name: 'roomCode', description: 'Código de la sala' })
@@ -276,7 +283,7 @@ export class MessagesController {
     );
   }
 
-  // 🔥 NUEVO: Obtener mensajes privados ANTES de un ID específico
+  //  NUEVO: Obtener mensajes privados ANTES de un ID específico
   @Get('user/:from/:to/before/:messageId')
   @ApiOperation({ summary: 'Obtener mensajes privados anteriores a un ID' })
   @ApiParam({ name: 'from', description: 'Username remitente' })
@@ -293,7 +300,7 @@ export class MessagesController {
     return this.messagesService.findByUserBeforeId(from, to, messageId, Number(limit));
   }
 
-  // 🔥 NUEVO: Endpoints para cargar mensajes HACIA ADELANTE (después de un ID)
+  //  NUEVO: Endpoints para cargar mensajes HACIA ADELANTE (después de un ID)
   @Get('room/:roomCode/after/:messageId')
   @ApiOperation({ summary: 'Obtener mensajes de sala posteriores a un ID' })
   @ApiParam({ name: 'roomCode', description: 'Código de la sala' })
@@ -324,7 +331,7 @@ export class MessagesController {
     return this.messagesService.findByUserAfterId(from, to, messageId, Number(limit));
   }
 
-  // 🔥 NUEVO: Obtener mensajes alrededor de un messageId para chats individuales
+  //  NUEVO: Obtener mensajes alrededor de un messageId para chats individuales
   @Get('user/:from/:to/around/:messageId')
   @ApiOperation({ summary: 'Obtener mensajes privados alrededor de un ID específico' })
   @ApiParam({ name: 'from', description: 'Username remitente' })
@@ -385,7 +392,7 @@ export class MessagesController {
   }
 
   /**
-   * 🔥 NUEVO: Obtener lista completa de usuarios que leyeron un mensaje
+   *  NUEVO: Obtener lista completa de usuarios que leyeron un mensaje
    * Usado cuando el usuario hace clic en "visto por X personas"
    */
   @Get(':messageId/read-by')
@@ -408,7 +415,7 @@ export class MessagesController {
         markReadDto.username,
       );
 
-      // 🔥 NOTIFICAR AL SOCKET (Batch)
+      //  NOTIFICAR AL SOCKET (Batch)
       if (messages && messages.length > 0) {
         // Enviar notificaciones individuales (idealmente sería un evento batch)
         messages.forEach(msg => this.socketGateway.notifyMessageRead(msg, markReadDto.username));
@@ -434,7 +441,7 @@ export class MessagesController {
       to,
     );
 
-    // 🔥 NOTIFICAR AL SOCKET (Batch)
+    //  NOTIFICAR AL SOCKET (Batch)
     // El usuario que lee es "from" (el que llama al endpoint)
     if (messages && messages.length > 0) {
       messages.forEach(msg => this.socketGateway.notifyMessageRead(msg, from));
@@ -513,7 +520,7 @@ export class MessagesController {
     return { success: deleted };
   }
 
-  // 🔥 NUEVO: Vaciar todos los mensajes de una sala (grupos/favoritos) - Solo SUPERADMIN
+  //  NUEVO: Vaciar todos los mensajes de una sala (grupos/favoritos) - Solo SUPERADMIN
   @Delete('room/:roomCode/clear')
   @ApiOperation({ summary: 'Vaciar todos los mensajes de una sala (Solo Superadmin)' })
   @ApiParam({ name: 'roomCode', description: 'Código de la sala' })
@@ -526,7 +533,7 @@ export class MessagesController {
     return this.messagesService.clearAllMessagesInRoom(roomCode, deletedBy);
   }
 
-  // 🔥 NUEVO: Vaciar todos los mensajes de una conversación directa - Solo SUPERADMIN
+  //  NUEVO: Vaciar todos los mensajes de una conversación directa - Solo SUPERADMIN
   @Delete('conversation/clear')
   @ApiOperation({ summary: 'Vaciar todos los mensajes de una conversación (Solo Superadmin)' })
   @ApiBody({ schema: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' }, deletedBy: { type: 'string' } } } })
@@ -584,7 +591,7 @@ export class MessagesController {
     );
   }
 
-  // 🔥 NUEVO: Búsqueda global de mensajes (tipo WhatsApp) con paginación
+  //  NUEVO: Búsqueda global de mensajes (tipo WhatsApp) con paginación
   // Busca en todos los chats y grupos donde el usuario participa
   @Get('search-all/:username')
   @ApiOperation({ summary: 'Búsqueda global de mensajes (tipo WhatsApp) con paginación' })
@@ -631,7 +638,7 @@ export class MessagesController {
     );
   }
 
-  // 🔥 NUEVO: Cargar mensajes alrededor de un mensaje específico (para búsqueda tipo WhatsApp)
+  //  NUEVO: Cargar mensajes alrededor de un mensaje específico (para búsqueda tipo WhatsApp)
   @Get('around/:messageId')
   @ApiOperation({ summary: 'Obtener mensajes alrededor de un mensaje específico (para búsqueda)' })
   @ApiParam({ name: 'messageId', description: 'ID del mensaje central' })
@@ -650,7 +657,7 @@ export class MessagesController {
     );
   }
 
-  // 🔥 NUEVO: Obtener hilos padres de un grupo (roomCode)
+  //  NUEVO: Obtener hilos padres de un grupo (roomCode)
   @Get('room/:roomCode/threads')
   @ApiOperation({ summary: 'Obtener hilos padres de un grupo' })
   @ApiParam({ name: 'roomCode', description: 'Código de la sala' })
@@ -672,7 +679,7 @@ export class MessagesController {
     );
   }
 
-  // 🔥 NUEVO: Obtener hilos padres de un chat directo (from/to)
+  //  NUEVO: Obtener hilos padres de un chat directo (from/to)
   @Get('user/:from/:to/threads')
   @ApiOperation({ summary: 'Obtener hilos padres de un chat directo' })
   @ApiParam({ name: 'from', description: 'Username remitente' })
@@ -713,7 +720,7 @@ export class MessagesController {
     return { success: true };
   }
 
-  // 🔥 NUEVO: Marcar hilo como leído
+  //  NUEVO: Marcar hilo como leído
   @Patch('thread/:threadId/read')
   @ApiOperation({ summary: 'Marcar un hilo como leído' })
   @ApiParam({ name: 'threadId', description: 'ID del hilo' })
@@ -727,7 +734,7 @@ export class MessagesController {
     return await this.messagesService.markThreadAsRead(parseInt(threadId), username);
   }
 
-  // 🔥 NUEVO: Obtener conteo de mensajes no leídos para un usuario en una sala
+  //  NUEVO: Obtener conteo de mensajes no leídos para un usuario en una sala
   @Get('unread-count/:roomCode/:username')
   @ApiOperation({ summary: 'Obtener conteo de no leídos en una sala específica' })
   @ApiParam({ name: 'roomCode', description: 'Código de la sala' })
@@ -744,7 +751,7 @@ export class MessagesController {
     return { roomCode, username, unreadCount };
   }
 
-  // 🔥 NUEVO: Obtener conteo de mensajes no leídos para múltiples salas
+  //  NUEVO: Obtener conteo de mensajes no leídos para múltiples salas
   @Post('unread-counts')
   @ApiOperation({ summary: 'Obtener conteos de no leídos para múltiples salas' })
   @ApiBody({ schema: { type: 'object', properties: { roomCodes: { type: 'array', items: { type: 'string' } }, username: { type: 'string' } } } })
@@ -761,7 +768,7 @@ export class MessagesController {
     return { username, unreadCounts };
   }
 
-  // 🔥 NUEVO: Obtener todos los conteos de mensajes no leídos para un usuario
+  //  NUEVO: Obtener todos los conteos de mensajes no leídos para un usuario
   @Get('unread-counts')
   @ApiOperation({ summary: 'Obtener todos los conteos de no leídos para un usuario' })
   @ApiQuery({ name: 'username', description: 'Username del usuario' })
