@@ -2449,33 +2449,14 @@ export class SocketGateway
             };
 
             if (data.isGroup && data.roomCode) {
-                // Broadcast a todos los usuarios de la sala
-                const roomUsersSet = this.roomUsers.get(data.roomCode);
-                if (roomUsersSet) {
-                    roomUsersSet.forEach((user) => {
-                        const userConnection = this.users.get(user);
-                        if (userConnection && userConnection.socket.connected) {
-                            userConnection.socket.emit('messageDeleted', deleteEvent);
-                        }
-                    });
-                    // console.log(
-                    //     `? Broadcast de eliminaci�n enviado a ${roomUsersSet.size} usuarios en sala ${data.roomCode}`,
-                    // );
-                }
+                // 🚀 CLUSTER FIX: Emitir directamente a la sala (gestionado por Redis Adapter)
+                // Se envía a todos los que estén en la sala sin importar la instancia.
+                this.server.to(data.roomCode).emit('messageDeleted', deleteEvent);
             } else {
-                // Enviar al destinatario individual
-                const recipient = this.users.get(data.to);
-                if (recipient && recipient.socket.connected) {
-                    recipient.socket.emit('messageDeleted', deleteEvent);
-                }
-                // Tambi�n enviar al remitente para sincronizar
-                const sender = this.users.get(data.username);
-                if (sender && sender.socket.connected) {
-                    sender.socket.emit('messageDeleted', deleteEvent);
-                }
-                // console.log(
-                //     `? Notificaci�n de eliminaci�n enviada a ${data.to} y ${data.username}`,
-                // );
+                // 🚀 CLUSTER FIX: Usar emisión a salas de alias (DNI/Nombre)
+                // Enviar al destinatario y al remitente
+                this.server.to(data.to).emit('messageDeleted', deleteEvent);
+                this.server.to(data.username).emit('messageDeleted', deleteEvent);
             }
         } catch (error) {
             console.error('? Error al hacer broadcast de mensaje eliminado:', error);
