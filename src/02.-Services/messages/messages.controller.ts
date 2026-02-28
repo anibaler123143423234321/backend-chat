@@ -66,43 +66,34 @@ export class MessagesController {
     console.log(`[MessagesController] CREATING MESSAGE FULL PAYLOAD:`, JSON.stringify(createMessageDto, null, 2));
     // 🔥 FIX: Obtener senderRole y senderNumeroAgente de la BD si no vienen en el DTO
     // Robustez: Manejar si 'from' es un DNI o un Nombre Completo
-    if (createMessageDto.from && (!createMessageDto.senderRole || !createMessageDto.senderNumeroAgente)) {
+    if (createMessageDto.from && (!createMessageDto.senderRole || !createMessageDto.senderNumeroAgente || !createMessageDto.fromId)) {
       try {
         const fromValue = createMessageDto.from.trim();
-        let dbUser = await this.userRepository.findOne({
-          where: { username: fromValue },
-        });
+        // 🚀 OPTIMIZADO: Usar el caché del SocketGateway en lugar de MySQL directo
+        const cachedUser = await this.socketGateway.getSenderData(fromValue);
 
-        // Si no se encuentra por username, intentar por Nombre Completo
-        if (!dbUser) {
-          dbUser = await this.userRepository.createQueryBuilder('user')
-            .where("CONCAT(user.nombre, ' ', user.apellido) = :fullName", { fullName: fromValue })
-            .getOne();
-        }
-
-        if (dbUser) {
+        if (cachedUser) {
           if (!createMessageDto.senderRole) {
-            createMessageDto.senderRole = dbUser.role;
+            createMessageDto.senderRole = cachedUser.role;
           }
           if (!createMessageDto.senderNumeroAgente) {
-            createMessageDto.senderNumeroAgente = dbUser.numeroAgente;
+            createMessageDto.senderNumeroAgente = cachedUser.numeroAgente;
           }
 
           //  IMPORTANTE: Si 'from' era un nombre, lo normalizamos a username (DNI) para consistencia en BD
-          if (createMessageDto.from !== dbUser.username) {
-            console.log(`♻️ Normalizando remitente: "${createMessageDto.from}" -> "${dbUser.username}"`);
-            createMessageDto.from = dbUser.username;
+          if (createMessageDto.from !== cachedUser.username) {
+            console.log(`♻️ Normalizando remitente: "${createMessageDto.from}" -> "${cachedUser.username}"`);
+            createMessageDto.from = cachedUser.username;
           }
 
           //  CRÍTICO: Siempre usar el ID real de la base de datos para fromId. 
-          // Esto evita que datos oxidados en el localStorage del frontend corrompan los nuevos registros.
-          if (createMessageDto.fromId !== dbUser.id) {
-            console.log(`🛡️ Corrigiendo fromId del cliente: ${createMessageDto.fromId} -> ${dbUser.id}`);
-            createMessageDto.fromId = dbUser.id;
+          if (createMessageDto.fromId !== cachedUser.id) {
+            console.log(`🛡️ [CACHÉ] Corrigiendo fromId del cliente: ${createMessageDto.fromId} -> ${cachedUser.id}`);
+            createMessageDto.fromId = cachedUser.id;
           }
         }
       } catch (error) {
-        console.error(`Controller - Error al buscar usuario en BD:`, error);
+        console.error(`Controller - Error al buscar usuario en caché/BD:`, error);
       }
     }
 

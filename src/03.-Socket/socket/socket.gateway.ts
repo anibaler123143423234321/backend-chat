@@ -86,7 +86,7 @@ export class SocketGateway
 
     // ?? NUEVO: Cach de datos de usuario para evitar consultas repetidas
     private userCache = new Map<string, UserCacheData>();
-    private CACHE_TTL = 5 * 60 * 1000; // 5 minutos
+    private CACHE_TTL = 8 * 60 * 60 * 1000; // 🚀 8 horas (Jornada completa)
 
     //  NUEVO: Map de admins para broadcasting eficiente
     private adminUsers = new Map<string, { socket: Socket; userData: any }>();
@@ -1789,7 +1789,7 @@ export class SocketGateway
         // Solo si no tiene ID real (no guardado por frontend)
         if (!data.id) {
             // Guardar en background sin await - USAR DNI resuelto para la base de datos
-            this.saveMessageInBackground(data, finalRoomCode, senderRole, senderNumeroAgente, tempId, resolvedFrom);
+            this.saveMessageInBackground(data, finalRoomCode, senderRole, senderNumeroAgente, tempId, resolvedFrom, senderFullName);
         }
 
         // 🚀 OPTIMIZADO: Broadcast INMEDIATO (sin esperar BD)
@@ -1850,7 +1850,7 @@ export class SocketGateway
                             // 🚀 OPTIMIZADO: Crear objeto base UNA vez fuera del loop (reduce allocations)
                             const baseGroupMessage = {
                                 id: msgContext.savedMessage?.id,
-                                from: from || 'Usuario Desconocido',
+                                from: senderFullName || 'Usuario Desconocido',
                                 senderRole,
                                 senderNumeroAgente,
                                 group: to,
@@ -2165,7 +2165,8 @@ export class SocketGateway
         senderRole: string,
         senderNumeroAgente: string,
         tempId: string,
-        from: string
+        from: string,
+        senderFullName?: string
     ): void {
         // Ejecutar en el siguiente tick del event loop
         setImmediate(async () => {
@@ -2214,7 +2215,7 @@ export class SocketGateway
                             conversationId: savedMessage.conversationId,
                             lastMessage: messageText,
                             lastMessageTime: savedMessage.sentAt || new Date().toISOString(),
-                            lastMessageFrom: from,
+                            lastMessageFrom: senderFullName || from,
                             lastMessageMediaType: data.mediaType,
                             messageId: savedMessage.id // Incluir ID real del mensaje
                         };
@@ -4803,8 +4804,9 @@ export class SocketGateway
         console.log(`✅ [CLUSTER] Notificación favoriteStatusChanged enviada a ${username}`);
     }
 
-    // 🔥 NUEVO: Método robusto para obtener datos del remitente por DNI o Nombre Completo
-    private async getSenderData(identifier: string): Promise<{
+    // 🔥 OPTIMIZADO: Método público para que el MessagesController también use caché
+    public async getSenderData(identifier: string): Promise<{
+        id: number,
         username: string,
         role: string,
         numeroAgente: string,
@@ -4818,6 +4820,7 @@ export class SocketGateway
         const localUser = this.users.get(normalizedInput);
         if (localUser?.userData) {
             return {
+                id: localUser.userData.id, // Ojo: Asegurar que userData tenga ID real (lo tiene por el login inicial)
                 username: normalizedInput,
                 role: localUser.userData.role,
                 numeroAgente: localUser.userData.numeroAgente,
@@ -4830,6 +4833,7 @@ export class SocketGateway
         const cached = this.userCache.get(normalizedInput);
         if (cached && (Date.now() - cached.cachedAt < this.CACHE_TTL)) {
             return {
+                id: cached.id,
                 username: cached.username,
                 role: cached.role,
                 numeroAgente: cached.numeroAgente,
@@ -4855,6 +4859,7 @@ export class SocketGateway
 
             if (dbUser) {
                 const userData = {
+                    id: dbUser.id,
                     username: dbUser.username,
                     role: dbUser.role,
                     numeroAgente: dbUser.numeroAgente,
