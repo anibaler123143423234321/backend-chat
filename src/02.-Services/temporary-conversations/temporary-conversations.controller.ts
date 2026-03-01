@@ -66,7 +66,7 @@ export class TemporaryConversationsController {
     @Query('username') username?: string,
     @Query('page') page: string = '1',
     @Query('limit') limit: string = '10',
-    @Query('search') search?: string, // 🔥 NUEVO: Parámetro de búsqueda
+    @Query('search') search?: string, //  NUEVO: Parámetro de búsqueda
   ) {
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.max(1, Math.min(50, parseInt(limit) || 10)); // Máximo 50 por página
@@ -74,7 +74,7 @@ export class TemporaryConversationsController {
       username,
       pageNum,
       limitNum,
-      search, // 🔥 Pasar parámetro de búsqueda
+      search, //  Pasar parámetro de búsqueda
     );
   }
 
@@ -193,3 +193,4 @@ export class TemporaryConversationsController {
     return this.temporaryConversationsService.unmuteConversation(+id, body.username);
   }
 }
+

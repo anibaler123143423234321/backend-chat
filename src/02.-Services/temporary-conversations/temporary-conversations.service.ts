@@ -1,4 +1,4 @@
-import {
+﻿import {
   Injectable,
   NotFoundException,
   BadRequestException,
@@ -18,11 +18,11 @@ export class TemporaryConversationsService {
     private temporaryConversationRepository: Repository<TemporaryConversation>,
     @InjectRepository(Message)
     private messageRepository: Repository<Message>,
-    @InjectRepository(User) // 🔥 Inyectar repositorio de User
+    @InjectRepository(User) //  Inyectar repositorio de User
     private userRepository: Repository<User>,
   ) { }
 
-  // 🔥 NUEVO: Obtener DNI y Nombre Completo para verificaciones robustas
+  //  NUEVO: Obtener DNI y Nombre Completo para verificaciones robustas
   private async getUserIdentifiers(username: string): Promise<{ dni: string; fullName: string }> {
     // 1. Intentar buscar por username (DNI)
     let user = await this.userRepository.findOne({ where: { username } });
@@ -114,7 +114,7 @@ export class TemporaryConversationsService {
     // Normalizar username para comparación (remover acentos y convertir a minúsculas)
     const usernameNormalized = this.normalizeUsername(username);
 
-    // 🔥 ROLES que pueden ver TODAS las conversaciones (sin filtrar por participante)
+    //  ROLES que pueden ver TODAS las conversaciones (sin filtrar por participante)
     const adminRoles = ['SUPERADMIN', 'ADMIN', 'PROGRAMADOR', 'DESARROLLADOR', 'JEFEPISO'];
     const isAdminRole = role && adminRoles.includes(role.toUpperCase());
 
@@ -131,8 +131,8 @@ export class TemporaryConversationsService {
       });
     }
 
-    // 🔥 BÚSQUEDA: Filtrar por cada palabra clave ingresada (permite buscar "Usuario1 Usuario2")
-    // 🔥 MEJORADO: Resolver cada búsqueda a TODOS los identificadores posibles (DNI + nombre completo)
+    //  BÚSQUEDA: Filtrar por cada palabra clave ingresada (permite buscar "Usuario1 Usuario2")
+    //  MEJORADO: Resolver cada búsqueda a TODOS los identificadores posibles (DNI + nombre completo)
     const search1 = (search || '').trim();
     const search2Val = (search2 || '').trim();
 
@@ -203,7 +203,7 @@ export class TemporaryConversationsService {
       });
     }
 
-    // 🔥 PAGINACIÓN: Calcular total antes de paginar
+    //  PAGINACIÓN: Calcular total antes de paginar
     const total = conversationsToEnrich.length;
     const totalPages = Math.ceil(total / limit);
     const offset = (page - 1) * limit;
@@ -361,7 +361,7 @@ export class TemporaryConversationsService {
 
         return {
           ...conv,
-          participantNames, // 🔥 NUEVO: Array con los nombres completos
+          participantNames, //  NUEVO: Array con los nombres completos
           _lastMessageSentAt: lastMessage?.sentAt,
           unreadCount,
           role: participantRole,
@@ -391,12 +391,12 @@ export class TemporaryConversationsService {
     };
   }
 
-  // 🔥 NUEVO: Método con paginación para conversaciones asignadas
+  //  NUEVO: Método con paginación para conversaciones asignadas
   async findAssignedConversations(
     username?: string,
     page: number = 1,
     limit: number = 10,
-    search?: string, // 🔥 NUEVO: Parámetro de búsqueda
+    search?: string, //  NUEVO: Parámetro de búsqueda
   ): Promise<{
     conversations: any[];
     total: number;
@@ -425,7 +425,7 @@ export class TemporaryConversationsService {
       );
 
       // 3. Excluir favoritos directamente en SQL
-      // 🔥 FIX: Verificar favoritos por DNI
+      //  FIX: Verificar favoritos por DNI
       queryBuilder.andWhere(
         `NOT EXISTS (
           SELECT 1 FROM conversation_favorites cf 
@@ -461,7 +461,7 @@ export class TemporaryConversationsService {
     const totalPages = Math.ceil(total / limitNum);
     const hasMore = pageNum < totalPages;
 
-    // 🔥 OPTIMIZADO: Procesar enriquecimiento con concurrencia controlada
+    //  OPTIMIZADO: Procesar enriquecimiento con concurrencia controlada
     // Usar chunks de 5 para no saturar las 12 conexiones disponibles
     const enrichedConversations = [];
     const chunkSize = 5;
@@ -484,10 +484,10 @@ export class TemporaryConversationsService {
               );
 
               if (otherParticipants.length > 0) {
-                // 🔥 SQL OPTIMIZATION: Usar count() directo en DB
+                //  SQL OPTIMIZATION: Usar count() directo en DB
                 const qb = this.messageRepository.createQueryBuilder('msg');
                 unreadCount = await qb
-                  .where('msg.conversationId = :convId', { convId: conv.id }) // 🔥 Filtrar por conversación primero
+                  .where('msg.conversationId = :convId', { convId: conv.id }) //  Filtrar por conversación primero
                   .andWhere('(msg.to = :dni OR msg.to = :fullName)', { dni, fullName })
                   .andWhere('msg.from IN (:...others)', { others: otherParticipants })
                   .andWhere('msg.isDeleted = :isDeleted', { isDeleted: false })
@@ -500,7 +500,7 @@ export class TemporaryConversationsService {
                   .getCount();
               }
 
-              // 🔥 Obtener último mensaje para ordenamiento y display
+              //  Obtener último mensaje para ordenamiento y display
               const lastMessages = await this.messageRepository.find({
                 where: {
                   conversationId: conv.id,
@@ -520,7 +520,7 @@ export class TemporaryConversationsService {
             console.error(`Error al contar unread en conv ${conv.id}:`, error);
           }
 
-          // 🔥 Obtener información del otro participante (imagen y nombre completo)
+          //  Obtener información del otro participante (imagen y nombre completo)
           let otherParticipantPicture = null;
           let otherParticipantFullName = null;
           let fallbackName = conv.name;
@@ -556,7 +556,7 @@ export class TemporaryConversationsService {
 
           return {
             id: conv.id,
-            name: otherParticipantFullName || fallbackName, // 🔥 Mostrar el nombre real del contacto, fallback inteligente
+            name: otherParticipantFullName || fallbackName, //  Mostrar el nombre real del contacto, fallback inteligente
             linkId: conv.linkId,
             participants: conv.participants,
             assignedUsers: conv.assignedUsers,
@@ -570,7 +570,7 @@ export class TemporaryConversationsService {
       enrichedConversations.push(...enrichedChunk);
     }
 
-    // 🔥 Ordenar por último mensaje (más reciente primero)
+    //  Ordenar por último mensaje (más reciente primero)
     enrichedConversations.sort((a, b) => {
       const aTime = a.lastMessage?.sentAt;
       const bTime = b.lastMessage?.sentAt;
@@ -589,7 +589,7 @@ export class TemporaryConversationsService {
     };
   }
 
-  // 🔥 Función para normalizar nombres (remover acentos y convertir a MAYÚSCULAS)
+  //  Función para normalizar nombres (remover acentos y convertir a MAYÚSCULAS)
   private normalizeUsername(username: string): string {
     return (
       username
@@ -668,7 +668,7 @@ export class TemporaryConversationsService {
             };
           }
 
-          // 🔥 CALCULAR UNREAD COUNT
+          //  CALCULAR UNREAD COUNT
           try {
             const otherParticipants = participants.filter((p) => {
               const pNorm = this.normalizeUsername(p);
@@ -695,7 +695,7 @@ export class TemporaryConversationsService {
           }
         }
 
-        // 🔥 Obtener información del otro participante (imagen, nombre completo, etc.)
+        //  Obtener información del otro participante (imagen, nombre completo, etc.)
         const others = participants.filter((p) => {
           const pNorm = this.normalizeUsername(p);
           return pNorm !== dniNormalized && pNorm !== fullNameNormalized;
@@ -803,7 +803,7 @@ export class TemporaryConversationsService {
     name: string,
     adminId: number,
   ): Promise<TemporaryConversation> {
-    // 🔥 NORMALIZAR: Asegurar que la comparación sea consistente
+    //  NORMALIZAR: Asegurar que la comparación sea consistente
     const u1 = this.normalizeUsername(user1);
     const u2 = this.normalizeUsername(user2);
 
@@ -820,7 +820,7 @@ export class TemporaryConversationsService {
     });
 
     if (existingConversation) {
-      // 🔥 Si ya existe pero está inactiva, REACTIVARLA en lugar de crear una nueva
+      //  Si ya existe pero está inactiva, REACTIVARLA en lugar de crear una nueva
       if (!existingConversation.isActive) {
         existingConversation.isActive = true;
         // Opcional: Actualizar el nombre si cambió
@@ -872,7 +872,7 @@ export class TemporaryConversationsService {
       throw new NotFoundException('Conversación temporal no encontrada');
     }
 
-    // 🔥 HARD DELETE: Eliminar permanentemente de la base de datos
+    //  HARD DELETE: Eliminar permanentemente de la base de datos
     // La funcionalidad de "desactivar" (soft delete) ya existe en deactivateConversation()
     await this.temporaryConversationRepository.remove(conversation);
   }
@@ -1116,7 +1116,7 @@ export class TemporaryConversationsService {
     };
   }
 
-  // 🔥 Silenciar conversación
+  //  Silenciar conversación
   async muteConversation(id: number, username: string): Promise<any> {
     const conversation = await this.findOne(id);
     const usernameNormalized = this.normalizeUsername(username);
@@ -1137,7 +1137,7 @@ export class TemporaryConversationsService {
     return { success: true, isMuted: true, id };
   }
 
-  // 🔥 Activar notificaciones (Desilenciar)
+  //  Activar notificaciones (Desilenciar)
   async unmuteConversation(id: number, username: string): Promise<any> {
     const conversation = await this.findOne(id);
     const usernameNormalized = this.normalizeUsername(username);
@@ -1154,3 +1154,4 @@ export class TemporaryConversationsService {
     return randomBytes(8).toString('hex').toUpperCase();
   }
 }
+

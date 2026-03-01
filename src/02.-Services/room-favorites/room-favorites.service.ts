@@ -1,4 +1,4 @@
-import { Injectable, Inject, forwardRef } from '@nestjs/common';
+﻿import { Injectable, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull } from 'typeorm';
 import { RoomFavorite } from 'src/02.-Services/room-favorites/entities/room-favorite.entity';
@@ -97,7 +97,7 @@ export class RoomFavoritesService {
     const roomFavorites = await this.getUserFavorites(username);
     const roomCodes = roomFavorites.map(f => f.roomCode);
 
-    // 🔥 NUEVO: También incluir IDs de conversaciones favoritas
+    //  NUEVO: También incluir IDs de conversaciones favoritas
     let conversationIds = [];
     try {
       conversationIds = await this.conversationFavoritesService.getUserFavoriteConversationIds(username);
@@ -109,7 +109,7 @@ export class RoomFavoritesService {
     return [...roomCodes, ...conversationIds.map(id => id.toString())];
   }
 
-  // 🔥 NUEVO: Obtener favoritos con datos completos de la sala (JOIN)
+  //  NUEVO: Obtener favoritos con datos completos de la sala (JOIN)
   // 🚀 MODIFICADO: Ahora trae tanto grupos (Rooms) como conversaciones (Chats)
   async getUserFavoritesWithRoomData(username: string): Promise<any[]> {
     // 1. Obtener salas favoritas
@@ -130,7 +130,7 @@ export class RoomFavoritesService {
             order: { sentAt: 'DESC' },
           }) : null;
 
-          // 🔥 CORREGIDO: Calcular unreadCount real para la sala
+          //  CORREGIDO: Calcular unreadCount real para la sala
           const unreadCount = code ? await this.messagesService.getUnreadCountForUserInRoom(code, username) : 0;
 
           return {
@@ -138,10 +138,10 @@ export class RoomFavoritesService {
             name: fav.room.name,
             roomCode: fav.roomCode,
             description: fav.room.description, // picture URL
-            type: 'room', // 🔥 Discriminador
+            type: 'room', //  Discriminador
             isFavorite: true,
             unreadCount: unreadCount,
-            lastActivity: lastMessage ? lastMessage.sentAt : (fav.room.updatedAt || fav.room.createdAt), // 🔥 NUEVO: Ordenamiento
+            lastActivity: lastMessage ? lastMessage.sentAt : (fav.room.updatedAt || fav.room.createdAt), //  NUEVO: Ordenamiento
             lastMessageInternal: lastMessage ? {
               id: lastMessage.id,
               sentAt: lastMessage.sentAt,
@@ -164,10 +164,10 @@ export class RoomFavoritesService {
     const normalizedConvFavorites = conversationFavorites.map(({ updatedAt, createdAt, lastMessageInternal, ...conv }) => ({
       ...conv,
       roomCode: conv.id.toString(), // Para conv usamos el ID como roomCode en el frontend
-      type: 'conv', // 🔥 Discriminador
+      type: 'conv', //  Discriminador
       isFavorite: true,
-      lastActivity: conv.lastActivity || updatedAt || createdAt, // 🔥 Asegurar que pase y tenga fallback
-      lastMessageInternal, // 🔥 Para ordenar pero no para el return
+      lastActivity: conv.lastActivity || updatedAt || createdAt, //  Asegurar que pase y tenga fallback
+      lastMessageInternal, //  Para ordenar pero no para el return
     }));
 
     // 3. Combinar ambos
@@ -180,7 +180,7 @@ export class RoomFavoritesService {
       return dateB - dateA;
     });
 
-    // 🔥 NUEVO: Devolver metadata del mensaje (lastMessage) y actividad para que el frontend pueda ordenar inicialmente
+    //  NUEVO: Devolver metadata del mensaje (lastMessage) y actividad para que el frontend pueda ordenar inicialmente
     return allFavorites.map(({ lastMessageInternal, ...rest }) => ({
       ...rest,
       lastMessage: lastMessageInternal ? {
@@ -192,3 +192,4 @@ export class RoomFavoritesService {
     }));
   }
 }
+

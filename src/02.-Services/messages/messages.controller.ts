@@ -1,4 +1,4 @@
-import {
+﻿import {
   Controller,
   Post,
   Get,
@@ -33,7 +33,7 @@ export class MessagesController {
     private readonly socketGateway: SocketGateway,
   ) { }
 
-  // 🔥 NUEVO: Endpoint para buscar menciones
+  //  NUEVO: Endpoint para buscar menciones
   @Get('mentions')
   @ApiOperation({ summary: 'Buscar menciones de usuarios en mensajes' })
   @ApiQuery({ name: 'username', description: 'Username a buscar' })
@@ -64,7 +64,7 @@ export class MessagesController {
   @ApiResponse({ status: 400, description: 'Datos inválidos' })
   async create(@Body() createMessageDto: CreateMessageDto) {
     console.log(`[MessagesController] CREATING MESSAGE FULL PAYLOAD:`, JSON.stringify(createMessageDto, null, 2));
-    // 🔥 FIX: Obtener senderRole y senderNumeroAgente de la BD si no vienen en el DTO
+    //  FIX: Obtener senderRole y senderNumeroAgente de la BD si no vienen en el DTO
     // Robustez: Manejar si 'from' es un DNI o un Nombre Completo
     if (createMessageDto.from && (!createMessageDto.senderRole || !createMessageDto.senderNumeroAgente || !createMessageDto.fromId)) {
       try {
@@ -99,7 +99,7 @@ export class MessagesController {
 
     const savedMessage = await this.messagesService.create(createMessageDto);
 
-    // 🔥 NUEVO: Emitir assignedConversationUpdated si es un chat asignado
+    //  NUEVO: Emitir assignedConversationUpdated si es un chat asignado
     if (savedMessage.conversationId && !savedMessage.isGroup) {
       const messageText = this.getMessagePreview(savedMessage);
 
@@ -374,7 +374,7 @@ export class MessagesController {
       username,
     );
 
-    // 🔥 NOTIFICAR AL SOCKET
+    //  NOTIFICAR AL SOCKET
     if (message) {
       this.socketGateway.notifyMessageRead(message, username);
     }
@@ -615,7 +615,7 @@ export class MessagesController {
   @ApiResponse({ status: 200, description: 'Mensajes del hilo recuperados' })
   async findThreadMessages(
     @Param('threadId') threadId: string,
-    @Query('attachmentId') attachmentId?: string, // 🔥 NUEVO
+    @Query('attachmentId') attachmentId?: string, //  NUEVO
     @Query('limit') limit: string = '100',
     @Query('offset') offset: string = '0',
     @Query('order') order: string = 'ASC',
@@ -625,7 +625,7 @@ export class MessagesController {
       parseInt(limit),
       parseInt(offset),
       order.toUpperCase() === 'DESC' ? 'DESC' : 'ASC',
-      attachmentId ? parseInt(attachmentId) : undefined, // 🔥 NUEVO
+      attachmentId ? parseInt(attachmentId) : undefined, //  NUEVO
     );
   }
 
@@ -702,7 +702,7 @@ export class MessagesController {
   @ApiResponse({ status: 200, description: 'Contador incrementado' })
   async incrementThreadCount(
     @Param('id') id: string,
-    @Query('attachmentId') attachmentId?: string, // 🔥 NUEVO
+    @Query('attachmentId') attachmentId?: string, //  NUEVO
   ) {
     await this.messagesService.incrementThreadCount(
       parseInt(id),
@@ -796,3 +796,4 @@ export class MessagesController {
   }
 
 }
+

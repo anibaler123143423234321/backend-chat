@@ -1,4 +1,4 @@
-import { Controller, Post, Delete, Get, Body, Param, Query, UseGuards } from '@nestjs/common';
+﻿import { Controller, Post, Delete, Get, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { ConversationFavoritesService } from 'src/02.-Services/conversation-favorites/conversation-favorites.service';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiQuery, ApiBody } from '@nestjs/swagger';
 import { SocketGateway } from 'src/03.-Socket/socket/socket.gateway';
@@ -25,7 +25,7 @@ export class ConversationFavoritesController {
       body.conversationId,
     );
 
-    // 🔥 Notificar sincronización
+    //  Notificar sincronización
     this.socketGateway.notifyFavoriteChanged(body.username, {
       type: 'conv',
       conversationId: body.conversationId,
@@ -46,7 +46,7 @@ export class ConversationFavoritesController {
       body.conversationId,
     );
 
-    // 🔥 Notificar sincronización
+    //  Notificar sincronización
     this.socketGateway.notifyFavoriteChanged(body.username, {
       type: 'conv',
       conversationId: body.conversationId,
@@ -64,7 +64,7 @@ export class ConversationFavoritesController {
   ) {
     await this.conversationFavoritesService.removeFavorite(body.username, body.conversationId);
 
-    // 🔥 Notificar sincronización
+    //  Notificar sincronización
     this.socketGateway.notifyFavoriteChanged(body.username, {
       type: 'conv',
       conversationId: body.conversationId,
@@ -100,7 +100,7 @@ export class ConversationFavoritesController {
     return { conversationIds };
   }
 
-  // 🔥 NUEVO: Obtener favoritos con datos completos de la conversación
+  //  NUEVO: Obtener favoritos con datos completos de la conversación
   @Get('full/:username')
   @ApiOperation({ summary: 'Obtener favoritos con datos embebidos de la conversación' })
   @ApiParam({ name: 'username' })
@@ -109,4 +109,5 @@ export class ConversationFavoritesController {
     return await this.conversationFavoritesService.getUserFavoritesWithConversationData(username);
   }
 }
+
 

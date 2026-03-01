@@ -1,4 +1,4 @@
-import {
+﻿import {
     Entity,
     PrimaryGeneratedColumn,
     Column,
@@ -35,14 +35,15 @@ export class MessageAttachment {
     messageId: number;
 
     @Column({ type: 'int', default: 0 })
-    threadCount: number; // 🔥 NUEVO: Cantidad de respuestas en este adjunto específico
+    threadCount: number; //  NUEVO: Cantidad de respuestas en este adjunto específico
 
     @Column({ type: 'varchar', length: 255, nullable: true })
-    lastReplyFrom: string; // 🔥 NUEVO: Quién dio la última respuesta
+    lastReplyFrom: string; //  NUEVO: Quién dio la última respuesta
 
     @Column({ type: 'datetime', nullable: true })
-    lastReplyAt: Date; // 🔥 NUEVO: Cuándo fue la última respuesta
+    lastReplyAt: Date; //  NUEVO: Cuándo fue la última respuesta
 
     @CreateDateColumn()
     createdAt: Date;
 }
+

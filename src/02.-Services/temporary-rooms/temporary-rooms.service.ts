@@ -1,4 +1,4 @@
-import {
+﻿import {
   Injectable,
   NotFoundException,
   BadRequestException,
@@ -49,7 +49,7 @@ export class TemporaryRoomsService {
     this.socketGateway = gateway;
   }
 
-  // 🔥 NUEVO: Obtener DNI y Nombre Completo para verificaciones de membresía robustas
+  //  NUEVO: Obtener DNI y Nombre Completo para verificaciones de membresía robustas
   private async getUserIdentifiers(username: string): Promise<{ dni: string; fullName: string }> {
     // 1. Intentar buscar por username (DNI)
     let user = await this.userRepository.findOne({ where: { username } });
@@ -100,7 +100,7 @@ export class TemporaryRoomsService {
     // console.log('Usuario ID:', userId);
     // console.log('Nombre del creador:', creatorUsername);
 
-    // 🔥 VALIDAR: Verificar si ya existe una sala activa con el mismo nombre
+    //  VALIDAR: Verificar si ya existe una sala activa con el mismo nombre
     const existingRoom = await this.temporaryRoomRepository.findOne({
       where: { name: createDto.name, isActive: true },
     });
@@ -152,7 +152,7 @@ export class TemporaryRoomsService {
       isActive: savedRoom.isActive,
     };
 
-    // 🔥 Notificar a todos los ADMIN y JEFEPISO que se creó una nueva sala
+    //  Notificar a todos los ADMIN y JEFEPISO que se creó una nueva sala
     if (this.socketGateway) {
       this.socketGateway.broadcastRoomCreated(savedRoom);
     }
@@ -168,7 +168,7 @@ export class TemporaryRoomsService {
     });
   }
 
-  // 🔥 NUEVO: Listar TODAS las salas paginadas (para el modal de gestión)
+  //  NUEVO: Listar TODAS las salas paginadas (para el modal de gestión)
   async findAllPaginated(
     page: number = 1,
     limit: number = 10,
@@ -217,7 +217,7 @@ export class TemporaryRoomsService {
       description: room.description,
       roomCode: room.roomCode,
       currentMembers: room.currentMembers,
-      members: room.members || [], // 🔥 AGREGADO: Para que el modal pueda mostrar quiénes están unidos
+      members: room.members || [], //  AGREGADO: Para que el modal pueda mostrar quiénes están unidos
       maxCapacity: room.maxCapacity,
       isActive: room.isActive,
       createdAt: room.createdAt,
@@ -238,7 +238,7 @@ export class TemporaryRoomsService {
     totalPages: number;
     hasMore: boolean;
   }> {
-    // 🔥 MEJORADO: Obtener todos los alias para rectificación de membresía robusta
+    //  MEJORADO: Obtener todos los alias para rectificación de membresía robusta
     const aliases = await this.messagesService.resolveUserAliases(username);
     const aliasSet = new Set(aliases.map(a => a.toLowerCase().trim()));
 
@@ -391,7 +391,7 @@ export class TemporaryRoomsService {
   ): Promise<TemporaryRoom> {
     const room = await this.findByRoomCode(joinDto.roomCode);
 
-    // 🔥 MEJORADO: Obtener todos los alias para verificación de membresía robusta
+    //  MEJORADO: Obtener todos los alias para verificación de membresía robusta
     const aliases = await this.messagesService.resolveUserAliases(username);
     const aliasSet = new Set(aliases.map(a => a.toLowerCase().trim()));
 
@@ -461,7 +461,7 @@ export class TemporaryRoomsService {
     return room;
   }
 
-  // 🔥 NUEVO: Aprobar solicitud de ingreso
+  //  NUEVO: Aprobar solicitud de ingreso
   async approveJoinRequest(roomCode: string, username: string, approverUsername?: string): Promise<TemporaryRoom> {
     const room = await this.findByRoomCode(roomCode);
 
@@ -469,7 +469,7 @@ export class TemporaryRoomsService {
       throw new NotFoundException(`No se encontró solicitud pendiente para ${username}`);
     }
 
-    // 🔥 MEJORADO: Usar alias para mover de pending a members
+    //  MEJORADO: Usar alias para mover de pending a members
     const aliases = await this.messagesService.resolveUserAliases(username);
     const aliasSet = new Set(aliases.map(a => a.toLowerCase().trim()));
 
@@ -500,7 +500,7 @@ export class TemporaryRoomsService {
     return room;
   }
 
-  // 🔥 NUEVO: Agregar usuario directamente (bypassing pending) - Para admins
+  //  NUEVO: Agregar usuario directamente (bypassing pending) - Para admins
   async addMemberDirectly(roomCode: string, username: string): Promise<TemporaryRoom> {
     console.log(`🔧 addMemberDirectly: Agregando ${username} directamente a sala ${roomCode}`);
 
@@ -555,7 +555,7 @@ export class TemporaryRoomsService {
     return room;
   }
 
-  // 🔥 NUEVO: Rechazar solicitud de ingreso
+  //  NUEVO: Rechazar solicitud de ingreso
   async rejectJoinRequest(roomCode: string, username: string): Promise<TemporaryRoom> {
     const room = await this.findByRoomCode(roomCode);
 
@@ -567,7 +567,7 @@ export class TemporaryRoomsService {
     return room;
   }
 
-  // 🔥 NUEVO: Validar acceso estricto a la sala
+  //  NUEVO: Validar acceso estricto a la sala
   async validateUserAccess(roomCode: string, username: string): Promise<void> {
     const room = await this.temporaryRoomRepository.findOne({ where: { roomCode } });
 
@@ -575,7 +575,7 @@ export class TemporaryRoomsService {
       return;
     }
 
-    // 🔥 MEJORADO: Obtener todos los alias para validación de acceso robusta
+    //  MEJORADO: Obtener todos los alias para validación de acceso robusta
     const aliases = await this.messagesService.resolveUserAliases(username);
     const aliasSet = new Set(aliases.map(a => a.toLowerCase().trim()));
 
@@ -599,7 +599,7 @@ export class TemporaryRoomsService {
 
     const room = await this.findByRoomCode(roomCode);
 
-    // 🔥 NUEVO: Validar si el usuario está asignado por un admin
+    //  NUEVO: Validar si el usuario está asignado por un admin
     if (
       room.isAssignedByAdmin &&
       room.assignedMembers &&
@@ -610,7 +610,7 @@ export class TemporaryRoomsService {
       );
     }
 
-    // 🔥 MEJORADO: Obtener todos los alias para una desconexión limpia
+    //  MEJORADO: Obtener todos los alias para una desconexión limpia
     const aliases = await this.messagesService.resolveUserAliases(username);
     const aliasSet = new Set(aliases.map(a => a.toLowerCase().trim()));
 
@@ -662,7 +662,7 @@ export class TemporaryRoomsService {
       throw new NotFoundException('Sala no encontrada');
     }
 
-    // 🔥 MEJORADO: Obtener TODOS los alias del usuario (Nombres históricos, DNI, Email)
+    //  MEJORADO: Obtener TODOS los alias del usuario (Nombres históricos, DNI, Email)
     const aliases = await this.messagesService.resolveUserAliases(username);
     const aliasSet = new Set(aliases.map(a => a.toLowerCase().trim()));
 
@@ -716,7 +716,7 @@ export class TemporaryRoomsService {
 
     await this.temporaryRoomRepository.save(room);
 
-    // 🔥 NUEVO: Remover de favoritos automáticamente al ser expulsado
+    //  NUEVO: Remover de favoritos automáticamente al ser expulsado
     // Intentar remover para todos los alias posibles
     for (const alias of aliases) {
       try {
@@ -795,7 +795,7 @@ export class TemporaryRoomsService {
     await this.temporaryRoomRepository.remove(room);
     // console.log('✅ Sala eliminada permanentemente');
 
-    // 🔥 Notificar a todos los usuarios conectados que la sala fue eliminada
+    //  Notificar a todos los usuarios conectados que la sala fue eliminada
     if (this.socketGateway) {
       this.socketGateway.broadcastRoomDeleted(roomCode, id);
     }
@@ -813,7 +813,7 @@ export class TemporaryRoomsService {
     // Obtener códigos de salas favoritas del usuario
     let favoriteRoomCodes: string[] = [];
 
-    // 🔥 OPTIMIZACIÓN: Priorizar búsqueda por username (Login) que es único e inmutable
+    //  OPTIMIZACIÓN: Priorizar búsqueda por username (Login) que es único e inmutable
     if (username) {
       try {
         favoriteRoomCodes = await this.roomFavoritesService.getUserFavoriteRoomCodes(username);
@@ -881,7 +881,7 @@ export class TemporaryRoomsService {
     // FILTRADO POR ROL (Movido a lgica en memoria para evitar problemas de compatibilidad SQL)
     // if (['ADMIN', 'JEFEPISO'].includes(role)) { ... }
 
-    // 🔥 MEJORADO: Obtener todos los alias para rectificación de membresía robusta
+    //  MEJORADO: Obtener todos los alias para rectificación de membresía robusta
     let aliasSet = new Set<string>();
     if (username) {
       const aliases = await this.messagesService.resolveUserAliases(username);
@@ -895,7 +895,7 @@ export class TemporaryRoomsService {
 
     // Mapear resultados
     const allRooms = entities.map((room, index) => {
-      // 🔥 FILTRADO POR ROL EN MEMORIA (Usando Alias Set Robusto)
+      //  FILTRADO POR ROL EN MEMORIA (Usando Alias Set Robusto)
       // ADMIN y JEFEPISO solo ven salas donde son miembros (rectificado por alias)
       // SUPERADMIN sigue viendo absolutamente todas las salas
       if (['ADMIN', 'JEFEPISO'].includes(role)) {
@@ -911,7 +911,7 @@ export class TemporaryRoomsService {
       // Obtenemos la fecha exacta del último mensaje
       const lastMessageSentAt = rowData.lastMessageSentAt;
 
-      // 🔥 OPTIMIZACIÓN: NO devolver arrays pesados de members/connectedMembers
+      //  OPTIMIZACIÓN: NO devolver arrays pesados de members/connectedMembers
       // Solo devolver contadores para reducir payload ~83%
       return {
         id: room.id,
@@ -934,10 +934,10 @@ export class TemporaryRoomsService {
       (room) => !favoriteRoomCodes.includes(room.roomCode),
     );
 
-    // 🔥 Ordenar en memoria por último mensaje (más reciente primero)
+    //  Ordenar en memoria por último mensaje (más reciente primero)
     const sortedNonFavorites = [...nonFavorites].sort((a, b) => b._sortTime - a._sortTime);
 
-    // 🔥 Solo paginar los NO-favoritos
+    //  Solo paginar los NO-favoritos
     const pageNum = Number(page);
     const limitNum = Number(limit);
     const skip = (pageNum - 1) * limitNum;
@@ -947,7 +947,7 @@ export class TemporaryRoomsService {
       .slice(skip, skip + limitNum)
       .map(({ _sortTime, ...rest }) => rest);
 
-    // 🔥 NUEVO: Calcular unreadCount para cada sala paginada
+    //  NUEVO: Calcular unreadCount para cada sala paginada
     // Esto resuelve el bug donde SUPERADMIN ve contadores incorrectos después de F5
     if (username && paginatedRooms.length > 0) {
       const roomCodes = paginatedRooms.map(room => room.roomCode);
@@ -963,8 +963,8 @@ export class TemporaryRoomsService {
     }
 
     return {
-      data: paginatedRooms, // 🔥 Solo NO-favoritos
-      total: nonFavorites.length, // 🔥 Total de NO-favoritos
+      data: paginatedRooms, //  Solo NO-favoritos
+      total: nonFavorites.length, //  Total de NO-favoritos
       page: Number(page),
       limit: Number(limit),
       totalPages: Math.ceil(nonFavorites.length / limit),
@@ -1005,7 +1005,7 @@ export class TemporaryRoomsService {
     const updatedRoom = await this.temporaryRoomRepository.save(room);
     // console.log('✅ Sala desactivada:', updatedRoom.name);
 
-    // 🔥 Notificar a todos los usuarios conectados que la sala fue desactivada
+    //  Notificar a todos los usuarios conectados que la sala fue desactivada
     if (this.socketGateway) {
       this.socketGateway.broadcastRoomDeleted(roomCode, id);
     }
@@ -1071,7 +1071,7 @@ export class TemporaryRoomsService {
         return { inRoom: false, room: null };
       }
 
-      // 🔥 MEJORADO: Obtener todos los alias para detección robusta
+      //  MEJORADO: Obtener todos los alias para detección robusta
       const aliases = await this.messagesService.resolveUserAliases(user.username);
       const aliasSet = new Set(aliases.map(a => a.toLowerCase().trim()));
 
@@ -1119,7 +1119,7 @@ export class TemporaryRoomsService {
 
   async getCurrentUserRoomByUsername(username: string): Promise<any> {
     try {
-      // 🔥 MEJORADO: Obtener todos los alias para detección robusta
+      //  MEJORADO: Obtener todos los alias para detección robusta
       const aliases = await this.messagesService.resolveUserAliases(username);
       const aliasSet = new Set(aliases.map(a => a.toLowerCase().trim()));
 
@@ -1176,7 +1176,7 @@ export class TemporaryRoomsService {
     const uniqueUsersMap = new Map<number, any>();
     const unresolvableIdentifiers = [];
 
-    // 🔥 OPTIMIZACIÓN: Primero intentar resolver todos los que son DNI (numéricos) en lote
+    //  OPTIMIZACIÓN: Primero intentar resolver todos los que son DNI (numéricos) en lote
     const dnis = rawIdentifiers.filter(id => !isNaN(Number(id)));
     if (dnis.length > 0) {
       const dbUsers = await this.userRepository.find({
@@ -1358,7 +1358,7 @@ export class TemporaryRoomsService {
     return room?.pinnedMessageId || null;
   }
 
-  // 🔥 NUEVO: Silenciar sala para un usuario
+  //  NUEVO: Silenciar sala para un usuario
   async muteRoom(roomCode: string, username: string): Promise<any> {
     const room = await this.findByRoomCode(roomCode);
 
@@ -1378,7 +1378,7 @@ export class TemporaryRoomsService {
     return { success: true, isMuted: true, roomCode };
   }
 
-  // 🔥 NUEVO: Desactivar silencio de sala para un usuario
+  //  NUEVO: Desactivar silencio de sala para un usuario
   async unmuteRoom(roomCode: string, username: string): Promise<any> {
     const room = await this.findByRoomCode(roomCode);
 
@@ -1390,3 +1390,4 @@ export class TemporaryRoomsService {
     return { success: true, isMuted: false, roomCode };
   }
 }
+

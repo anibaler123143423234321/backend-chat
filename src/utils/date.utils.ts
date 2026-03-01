@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Utilidades para manejo de fechas con zona horaria de Lima (UTC-5)
  */
 
@@ -28,12 +28,12 @@ export function getPeruDate(): Date {
 export function formatPeruTime(date?: Date): string {
   const peruDate = date || getPeruDate();
 
-  // 🔥 CRÍTICO: Usar getUTCHours() y getUTCMinutes() porque peruDate es un Date ajustado a UTC
+  //  CRÍTICO: Usar getUTCHours() y getUTCMinutes() porque peruDate es un Date ajustado a UTC
   // El objeto Date internamente sigue siendo UTC, pero con el tiempo ajustado a Perú
   const hours24 = peruDate.getUTCHours();
   const minutes = peruDate.getUTCMinutes().toString().padStart(2, '0');
 
-  // 🔥 NUEVO: Convertir a formato 12 horas con AM/PM
+  //  NUEVO: Convertir a formato 12 horas con AM/PM
   const period = hours24 >= 12 ? 'PM' : 'AM';
   const hours12 = hours24 % 12 || 12; // Convertir 0 a 12 para medianoche
 
@@ -87,3 +87,4 @@ export function formatDisplayDate(sentAt: Date): string {
     });
   }
 }
+

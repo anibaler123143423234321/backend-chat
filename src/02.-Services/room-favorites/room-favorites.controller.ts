@@ -1,4 +1,4 @@
-import { Controller, Post, Delete, Get, Body, Param, Query, UseGuards } from '@nestjs/common';
+﻿import { Controller, Post, Delete, Get, Body, Param, Query, UseGuards } from '@nestjs/common';
 import { RoomFavoritesService } from 'src/02.-Services/room-favorites/room-favorites.service';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiParam, ApiBody, ApiQuery } from '@nestjs/swagger';
 import { SocketGateway } from 'src/03.-Socket/socket/socket.gateway';
@@ -26,7 +26,7 @@ export class RoomFavoritesController {
       body.roomId,
     );
 
-    // 🔥 Notificar sincronización
+    //  Notificar sincronización
     this.socketGateway.notifyFavoriteChanged(body.username, {
       type: 'room',
       roomCode: body.roomCode,
@@ -51,7 +51,7 @@ export class RoomFavoritesController {
       body.roomId,
     );
 
-    // 🔥 Notificar sincronización
+    //  Notificar sincronización
     this.socketGateway.notifyFavoriteChanged(body.username, {
       type: 'room',
       roomCode: body.roomCode,
@@ -69,7 +69,7 @@ export class RoomFavoritesController {
   ) {
     await this.roomFavoritesService.removeFavorite(body.username, body.roomCode);
 
-    // 🔥 Notificar sincronización
+    //  Notificar sincronización
     this.socketGateway.notifyFavoriteChanged(body.username, {
       type: 'room',
       roomCode: body.roomCode,
@@ -109,7 +109,7 @@ export class RoomFavoritesController {
     return { roomCodes };
   }
 
-  // 🔥 NUEVO: Obtener favoritos con datos completos de la sala
+  //  NUEVO: Obtener favoritos con datos completos de la sala
   @Get('full/:username')
   @ApiOperation({ summary: 'Obtener favoritos con datos embebidos de la sala' })
   @ApiParam({ name: 'username' })
@@ -118,4 +118,5 @@ export class RoomFavoritesController {
     return await this.roomFavoritesService.getUserFavoritesWithRoomData(username);
   }
 }
+
 

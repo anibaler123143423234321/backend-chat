@@ -1,4 +1,4 @@
-import {
+﻿import {
   Entity,
   PrimaryGeneratedColumn,
   Column,
@@ -114,7 +114,7 @@ export class Message {
   replyToSenderNumeroAgente: string; // Número de agente del remitente original
 
   @Column({ type: 'int', nullable: true, default: null })
-  replyToAttachmentId: number; // 🔥 NUEVO: ID del adjunto específico al que se responde
+  replyToAttachmentId: number; //  NUEVO: ID del adjunto específico al que se responde
 
   // Campos para hilos de conversación
   @Column({ type: 'int', nullable: true, default: null })
@@ -130,7 +130,7 @@ export class Message {
   @Column({ type: 'json', nullable: true })
   reactions: { emoji: string; username: string; fullName?: string; timestamp: Date }[]; // Array de reacciones
 
-  // 🔥 NUEVO: Campos para videollamadas
+  //  NUEVO: Campos para videollamadas
   @Column({ type: 'varchar', length: 50, nullable: true })
   type: string; // 'text', 'video_call', 'audio_call', etc.
 
@@ -154,12 +154,12 @@ export class Message {
   room: TemporaryRoom;
 
   @Column({ type: 'int', nullable: true, default: null })
-  conversationId: number; // 🔥 NUEVO: ID de la conversación asignada (TemporaryConversation)
+  conversationId: number; //  NUEVO: ID de la conversación asignada (TemporaryConversation)
 
   @Column({ type: 'int', nullable: true, default: null })
   roomId: number;
 
-  // 🔥 Campo simple para indicar mensaje reenviado
+  //  Campo simple para indicar mensaje reenviado
   @Column({ type: 'boolean', default: false })
   isForwarded: boolean; // Indica si el mensaje fue reenviado
 
@@ -169,3 +169,4 @@ export class Message {
   @UpdateDateColumn()
   updatedAt: Date;
 }
+

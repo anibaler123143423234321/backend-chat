@@ -1,4 +1,4 @@
-# 🖼️ Redis Cache para Mensajes con URLs Multimedia
+﻿# 🖼️ Redis Cache para Mensajes con URLs Multimedia
 
 ## 📌 Explicación: ¿Cómo funciona con URLs?
 
@@ -49,7 +49,7 @@ export class MessagesService {
     private temporaryConversationRepository: Repository<TemporaryConversation>,
     @Inject(forwardRef(() => SocketGateway))
     private socketGateway: SocketGateway,
-    @Inject(CACHE_MANAGER) private cacheManager: Cache, // 🔥 NUEVO
+    @Inject(CACHE_MANAGER) private cacheManager: Cache, //  NUEVO
   ) {}
 ```
 
@@ -63,7 +63,7 @@ async findByRoomOrderedById(
   limit: number = 20,
   offset: number = 0,
 ): Promise<any[]> {
-  // 🔥 Clave de cache única por sala, límite y offset
+  //  Clave de cache única por sala, límite y offset
   const cacheKey = `messages:room:${roomCode}:${limit}:${offset}`;
   
   try {
@@ -156,7 +156,7 @@ async findByUserOrderedById(
   limit: number = 20,
   offset: number = 0,
 ): Promise<any[]> {
-  // 🔥 Clave de cache única por conversación
+  //  Clave de cache única por conversación
   // Normalizar para que "Juan-María" sea igual a "María-Juan"
   const users = [from, to].sort();
   const cacheKey = `messages:conversation:${users[0]}:${users[1]}:${limit}:${offset}`;
@@ -258,7 +258,7 @@ async create(createMessageDto: CreateMessageDto): Promise<Message> {
   
   const savedMessage = await this.messageRepository.save(message);
 
-  // 🔥 INVALIDAR CACHE relacionado
+  //  INVALIDAR CACHE relacionado
   try {
     if (savedMessage.roomCode) {
       // Mensaje de sala - invalidar cache de la sala
@@ -307,7 +307,7 @@ async deleteMessage(
     }
     await this.messageRepository.save(message);
 
-    // 🔥 INVALIDAR CACHE
+    //  INVALIDAR CACHE
     try {
       if (message.roomCode) {
         for (let offset = 0; offset < 100; offset += 20) {
@@ -369,7 +369,7 @@ TTL: 600 segundos (10 minutos)
 TTL: 180 segundos (3 minutos)
 ```
 
-## 🔥 Comando para Monitorear
+##  Comando para Monitorear
 
 ```bash
 # Ver qué está en cache
@@ -385,3 +385,4 @@ redis-cli -h 198.46.186.2 -p 6379 -a Midas*2025 INFO memory
 ---
 
 **IMPORTANTE**: Las URLs de multimedia se cachean perfectamente. Redis solo guarda el **texto de la URL**, no descarga los archivos. El frontend sigue haciendo las peticiones HTTP normales para obtener las imágenes/videos.
+

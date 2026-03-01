@@ -1,4 +1,4 @@
-import {
+﻿import {
     ConnectedSocket,
     MessageBody,
     OnGatewayConnection,
@@ -42,7 +42,7 @@ interface UserCacheData {
     },
     transports: ['websocket', 'polling'],
     path: '/socket.io/',
-    // 🔥 OPTIMIZADO: Timeouts relajados para evitar desconexiones en segundo plano
+    //  OPTIMIZADO: Timeouts relajados para evitar desconexiones en segundo plano
     pingTimeout: 60000,    //  60 segundos (antes 10s) - mayor tolerancia para pestañas en segundo plano
     pingInterval: 10000,   //  25 segundos (antes 15s)
     maxHttpBufferSize: 10 * 1024 * 1024, // 10MB - límite de tamaño de mensaje
@@ -108,7 +108,7 @@ export class SocketGateway
     private pendingDisconnects = new Map<string, NodeJS.Timeout>(); // username -> timeout
     private DISCONNECT_DEBOUNCE_MS = 10000; // 10 segundos de gracia antes de marcar offline
 
-    // 🔥 NUEVO: Método público para verificar si un usuario está conectado
+    //  NUEVO: Método público para verificar si un usuario está conectado
     // Primero verifica memoria local, luego Redis (para cluster)
     public isUserOnline(username: string): boolean {
         // 1. Verificar en memoria local (rápido - O(1))
@@ -121,7 +121,7 @@ export class SocketGateway
         return false;
     }
 
-    // 🔥 NUEVO: Versión async que verifica tanto memoria local como Redis (cluster)
+    //  NUEVO: Versión async que verifica tanto memoria local como Redis (cluster)
     public async isUserOnlineAsync(username: string): Promise<boolean> {
         // 1. Verificar en memoria local (rápido - O(1))
         if (this.users.has(username)) {
@@ -143,7 +143,7 @@ export class SocketGateway
         return false;
     }
 
-    // 🔥 NUEVO: Obtener Set de usuarios online para verificaciones batch (más eficiente)
+    //  NUEVO: Obtener Set de usuarios online para verificaciones batch (más eficiente)
     // Consulta Redis una sola vez y retorna un Set para O(1) lookups
     public async getOnlineUsersSet(): Promise<Set<string>> {
         const onlineSet = new Set<string>();
@@ -152,7 +152,7 @@ export class SocketGateway
         for (const [username, { userData }] of this.users.entries()) {
             onlineSet.add(username);
             onlineSet.add(username.toLowerCase().trim());
-            // 🔥 FIX: También agregar display name (nombre + apellido) para match con participantes de conversaciones
+            //  FIX: También agregar display name (nombre + apellido) para match con participantes de conversaciones
             if (userData?.nombre && userData?.apellido) {
                 const displayName = `${userData.nombre} ${userData.apellido}`;
                 onlineSet.add(displayName);
@@ -167,7 +167,7 @@ export class SocketGateway
                 for (const [username, jsonData] of Object.entries(usersHash)) {
                     onlineSet.add(username);
                     onlineSet.add(username.toLowerCase().trim());
-                    // 🔥 FIX: Parsear datos de Redis para obtener display name
+                    //  FIX: Parsear datos de Redis para obtener display name
                     try {
                         const userData = JSON.parse(jsonData as string);
                         if (userData?.nombre && userData?.apellido) {
@@ -185,7 +185,7 @@ export class SocketGateway
         return onlineSet;
     }
 
-    // 🔥 NUEVO: Verificar si un usuario está online usando un Set pre-cargado
+    //  NUEVO: Verificar si un usuario está online usando un Set pre-cargado
     // Útil cuando ya tenemos la lista de Redis y queremos evitar re-consultar
     public isUserOnlineWithSet(username: string, onlineSet: Set<string>): boolean {
         return onlineSet.has(username) || onlineSet.has(username.toLowerCase().trim());
@@ -260,7 +260,7 @@ export class SocketGateway
     }
 
     /**
-     * 🔥 CLUSTER FIX: Obtener datos de múltiples usuarios desde BD
+     *  CLUSTER FIX: Obtener datos de múltiples usuarios desde BD
      * Resuelve el problema donde usuarios en otras instancias no tenían datos (solo aparecían como strings)
      */
     private async getBatchUsersData(usernames: string[]): Promise<any[]> {
@@ -351,7 +351,7 @@ export class SocketGateway
         private temporaryConversationsService: TemporaryConversationsService,
         private pollsService: PollsService,
         private roomFavoritesService: RoomFavoritesService, //  NUEVO: Inyectar servicio de favoritos
-        private conversationFavoritesService: ConversationFavoritesService, // 🔥 NUEVO: Inyectar servicio de favoritos de conversaciones
+        private conversationFavoritesService: ConversationFavoritesService, //  NUEVO: Inyectar servicio de favoritos de conversaciones
         @InjectRepository(User)
         private userRepository: Repository<User>,
     ) {
@@ -380,7 +380,7 @@ export class SocketGateway
 
     }
 
-    // 🔥 NUEVO: Obtener todas las variantes de identificación de un usuario (DNI y Nombre Completo) para emisión de sockets
+    //  NUEVO: Obtener todas las variantes de identificación de un usuario (DNI y Nombre Completo) para emisión de sockets
     public async getUserIdentifiersArray(username: string): Promise<string[]> {
         if (!username) return [];
         const normalizedInput = username.trim();
@@ -538,7 +538,7 @@ export class SocketGateway
         }
     }
 
-    // 🔥 NUEVO: Obtener Mapa de usuarios online (para lookup rápido O(1))
+    //  NUEVO: Obtener Mapa de usuarios online (para lookup rápido O(1))
     // Retorna username -> UserData
     private async getOnlineUsersDataMap(): Promise<Map<string, any>> {
         const usersMap = new Map<string, any>();
@@ -599,7 +599,7 @@ export class SocketGateway
                 }
             }
 
-            // C. 🔥 NUEVO: Añadir favoritos (para que aparezcan online de inmediato)
+            // C.  NUEVO: Añadir favoritos (para que aparezcan online de inmediato)
             try {
                 // 1. Favoritos de salas (Grupos)
                 const favoriteRoomCodes = await this.roomFavoritesService.getUserFavoriteRoomCodes(username);
@@ -609,7 +609,7 @@ export class SocketGateway
                     });
                 }
 
-                // 2. 🔥 NUEVO: Favoritos de conversaciones privadas (Karen, etc.)
+                // 2.  NUEVO: Favoritos de conversaciones privadas (Karen, etc.)
                 const favoriteConversations = await this.conversationFavoritesService.getUserFavoritesWithConversationData(username);
                 if (favoriteConversations && favoriteConversations.length > 0) {
                     favoriteConversations.forEach(conv => {
@@ -633,7 +633,7 @@ export class SocketGateway
             console.log(`🔍 [ONLINE-DEBUG] Whitelist de usuarios relevantes (${relevantUsers.size}):`, [...relevantUsers].slice(0, 20));
             for (const user of onlineUsers) {
                 const targetUsername = user.username?.toLowerCase().trim();
-                // 🔥 FIX: Construir display name robusto (permitir nombre o apellido solos)
+                //  FIX: Construir display name robusto (permitir nombre o apellido solos)
                 const targetDisplayName = (user.nombre || user.apellido)
                     ? `${user.nombre || ''} ${user.apellido || ''}`.toLowerCase().trim()
                     : null;
@@ -829,7 +829,7 @@ export class SocketGateway
 
         this.users.set(username, { socket: client, userData });
 
-        // 🔥 CLUSTER FIX: Unir socket a salas para TODOS sus alias posibles
+        //  CLUSTER FIX: Unir socket a salas para TODOS sus alias posibles
         // Esto garantiza que cualquier notificación enviada a un DNI, Nombre o Email
         // llegue a este socket sin importar qué identificador use el emisor.
         const aliases = await this.messagesService.resolveUserAliases(username);
@@ -1084,12 +1084,12 @@ export class SocketGateway
             : username;
 
         // Broadcast ligero: solo notificar cambio de estado online
-        // 🔥 FIX: Usar userCacheData para asegurar que picture y otros datos actualizados se envíen
+        //  FIX: Usar userCacheData para asegurar que picture y otros datos actualizados se envíen
         const userToBroadcast = userCacheData || userData;
         this.broadcastUserStatusChange(displayName, true, userToBroadcast, username);
 
         //  CLUSTER FIX: Agregar usuario a Redis para tracking global
-        // 🔥 FIX: Usar userCacheData para asegurar que picture esté en Redis
+        //  FIX: Usar userCacheData para asegurar que picture esté en Redis
         await this.addOnlineUserToRedis(username, userToBroadcast);
 
         // MOVIDO: await this.sendInitialOnlineStatuses(client); (Ahora se llama en setImmediate con datos)
@@ -1101,7 +1101,7 @@ export class SocketGateway
         // Esto permite que handleRegister termine rápido y no bloquee otros registros
         setImmediate(async () => {
             try {
-                // 🔥 FIX: Buscar por AMBOS identificadores (DNI y Nombre Completo)
+                //  FIX: Buscar por AMBOS identificadores (DNI y Nombre Completo)
                 // porque los participantes pueden estar guardados como DNI o como Nombre
                 const resultByDNI = await this.temporaryConversationsService.findAll(username);
                 const convsByDNI: any[] = Array.isArray(resultByDNI) ? resultByDNI : (resultByDNI?.data || []);
@@ -1172,7 +1172,7 @@ export class SocketGateway
                     isOnline: true,
                 };
                 connectedUsersMap.set(username, userInfo);
-                // 🔥 FIX: También indexar por display name (nombre + apellido)
+                //  FIX: También indexar por display name (nombre + apellido)
                 // Los participantes de conversaciones se guardan como display name
                 if (ud?.nombre || ud?.apellido) {
                     const displayName = `${ud.nombre || ''} ${ud.apellido || ''}`.trim();
@@ -1201,7 +1201,7 @@ export class SocketGateway
             const ownUserData = connectedUsersMap.get(userData?.username);
             if (ownUserData) usersToSend.push(ownUserData);
 
-            // 🔥 NUEVO: Agregar usuarios de conversaciones FAVORITAS (aunque no estén asignadas activamente)
+            //  NUEVO: Agregar usuarios de conversaciones FAVORITAS (aunque no estén asignadas activamente)
             try {
                 const favoriteConversations = await this.conversationFavoritesService.getUserFavoritesWithConversationData(userData?.username);
                 if (favoriteConversations && favoriteConversations.length > 0) {
@@ -1343,7 +1343,7 @@ export class SocketGateway
                     isOnline: true, // Usuario conectado
                 };
                 connectedUsersMap.set(uname, userInfo);
-                // 🔥 FIX: También indexar por display name (nombre + apellido)
+                //  FIX: También indexar por display name (nombre + apellido)
                 // Los participantes de conversaciones se guardan como display name
                 if (userData?.nombre && userData?.apellido) {
                     const displayName = `${userData.nombre} ${userData.apellido}`;
@@ -1390,7 +1390,7 @@ export class SocketGateway
                 // 🚀 OPTIMIZACIÓN: UNA sola query para todos los participantes offline
                 if (participantsToFind.length > 0) {
                     try {
-                        // 🔥 CLUSTER FIX: Obtener Set de usuarios online (incluye Redis)
+                        //  CLUSTER FIX: Obtener Set de usuarios online (incluye Redis)
                         const onlineUsersSet = await this.getOnlineUsersSet();
 
                         const dbUsers = await this.userRepository
@@ -1411,7 +1411,7 @@ export class SocketGateway
                                     ? `${dbUser.nombre} ${dbUser.apellido}`
                                     : dbUser.username;
 
-                            // 🔥 CLUSTER FIX: Verificar estado online usando Set que incluye Redis
+                            //  CLUSTER FIX: Verificar estado online usando Set que incluye Redis
                             const isUserConnected = this.isUserOnlineWithSet(fullName, onlineUsersSet) ||
                                 this.isUserOnlineWithSet(dbUser.username, onlineUsersSet);
 
@@ -1673,7 +1673,7 @@ export class SocketGateway
         // Actualizar momento del último envío
         this.typingThrottle.set(throttleKey, now);
 
-        // 🔥 FIX: Obtener el NOMBRE COMPLETO para mostrar en lugar del DNI
+        //  FIX: Obtener el NOMBRE COMPLETO para mostrar en lugar del DNI
         let fromName = data.from;
         const senderData = await this.getSenderData(data.from);
         if (senderData?.fullName) {
@@ -1773,7 +1773,7 @@ export class SocketGateway
         // Mensaje "optimista" para emisión inmediata
         const optimisticMessage = {
             ...data,
-            from: senderFullName, // 🔥 Usar Nombre Completo para consistencia real-time (para el frontend)
+            from: senderFullName, //  Usar Nombre Completo para consistencia real-time (para el frontend)
             id: tempId,
             sentAt: data.sentAt || peruDate,
             time: data.time || calculatedTime,
@@ -1816,7 +1816,7 @@ export class SocketGateway
                         if (room && room.connectedMembers && room.connectedMembers.length > 0) {
                             // 🚀 CLUSTER FIX: Usar TODOS los miembros de la BD, NO filtrar por conexión local
 
-                            // 🔥 MEJORADO: Incluir tanto miembros conectados como miembros históricos (aprobados)
+                            //  MEJORADO: Incluir tanto miembros conectados como miembros históricos (aprobados)
                             // para asegurar que todos reciban el mensaje/notificación
                             const allMembers = Array.from(new Set([
                                 ...(room.members || []),
@@ -1826,7 +1826,7 @@ export class SocketGateway
 
                             roomUsers = new Set([
                                 ...(roomUsers ? Array.from(roomUsers) : []),
-                                ...allMembers, // 🔥 NO filtrar por this.users.has()
+                                ...allMembers, //  NO filtrar por this.users.has()
                             ]);
 
                             console.log(`👥 [handleMessage] Sala ${finalRoomCode}: ${allMembers.length} miembros totales para broadcast`);
@@ -1843,7 +1843,7 @@ export class SocketGateway
                             const mentions = this.detectMentions(message);
                             // console.log(`?? Menciones detectadas en mensaje:`, mentions);
 
-                            // 🔥 FIX: Obtener nombre de la sala para mostrar en toast del frontend
+                            //  FIX: Obtener nombre de la sala para mostrar en toast del frontend
                             const cachedRoom = await this.getCachedRoom(finalRoomCode);
                             const roomName = cachedRoom?.name || to; // Fallback al destinatario si no hay nombre
 
@@ -1856,7 +1856,7 @@ export class SocketGateway
                                 group: to,
                                 groupName: to,
                                 roomCode: finalRoomCode,
-                                roomName, // 🔥 NUEVO: Nombre real de la sala para mostrar en toast
+                                roomName, //  NUEVO: Nombre real de la sala para mostrar en toast
                                 message,
                                 isGroup: true,
                                 time: time || formatPeruTime(),
@@ -1872,7 +1872,7 @@ export class SocketGateway
                                 videoCallUrl: data.videoCallUrl,
                                 videoRoomID: data.videoRoomID,
                                 metadata: data.metadata,
-                                attachments: data.attachments, // 🔥 NUEVO: Enviar adjuntos en tiempo real
+                                attachments: data.attachments, //  NUEVO: Enviar adjuntos en tiempo real
                             };
 
                             // 🚀 CLUSTER FIX: Broadcast global a la sala vía Redis
@@ -1994,7 +1994,7 @@ export class SocketGateway
                                     videoCallUrl: data.videoCallUrl,
                                     videoRoomID: data.videoRoomID,
                                     metadata: data.metadata,
-                                    attachments: data.attachments, // 🔥 NUEVO: Enviar adjuntos en tiempo real
+                                    attachments: data.attachments, //  NUEVO: Enviar adjuntos en tiempo real
                                 });
                                 // console.log(`🚀 DEBUG: Mensaje enviado a sala ${groupRoomCode} (Redis Broadcast)`);
                             } else {
@@ -2032,7 +2032,7 @@ export class SocketGateway
                                         senderNumeroAgente,
                                         group: to,
                                         groupName: to,
-                                        roomName: to, // 🔥 AGREGADO: Para alerts de SweetAlert
+                                        roomName: to, //  AGREGADO: Para alerts de SweetAlert
                                         roomCode: groupRoomCode,
                                         message,
                                         isGroup: true,
@@ -2050,7 +2050,7 @@ export class SocketGateway
                                         videoCallUrl: data.videoCallUrl,
                                         videoRoomID: data.videoRoomID,
                                         metadata: data.metadata,
-                                        attachments: data.attachments, // 🔥 NUEVO: Enviar adjuntos en tiempo real
+                                        attachments: data.attachments, //  NUEVO: Enviar adjuntos en tiempo real
                                     });
                                 });
                             }
@@ -2103,7 +2103,7 @@ export class SocketGateway
                         videoCallUrl: data.videoCallUrl,
                         videoRoomID: data.videoRoomID,
                         metadata: data.metadata,
-                        attachments: data.attachments, // 🔥 NUEVO: Enviar adjuntos en tiempo real
+                        attachments: data.attachments, //  NUEVO: Enviar adjuntos en tiempo real
                     };
 
                     //  Enviar mensaje al destinatario
@@ -2144,7 +2144,7 @@ export class SocketGateway
                         replyToMessageId,
                         replyToSender,
                         replyToText,
-                        attachments: data.attachments, // 🔥 NUEVO: Enviar adjuntos en tiempo real
+                        attachments: data.attachments, //  NUEVO: Enviar adjuntos en tiempo real
                     });
 
                     // assignedConversationUpdated se emite en saveMessageInBackground()
@@ -2197,7 +2197,7 @@ export class SocketGateway
                         }
                     }
 
-                    // 🔥 NUEVO: Emitir assignedConversationUpdated con ID real si es chat asignado
+                    //  NUEVO: Emitir assignedConversationUpdated con ID real si es chat asignado
                     // Esto asegura que el evento se emita incluso si el mensaje se guardó en background
                     if (savedMessage.conversationId && !data.isGroup) {
                         let messageText = data.message;
@@ -2282,7 +2282,7 @@ export class SocketGateway
             videoCallUrl,
             videoRoomID,
             metadata,
-            attachments, // 🔥 NUEVO: Extraer lista de adjuntos
+            attachments, //  NUEVO: Extraer lista de adjuntos
         } = data;
 
         try {
@@ -2341,7 +2341,7 @@ export class SocketGateway
                 videoCallUrl,
                 videoRoomID,
                 metadata,
-                attachments, // 🔥 NUEVO: Pasar adjuntos al servicio para persistencia
+                attachments, //  NUEVO: Pasar adjuntos al servicio para persistencia
             };
 
             // console.log(`?? Guardando mensaje en BD:`, messageData);
@@ -2712,13 +2712,13 @@ export class SocketGateway
             allUsernames = connectedUsernamesList;
         }
 
-        // 🔥 CLUSTER FIX: Obtener Set de usuarios online (incluye Redis)
+        //  CLUSTER FIX: Obtener Set de usuarios online (incluye Redis)
         const onlineUsersSet = await this.getOnlineUsersSet();
 
         // Crear lista con TODOS los usuarios añadidos a la sala y su estado de conexión
         const roomUsersList = allUsernames.map((username) => {
             const user = this.users.get(username);
-            // 🔥 CLUSTER FIX: Verificar estado online usando Set que incluye Redis
+            //  CLUSTER FIX: Verificar estado online usando Set que incluye Redis
             const isOnline = this.isUserOnlineWithSet(username, onlineUsersSet);
             return {
                 id: user?.userData?.id || null,
@@ -2906,7 +2906,7 @@ export class SocketGateway
                     isOnline: true, // Usuario conectado
                 };
                 connectedUsersMap.set(username, userInfo);
-                // 🔥 FIX: También indexar por display name (nombre + apellido)
+                //  FIX: También indexar por display name (nombre + apellido)
                 // Los participantes de conversaciones se guardan como display name
                 if (userData?.nombre && userData?.apellido) {
                     const displayName = `${userData.nombre} ${userData.apellido}`;
@@ -2964,14 +2964,14 @@ export class SocketGateway
                             // Log eliminado para optimizaci�n
 
                             //  PASO 1: Verificar caché primero
-                            // 🔥 CLUSTER FIX: Pre-fetch online users set
+                            //  CLUSTER FIX: Pre-fetch online users set
                             const onlineUsersSet = await this.getOnlineUsersSet();
                             const uncachedParticipants: string[] = [];
                             offlineParticipants.forEach((participantName) => {
                                 const cached = this.userCache.get(participantName);
                                 if (cached && Date.now() - cached.cachedAt < this.CACHE_TTL) {
                                     // Usar datos del caché
-                                    // 🔥 CLUSTER FIX: Verificar estado online usando Set que incluye Redis
+                                    //  CLUSTER FIX: Verificar estado online usando Set que incluye Redis
                                     const isUserConnected = this.isUserOnlineWithSet(cached.username, onlineUsersSet) ||
                                         this.isUserOnlineWithSet(participantName, onlineUsersSet);
 
@@ -3025,7 +3025,7 @@ export class SocketGateway
                                                 ? `${dbUser.nombre} ${dbUser.apellido}`
                                                 : dbUser.username;
 
-                                        // 🔥 CLUSTER FIX: Verificar estado online usando Set que incluye Redis
+                                        //  CLUSTER FIX: Verificar estado online usando Set que incluye Redis
                                         const isUserConnected = this.isUserOnlineWithSet(fullName, onlineUsersSet) ||
                                             this.isUserOnlineWithSet(dbUser.username, onlineUsersSet);
 
@@ -3182,7 +3182,7 @@ export class SocketGateway
                                     })
                                     .getMany();
 
-                                // 🔥 CLUSTER FIX: Obtener Set de usuarios online ANTES del forEach
+                                //  CLUSTER FIX: Obtener Set de usuarios online ANTES del forEach
                                 const onlineUsersSet2 = await this.getOnlineUsersSet();
 
                                 dbUsers.forEach((dbUser) => {
@@ -3191,7 +3191,7 @@ export class SocketGateway
                                             ? `${dbUser.nombre} ${dbUser.apellido}`
                                             : dbUser.username;
 
-                                    // 🔥 CLUSTER FIX: Verificar estado online usando Set pre-cargado
+                                    //  CLUSTER FIX: Verificar estado online usando Set pre-cargado
                                     const isUserConnected = this.isUserOnlineWithSet(fullName, onlineUsersSet2) ||
                                         this.isUserOnlineWithSet(dbUser.username, onlineUsersSet2);
 
@@ -3202,7 +3202,7 @@ export class SocketGateway
                                         apellido: dbUser.apellido || null,
                                         email: dbUser.email || null,
                                         role: dbUser.role || 'USER',
-                                        picture: dbUser.picture || null, // 🔥 FIX: Usar picture de BD
+                                        picture: dbUser.picture || null, //  FIX: Usar picture de BD
                                         sede: userConversations.find(c => c.participants.includes(fullName))?.sede || null, // Intentar obtener sede de conversación si no está en BD
                                         sede_id: null,
                                         numeroAgente: dbUser.numeroAgente || null,
@@ -3257,10 +3257,10 @@ export class SocketGateway
             memberCount = connectedUsernamesList.length;
         }
 
-        // 🔥 CLUSTER FIX: Obtener Set de usuarios online (incluye Redis)
+        //  CLUSTER FIX: Obtener Set de usuarios online (incluye Redis)
         const onlineUsersSet = await this.getOnlineUsersSet();
 
-        // 🔥 CLUSTER FIX: Obtener datos completos de usuarios online desde Redis
+        //  CLUSTER FIX: Obtener datos completos de usuarios online desde Redis
         const onlineUsersDataMap = await this.getOnlineUsersDataMap();
 
         // Crear lista con TODOS los usuarios añadidos a la sala y su estado de conexión
@@ -3268,7 +3268,7 @@ export class SocketGateway
             let user = this.users.get(username);
             let userData = user?.userData;
 
-            // 🔥 FIX: Si no está conectado localmente, buscar en caché (local o lo que se haya traído de Redis)
+            //  FIX: Si no está conectado localmente, buscar en caché (local o lo que se haya traído de Redis)
             if (!userData) {
                 const cached = this.userCache.get(username);
                 if (cached) {
@@ -3276,7 +3276,7 @@ export class SocketGateway
                 }
             }
 
-            // 🔥 FIX: Si aún no tenemos datos pero está online en Redis, usar datos de Redis
+            //  FIX: Si aún no tenemos datos pero está online en Redis, usar datos de Redis
             if (!userData) {
                 const redisData = onlineUsersDataMap.get(username);
                 if (redisData) {
@@ -3284,7 +3284,7 @@ export class SocketGateway
                 }
             }
 
-            // 🔥 CLUSTER FIX: Verificar estado online usando Set que incluye Redis
+            //  CLUSTER FIX: Verificar estado online usando Set que incluye Redis
             const isOnline = this.isUserOnlineWithSet(username, onlineUsersSet);
 
             return {
@@ -3303,7 +3303,7 @@ export class SocketGateway
 
         // Enviar a TODOS los usuarios conectados (para que vean actualizaciones en tiempo real)
         // Esto permite que usuarios que salieron de la sala vean cuando otros entran/salen
-        // 🔥 CLUSTER FIX: Usar server.to(roomCode).emit() para Redis
+        //  CLUSTER FIX: Usar server.to(roomCode).emit() para Redis
         this.server.to(roomCode).emit('roomUsers', {
             roomCode,
             users: roomUsersList,
@@ -3680,7 +3680,7 @@ export class SocketGateway
             );
 
             if (messages.length > 0) {
-                // 🔥 NUEVO: Emitir reset de contador para conversación asignada
+                //  NUEVO: Emitir reset de contador para conversación asignada
                 // Esto asegura que el contador se resetee en favoritos y en la lista normal
                 if (data.conversationId) {
                     console.log(`📬 Emitiendo unreadCountReset para conversación ${data.conversationId} a ${data.to}`);
@@ -3722,7 +3722,7 @@ export class SocketGateway
                         readBy: data.to,
                         messageIds: messages.map((m) => m.id),
                         readAt: getPeruDate(),
-                        conversationId: messages[0]?.conversationId // 🔥 Incluir ID de conversación
+                        conversationId: messages[0]?.conversationId //  Incluir ID de conversación
                     });
                 } else {
                     // console.log(
@@ -3755,7 +3755,7 @@ export class SocketGateway
             console.log(`🚨🚨🚨 handleMarkRoomMessageAsRead KAREN - msgId: ${data.messageId}, room: ${data.roomCode}, stack: ${new Error().stack?.split('\n').slice(1, 4).join(' | ')}`);
         }
 
-        // 🔥 DEDUPLICACIÓN: Bloquear eventos duplicados del frontend viejo (cacheado)
+        //  DEDUPLICACIÓN: Bloquear eventos duplicados del frontend viejo (cacheado)
         const dedupeKey = `markRead:${data.messageId}:${data.username}`;
 
         try {
@@ -3777,14 +3777,14 @@ export class SocketGateway
             );
 
             if (message) {
-                // 🔥 FIX CLUSTER: Obtener datos completos de usuarios desde BD
+                //  FIX CLUSTER: Obtener datos completos de usuarios desde BD
                 const readByData = await this.getBatchUsersData(message.readBy || []);
 
                 // Broadcast a la sala - SIN log para evitar spam
                 this.server.to(data.roomCode).emit('roomMessageRead', {
                     messageId: data.messageId,
                     readBy: message.readBy, // Array de usernames (compatibilidad)
-                    readByData, // 🔥 NUEVO: Array con datos completos
+                    readByData, //  NUEVO: Array con datos completos
                     readAt: message.readAt,
                     roomCode: data.roomCode,
                 });
@@ -3876,7 +3876,7 @@ export class SocketGateway
                 hasId: !!data.id,
             });
 
-            // 🔥 RESOLVER DATOS DEL REMITENTE SIEMPRE (para real-time display)
+            //  RESOLVER DATOS DEL REMITENTE SIEMPRE (para real-time display)
             const senderData = await this.getSenderData(from);
             const resolvedFrom = senderData?.username || from;
             const senderFullName = senderData?.fullName || from;
@@ -3911,7 +3911,7 @@ export class SocketGateway
             // 🚀 PASO 2: Incrementar threadCount del mensaje padre O del adjunto específico
             if (threadId) {
                 try {
-                    // 🔥 FIX: Pasar replyToAttachmentId para separar contadores
+                    //  FIX: Pasar replyToAttachmentId para separar contadores
                     await this.messagesService.incrementThreadCount(threadId, data.replyToAttachmentId);
                     console.log(`🔢 threadCount incrementado para ${data.replyToAttachmentId ? `adjunto ${data.replyToAttachmentId}` : `mensaje ${threadId}`}`);
                 } catch (incError) {
@@ -3922,7 +3922,7 @@ export class SocketGateway
             // 🚀 PASO 3: Preparar payload con datos actualizados
             const messagePayload = {
                 ...data,
-                from: senderFullName, // 🔥 Usar Nombre Completo para consistencia real-time
+                from: senderFullName, //  Usar Nombre Completo para consistencia real-time
                 id: savedMessage?.id || data.id,
                 sentAt: savedMessage?.sentAt || data.sentAt,
                 time: savedMessage?.time || data.time,
@@ -3951,19 +3951,19 @@ export class SocketGateway
                 roomName = room?.name || '';
             }
 
-            // 🔥 FIX: Obtener conteo REAL desde BD para evitar desincronización
+            //  FIX: Obtener conteo REAL desde BD para evitar desincronización
             const realThreadCount = await this.messagesService.getThreadCount(threadId);
 
             const updatePayload = {
                 messageId: threadId,
-                lastReplyFrom: senderFullName, // 🔥 Usar Nombre Completo
+                lastReplyFrom: senderFullName, //  Usar Nombre Completo
                 lastReplyText: data.message?.substring(0, 100), // Preview del mensaje
-                from: senderFullName, // 🔥 Usar Nombre Completo
+                from: senderFullName, //  Usar Nombre Completo
                 to,
                 isGroup,
                 roomCode,
                 roomName,
-                threadCount: realThreadCount, // 🔥 ENVIAR TOTAL ABSOLUTO
+                threadCount: realThreadCount, //  ENVIAR TOTAL ABSOLUTO
             };
 
             if (isGroup && roomCode) {
@@ -3979,7 +3979,7 @@ export class SocketGateway
                 }
             }
 
-            // 🔥 NUEVO: Emitir assignedConversationUpdated si es un chat asignado
+            //  NUEVO: Emitir assignedConversationUpdated si es un chat asignado
             if (!isGroup && savedMessage?.conversationId) {
                 const messageText = data.message || (data.mediaType ? `📎 ${data.mediaType}` : '📎 Archivo');
 
@@ -3987,7 +3987,7 @@ export class SocketGateway
                     conversationId: savedMessage.conversationId,
                     lastMessage: messageText,
                     lastMessageTime: savedMessage.sentAt || new Date().toISOString(),
-                    lastMessageFrom: senderFullName, // 🔥 Usar Nombre Completo
+                    lastMessageFrom: senderFullName, //  Usar Nombre Completo
                     lastMessageMediaType: data.mediaType
                 };
 
@@ -4004,7 +4004,7 @@ export class SocketGateway
         }
     }
 
-    // 🔥 NUEVO: Método público para notificar que un mensaje fue leído (Read Receipt)
+    //  NUEVO: Método público para notificar que un mensaje fue leído (Read Receipt)
     // Se llama desde MessagesController
     public async notifyMessageRead(message: any, readByUsername: string) {
         if (!message) return;
@@ -4038,7 +4038,7 @@ export class SocketGateway
         }
     }
 
-    // 🔥 DESHABILITADO: Este handler es redundante.
+    //  DESHABILITADO: Este handler es redundante.
     // La lógica de threadCountUpdated ya se maneja en handleThreadMessage.
     // Mantener este handler causaba emisiones duplicadas.
     /*
@@ -4065,7 +4065,7 @@ export class SocketGateway
             threadId?: number; //  Para reacciones en mensajes de hilo
         },
     ) {
-        // 🔥 DEDUPLICACIÓN: Evitar procesamiento múltiple del mismo evento
+        //  DEDUPLICACIÓN: Evitar procesamiento múltiple del mismo evento
         const dedupeKey = `reaction:${data.messageId}:${data.username}:${data.emoji}`;
 
         try {
@@ -4182,12 +4182,12 @@ export class SocketGateway
 
     /**
      * Notificar a un usuario específico que fue agregado a una sala
-     * 🔥 CLUSTER FIX: Emitir a la sala del 'username' o alias.
+     *  CLUSTER FIX: Emitir a la sala del 'username' o alias.
      */
     notifyUserAddedToRoom(username: string, roomCode: string, roomName: string) {
         // console.log(`📢 Notificando adición a sala a ${username}`);
 
-        // 🔥 NO verificar localmente this.users.get(username)
+        //  NO verificar localmente this.users.get(username)
         // Emitir a la sala del usuario (que puede ser DNI, Nombre o Email)
         // Como el usuario se unió a todas sus salas de alias al registrarse,
         // esto llegará a su socket sin importar en qué instancia esté.
@@ -4217,7 +4217,7 @@ export class SocketGateway
         }
 
         // 2. Notificar al usuario (vía Sala Redis/Cluster)
-        // 🔥 CLUSTER FIX: No depender de userConnection local
+        //  CLUSTER FIX: No depender de userConnection local
         this.server.to(username.toLowerCase().trim()).emit('removedFromRoom', {
             username: username,
             roomCode,
@@ -4749,7 +4749,7 @@ export class SocketGateway
         };
     }
 
-    // 🔥 NUEVO: Notificar a todos los administradores de una solicitud de ingreso
+    //  NUEVO: Notificar a todos los administradores de una solicitud de ingreso
     public notifyAdminJoinRequest(roomCode: string, username: string) {
         // Emitir a todos los sockets conectados que pertenezcan a administradores
         this.adminUsers.forEach((adminData, adminUsername) => {
@@ -4766,7 +4766,7 @@ export class SocketGateway
         // this.server.to('admin-room').emit('adminJoinRequest', { roomCode, username });
     }
 
-    // 🔥 NUEVO: Notificar al usuario que su solicitud fue aprobada
+    //  NUEVO: Notificar al usuario que su solicitud fue aprobada
     public notifyUserApproved(roomCode: string, username: string) {
         const target = username.toLowerCase().trim();
 
@@ -4804,7 +4804,7 @@ export class SocketGateway
         console.log(`✅ [CLUSTER] Notificación favoriteStatusChanged enviada a ${username}`);
     }
 
-    // 🔥 OPTIMIZADO: Método público para que el MessagesController también use caché
+    //  OPTIMIZADO: Método público para que el MessagesController también use caché
     public async getSenderData(identifier: string): Promise<{
         id: number,
         username: string,
@@ -4898,3 +4898,4 @@ export class SocketGateway
         return null;
     }
 }
+
