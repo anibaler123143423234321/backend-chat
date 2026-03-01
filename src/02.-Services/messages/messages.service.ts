@@ -608,17 +608,20 @@ export class MessagesService {
         const resolvedUsers = await this.userRepository.createQueryBuilder('user')
           .where('user.username IN (:...values)', { values: uniqueValues })
           .orWhere('CONCAT(user.nombre, " ", user.apellido) IN (:...values)', { values: uniqueValues })
-          .select(['user.username', 'user.nombre', 'user.apellido', 'user.displayName', 'user.picture'])
+          .select(['user.username', 'user.nombre', 'user.apellido', 'user.picture'])
           .getMany();
 
         // Construimos un mapa para búsqueda rápida
         const userMap = new Map<string, any>();
         for (const u of resolvedUsers) {
           const userObj = u as any; // Cast to bypass TS checks on the entity
+
+          // Construir displayName al vuelo ya que no existe en la BD
+          const builtDisplayName = `${userObj.nombre || ''} ${userObj.apellido || ''}`.trim();
+          userObj.displayName = builtDisplayName || userObj.username;
+
           if (userObj.username) userMap.set(userObj.username.toLowerCase(), userObj);
-          const fullName = `${userObj.nombre || ''} ${userObj.apellido || ''}`.trim().toLowerCase();
-          if (fullName) userMap.set(fullName, userObj);
-          if (userObj.displayName) userMap.set(userObj.displayName.toLowerCase(), userObj);
+          if (builtDisplayName) userMap.set(builtDisplayName.toLowerCase(), userObj);
         }
 
         // Mapear los strings orginales por sus objetos enriquecidos siempre que sea posible
