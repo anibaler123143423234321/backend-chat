@@ -364,6 +364,7 @@ export class SocketGateway
 
         // Inyectar referencia del gateway en el servicio para notificaciones
         this.temporaryRoomsService.setSocketGateway(this);
+        this.temporaryConversationsService.setSocketGateway(this);
 
         // ?? OPTIMIZADO: Limpiar conexiones hu�rfanas cada 10 minutos (antes: 5min)
         // Reducir frecuencia ya que las desconexiones se manejan en handleDisconnect

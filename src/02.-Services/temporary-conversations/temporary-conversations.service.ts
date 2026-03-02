@@ -13,6 +13,8 @@ import { randomBytes } from 'crypto';
 
 @Injectable()
 export class TemporaryConversationsService {
+  private socketGateway: any;
+
   constructor(
     @InjectRepository(TemporaryConversation)
     private temporaryConversationRepository: Repository<TemporaryConversation>,
@@ -21,6 +23,11 @@ export class TemporaryConversationsService {
     @InjectRepository(User) //  Inyectar repositorio de User
     private userRepository: Repository<User>,
   ) { }
+
+  // Permite al gateway inyectarse en el servicio para notificaciones
+  setSocketGateway(gateway: any) {
+    this.socketGateway = gateway;
+  }
 
   //  NUEVO: Obtener DNI y Nombre Completo para verificaciones robustas
   private async getUserIdentifiers(username: string): Promise<{ dni: string; fullName: string }> {
@@ -391,7 +398,6 @@ export class TemporaryConversationsService {
     };
   }
 
-  //  NUEVO: Método con paginación para conversaciones asignadas
   async findAssignedConversations(
     username?: string,
     page: number = 1,
@@ -435,6 +441,7 @@ export class TemporaryConversationsService {
         { favUser: dni }
       );
     }
+
 
     // 4. Aplicar búsqueda
     if (search && search.trim()) {
@@ -524,39 +531,55 @@ export class TemporaryConversationsService {
           let otherParticipantPicture = null;
           let otherParticipantFullName = null;
           let fallbackName = conv.name;
-
-          if (participants.length > 0 && username) {
-            const others = participants.filter((p) => {
+          const others = (participants.length > 0 && username)
+            ? participants.filter((p) => {
               const pNorm = this.normalizeUsername(p);
               return pNorm !== dniNormalized && pNorm !== fullNameNormalized;
+            })
+            : [];
+
+          if (others.length > 0) {
+            const otherId = others[0];
+
+            // Si el ID del otro no es un número (DNI), significa que es un nombre antiguo hardcodeado.
+            // Usamos ese nombre antiguo como fallback en lugar de `conv.name` (que a veces tiene el nombre del usuario actual).
+            const isDniOrEmail = /^\d+$/.test(otherId) || otherId.includes('@');
+            if (!isDniOrEmail && otherId) {
+              fallbackName = otherId; // Ej: "JOSÉ TORRES CHIRINOS"
+            }
+
+            const otherUser = await this.userRepository.findOne({
+              where: { username: otherId },
+              select: ['picture', 'nombre', 'apellido'],
             });
-            if (others.length > 0) {
-              const otherId = others[0];
 
-              // Si el ID del otro no es un número (DNI), significa que es un nombre antiguo hardcodeado.
-              // Usamos ese nombre antiguo como fallback en lugar de `conv.name` (que a veces tiene el nombre del usuario actual).
-              const isDniOrEmail = /^\d+$/.test(otherId) || otherId.includes('@');
-              if (!isDniOrEmail && otherId) {
-                fallbackName = otherId; // Ej: "JOSÉ TORRES CHIRINOS"
+            if (otherUser) {
+              otherParticipantPicture = otherUser.picture;
+              if (otherUser.nombre && otherUser.apellido) {
+                otherParticipantFullName = `${otherUser.nombre} ${otherUser.apellido}`;
               }
+            }
+          }
 
-              const otherUser = await this.userRepository.findOne({
-                where: { username: otherId },
-                select: ['picture', 'nombre', 'apellido'],
-              });
+          // NUEVO: Lógica de nombre más inteligente
+          // Para conversaciones asignadas por admin, solemos guardar el nombre del cliente en conv.name (a veces con un prefijo '/')
+          // Priorizamos ese nombre si existe y es especial.
+          const isClientName = conv.isAssignedByAdmin && conv.name && conv.name.startsWith('/');
 
-              if (otherUser) {
-                otherParticipantPicture = otherUser.picture;
-                if (otherUser.nombre && otherUser.apellido) {
-                  otherParticipantFullName = `${otherUser.nombre} ${otherUser.apellido}`;
-                }
-              }
+          // 2. Determinar el nombre final
+          let displayName = otherParticipantFullName || fallbackName;
+
+          //  CRITICAL FIX: Evitar que el nombre se muestre como el propio usuario logueado (Dagner)
+          const displayNameNorm = this.normalizeUsername(displayName);
+          if (displayNameNorm === fullNameNormalized || displayNameNorm === dniNormalized) {
+            if (others.length > 0 && others[0] !== displayName) {
+              displayName = others[0];
             }
           }
 
           return {
             id: conv.id,
-            name: otherParticipantFullName || fallbackName, //  Mostrar el nombre real del contacto, fallback inteligente
+            name: isClientName ? conv.name : displayName, //  Mostrar nombre de cliente o contacto
             linkId: conv.linkId,
             participants: conv.participants,
             assignedUsers: conv.assignedUsers,
@@ -590,14 +613,10 @@ export class TemporaryConversationsService {
   }
 
   //  Función para normalizar nombres (remover acentos y convertir a MAYÚSCULAS)
-  private normalizeUsername(username: string): string {
-    return (
-      username
-        ?.toUpperCase()
-        .trim()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '') || ''
-    );
+  private normalizeUsername(username: any): string {
+    if (!username) return '';
+    const str = String(username).toUpperCase().trim().replace(/\s+/g, ' ');
+    return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   }
 
   async findByUser(username: string): Promise<any[]> {
@@ -810,7 +829,7 @@ export class TemporaryConversationsService {
     // 🚀 VALIDAR: Verificar si ya existe una conversación entre estos usuarios (incluyendo INACTIVAS)
     const allAssignedConversations =
       await this.temporaryConversationRepository.find({
-        where: { isAssignedByAdmin: true }, // Buscar en todas, activas o inactivas
+        where: { isAssignedByAdmin: true },
       });
 
     // Buscar si existe una conversación con los mismos participantes (normalizados)
@@ -819,32 +838,58 @@ export class TemporaryConversationsService {
       return participants.includes(u1) && participants.includes(u2);
     });
 
+    let saved: TemporaryConversation;
+    let isNew = false;
+    let finalName = name && name.trim() ? name : existingConversation?.name || `Chat: ${user1} - ${user2}`;
+
     if (existingConversation) {
       //  Si ya existe pero está inactiva, REACTIVARLA en lugar de crear una nueva
-      if (!existingConversation.isActive) {
+      if (!existingConversation.isActive || (name && name.trim())) {
         existingConversation.isActive = true;
-        // Opcional: Actualizar el nombre si cambió
-        if (name) existingConversation.name = name;
-        await this.temporaryConversationRepository.save(existingConversation);
+        if (name && name.trim()) {
+          existingConversation.name = name;
+        }
+        saved = await this.temporaryConversationRepository.save(existingConversation);
+      } else {
+        saved = existingConversation;
       }
-      return existingConversation;
+    } else {
+      isNew = true;
+      const linkId = this.generateLinkId();
+      const conversation = this.temporaryConversationRepository.create({
+        name: finalName,
+        linkId,
+        createdBy: adminId,
+        currentParticipants: 2,
+        maxParticipants: 2,
+        isActive: true,
+        isAssignedByAdmin: true,
+        participants: [user1, user2],
+        assignedUsers: [user1, user2],
+      });
+      saved = await this.temporaryConversationRepository.save(conversation);
     }
 
-    const linkId = this.generateLinkId();
+    //  NOTIFICAR VIA SOCKET
+    if (this.socketGateway?.server) {
+      const payload = {
+        conversationId: saved.id,
+        user1: user1,
+        user2: user2,
+        name: saved.name,
+        linkId: saved.linkId,
+        isNew: isNew
+      };
 
-    const conversation = this.temporaryConversationRepository.create({
-      name,
-      linkId,
-      createdBy: adminId,
-      currentParticipants: 2,
-      maxParticipants: 2,
-      isActive: true,
-      isAssignedByAdmin: true,
-      participants: [user1, user2],
-      assignedUsers: [user1, user2],
-    });
+      // Notificar a los participantes (usando sus alias/salas de username)
+      this.socketGateway.server.to(user1).emit('conversationAssigned', payload);
+      this.socketGateway.server.to(user2).emit('conversationAssigned', payload);
 
-    const saved = await this.temporaryConversationRepository.save(conversation);
+      // También notificar a los admins para que sus listas se actualicen
+      this.socketGateway.server.emit('adminConversationAssigned', payload);
+
+      console.log(`📢 [SOCKET] Notificando asignación de conversación ${saved.id} (new:${isNew}) a ${user1} y ${user2}`);
+    }
 
     return saved;
   }

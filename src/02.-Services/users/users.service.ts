@@ -1,33 +1,44 @@
 import { Injectable } from '@nestjs/common';
-import { User } from 'src/02.-Services/users/interfaces/user.interface';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { User as UserEntity } from 'src/02.-Services/users/entities/user.entity';
+import { User as UserInterface } from 'src/02.-Services/users/interfaces/user.interface';
 
 @Injectable()
 export class UsersService {
-  async findByUsername(username: string): Promise<User | null> {
-    // Este método se implementará cuando se conecte con la API del CRM
-    // Por ahora retorna null para evitar errores
-    return null;
+  constructor(
+    @InjectRepository(UserEntity)
+    private readonly userRepository: Repository<UserEntity>,
+  ) { }
+
+  async findByUsername(username: string): Promise<UserEntity | null> {
+    if (!username) return null;
+    return await this.userRepository.findOne({ where: { username } });
   }
 
-  async createOrUpdate(userData: any): Promise<User> {
-    // Este método se implementará cuando se conecte con la API del CRM
-    // Por ahora retorna un objeto mock para evitar errores
-    return {
-      id: userData.id || 0,
-      username: userData.username || '',
-      password: '',
-      nombre: userData.nombre || '',
-      apellido: userData.apellido || '',
-      tipoTrabajo: userData.tipoTrabajo || '',
-      email: userData.email || '',
-      fechaCreacion: new Date(),
-      estado: 'A',
-      role: userData.role || 'ASESOR',
-      picture: userData.picture || '',
-      token: userData.token || '',
-      sede_id: userData.sede_id || 0,
-      sede: userData.sede || '',
-      numeroAgente: userData.numeroAgente || null,
-    } as User;
+  async createOrUpdate(userData: any): Promise<UserEntity> {
+    const username = userData.username;
+    let user = await this.findByUsername(username);
+
+    const updateData = {
+      username: userData.username,
+      nombre: userData.nombre,
+      apellido: userData.apellido,
+      email: userData.email,
+      role: userData.role,
+      picture: userData.picture,
+      sede: userData.sede,
+      sede_id: userData.sede_id,
+      numeroAgente: userData.numeroAgente,
+      tipoTrabajo: userData.tipoTrabajo,
+    };
+
+    if (user) {
+      await this.userRepository.update(user.id, updateData);
+      return await this.findByUsername(username);
+    } else {
+      const newUser = this.userRepository.create(updateData);
+      return await this.userRepository.save(newUser);
+    }
   }
 }
